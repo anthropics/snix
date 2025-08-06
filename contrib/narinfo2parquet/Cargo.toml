@@ -3,6 +3,9 @@ name = "narinfo2parquet"
 version = "0.1.0"
 edition = "2024"
 
+[lints.clippy]
+pedantic = "warn"
+
 [workspace]
 members = ["."]
 

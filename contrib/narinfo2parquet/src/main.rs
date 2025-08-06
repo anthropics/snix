@@ -40,7 +40,7 @@ fn main() -> Result<()> {
     let mut frame = FrameBuilder::default();
 
     for_each(reader, |s| {
-        let entry = NarInfo::parse(&s).context("couldn't parse entry:\n{s}")?;
+        let entry = NarInfo::parse(s).context("couldn't parse entry:\n{s}")?;
         frame.push(&entry);
         Ok(())
     })?;
@@ -98,7 +98,7 @@ fn for_each(reader: impl Read, mut f: impl FnMut(&str) -> Result<()>) -> Result<
     Ok(())
 }
 
-/// [FrameBuilder] builds a [DataFrame] out of [NarInfo]s.
+/// [`FrameBuilder`] builds a [`DataFrame`] out of [`NarInfo`]s.
 /// The exact format is still in flux.
 ///
 /// # Example
@@ -179,7 +179,7 @@ impl FrameBuilder {
             self.deriver_name.append_null();
         }
 
-        self.nar_hash.append_value(&entry.nar_hash);
+        self.nar_hash.append_value(entry.nar_hash);
         self.nar_size.append_value(entry.nar_size);
 
         self.references
@@ -187,7 +187,7 @@ impl FrameBuilder {
 
         assert!(entry.signatures.len() <= 1);
         self.signature
-            .append_option(entry.signatures.get(0).map(|sig| {
+            .append_option(entry.signatures.first().map(|sig| {
                 assert_eq!(sig.name(), &"cache.nixos.org-1");
                 sig.bytes()
             }));
