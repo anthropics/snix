@@ -157,11 +157,6 @@ in
       '';
     };
 
-    # Old harmonia NAR URLs (castore ones start with `nar/snix-castore/` and don't end with `.nar`)
-    # See `narinfo-cache-positive-ttl` (defaults to 4 weeks)
-    locations."~ /nar/([0-9abcdfghijklmnpqrsvwxyz]+)\\.nar".proxyPass =
-      "http://build03.infra.snix.dev:5000";
-
     locations."/grpc.reflection.v1alpha.ServerReflection".extraConfig = passToSnixStoreDaemonAll;
     locations."/grpc.reflection.v1.ServerReflection".extraConfig = passToSnixStoreDaemonAll;
     locations."/snix.castore.v1.BlobService/Stat".extraConfig = passToSnixStoreDaemonAll;
