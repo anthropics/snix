@@ -12,6 +12,7 @@ use std::rc::Rc;
 use std::sync::LazyLock;
 
 use bstr::{BStr, ByteSlice};
+use codemap::Span;
 use itertools::Itertools as _;
 use rustc_hash::FxHashMap;
 use serde::Deserialize;
@@ -35,15 +36,17 @@ pub(super) enum AttrsRep {
     #[default]
     Empty,
 
-    Map(FxHashMap<NixString, Value>),
+    Map {
+        attrs: FxHashMap<NixString, Value>,
+
+        #[serde(skip)]
+        pos: Option<Box<FxHashMap<NixString, Span>>>,
+    },
 
     /// Warning: this represents a **two**-attribute attrset, with
     /// attribute names "name" and "value", like `{name="foo";
     /// value="bar";}`, *not* `{foo="bar";}`!
-    KV {
-        name: Value,
-        value: Value,
-    },
+    KV { name: Value, value: Value },
 }
 
 impl AttrsRep {
@@ -57,7 +60,7 @@ impl AttrsRep {
                 _ => None,
             },
 
-            AttrsRep::Map(map) => map.get(key),
+            AttrsRep::Map { attrs, .. } => attrs.get(key),
         }
     }
 
@@ -65,7 +68,7 @@ impl AttrsRep {
         match self {
             AttrsRep::Empty => false,
             AttrsRep::KV { .. } => key == "name" || key == "value",
-            AttrsRep::Map(map) => map.contains_key(key),
+            AttrsRep::Map { attrs, .. } => attrs.contains_key(key),
         }
     }
 }
@@ -89,24 +92,34 @@ where
     where
         T: IntoIterator<Item = (K, V)>,
     {
-        AttrsRep::Map(
-            iter.into_iter()
+        AttrsRep::Map {
+            attrs: iter
+                .into_iter()
                 .map(|(k, v)| (k.into(), v.into()))
                 .collect(),
-        )
+            pos: None,
+        }
         .into()
     }
 }
 
 impl From<BTreeMap<NixString, Value>> for NixAttrs {
     fn from(map: BTreeMap<NixString, Value>) -> Self {
-        AttrsRep::Map(map.into_iter().collect()).into()
+        AttrsRep::Map {
+            attrs: map.into_iter().collect(),
+            pos: None,
+        }
+        .into()
     }
 }
 
 impl From<FxHashMap<NixString, Value>> for NixAttrs {
     fn from(map: FxHashMap<NixString, Value>) -> Self {
-        AttrsRep::Map(map).into()
+        AttrsRep::Map {
+            attrs: map,
+            pos: None,
+        }
+        .into()
     }
 }
 
@@ -162,7 +175,7 @@ impl<'de> Deserialize<'de> for NixAttrs {
                     stack_array.push(value);
                 }
 
-                Ok(NixAttrs::construct(stack_array.len() / 2, stack_array)
+                Ok(NixAttrs::construct(stack_array.len() / 2, stack_array, &[])
                     .map_err(A::Error::custom)?
                     .expect("Catchable values are unreachable here"))
             }
@@ -198,21 +211,21 @@ impl NixAttrs {
             // Explicitly handle all branches instead of falling
             // through, to ensure that we get at least some compiler
             // errors if variants are modified.
-            (AttrsRep::Map(_), AttrsRep::Map(_))
-            | (AttrsRep::Map(_), AttrsRep::KV { .. })
-            | (AttrsRep::KV { .. }, AttrsRep::Map(_)) => {}
+            (AttrsRep::Map { .. }, AttrsRep::Map { .. })
+            | (AttrsRep::Map { .. }, AttrsRep::KV { .. })
+            | (AttrsRep::KV { .. }, AttrsRep::Map { .. }) => {}
         };
 
         // Slightly more advanced, but still optimised updates
         match (Rc::unwrap_or_clone(self.0), Rc::unwrap_or_clone(other.0)) {
-            (AttrsRep::Map(mut m), AttrsRep::KV { name, value }) => {
-                m.insert(NAME.clone(), name);
-                m.insert(VALUE.clone(), value);
-                AttrsRep::Map(m).into()
+            (AttrsRep::Map { mut attrs, .. }, AttrsRep::KV { name, value }) => {
+                attrs.insert(NAME.clone(), name);
+                attrs.insert(VALUE.clone(), value);
+                AttrsRep::Map { attrs, pos: None }.into()
             }
 
-            (AttrsRep::KV { name, value }, AttrsRep::Map(mut m)) => {
-                match m.entry(NAME.clone()) {
+            (AttrsRep::KV { name, value }, AttrsRep::Map { mut attrs, .. }) => {
+                match attrs.entry(NAME.clone()) {
                     hash_map::Entry::Vacant(e) => {
                         e.insert(name);
                     }
@@ -220,7 +233,7 @@ impl NixAttrs {
                     hash_map::Entry::Occupied(_) => { /* name from `m` has precedence */ }
                 };
 
-                match m.entry(VALUE.clone()) {
+                match attrs.entry(VALUE.clone()) {
                     hash_map::Entry::Vacant(e) => {
                         e.insert(value);
                     }
@@ -228,11 +241,11 @@ impl NixAttrs {
                     hash_map::Entry::Occupied(_) => { /* value from `m` has precedence */ }
                 };
 
-                AttrsRep::Map(m).into()
+                AttrsRep::Map { attrs, pos: None }.into()
             }
 
             // Plain merge of maps.
-            (AttrsRep::Map(mut m1), AttrsRep::Map(mut m2)) => {
+            (AttrsRep::Map { attrs: mut m1, .. }, AttrsRep::Map { attrs: mut m2, .. }) => {
                 let map = if m1.len() >= m2.len() {
                     m1.extend(m2);
                     m1
@@ -242,7 +255,11 @@ impl NixAttrs {
                     }
                     m2
                 };
-                AttrsRep::Map(map).into()
+                AttrsRep::Map {
+                    attrs: map,
+                    pos: None,
+                }
+                .into()
             }
 
             // Cases handled above by the borrowing match:
@@ -253,7 +270,7 @@ impl NixAttrs {
     /// Return the number of key-value entries in an attrset.
     pub fn len(&self) -> usize {
         match self.0.as_ref() {
-            AttrsRep::Map(map) => map.len(),
+            AttrsRep::Map { attrs, .. } => attrs.len(),
             AttrsRep::Empty => 0,
             AttrsRep::KV { .. } => 2,
         }
@@ -261,7 +278,7 @@ impl NixAttrs {
 
     pub fn is_empty(&self) -> bool {
         match self.0.as_ref() {
-            AttrsRep::Map(map) => map.is_empty(),
+            AttrsRep::Map { attrs, .. } => attrs.is_empty(),
             AttrsRep::Empty => true,
             AttrsRep::KV { .. } => false,
         }
@@ -298,7 +315,7 @@ impl NixAttrs {
     #[allow(clippy::needless_lifetimes)]
     pub fn iter<'a>(&'a self) -> Iter<KeyValue<'a>> {
         Iter(match &self.0.as_ref() {
-            AttrsRep::Map(map) => KeyValue::Map(map.iter()),
+            AttrsRep::Map { attrs, .. } => KeyValue::Map(attrs.iter()),
             AttrsRep::Empty => KeyValue::Empty,
 
             AttrsRep::KV { name, value } => KeyValue::KV {
@@ -314,8 +331,8 @@ impl NixAttrs {
     pub fn iter_sorted(&self) -> Iter<KeyValue<'_>> {
         Iter(match self.0.as_ref() {
             AttrsRep::Empty => KeyValue::Empty,
-            AttrsRep::Map(map) => {
-                let sorted = map.iter().sorted_by_key(|x| x.0);
+            AttrsRep::Map { attrs, .. } => {
+                let sorted = attrs.iter().sorted_by_key(|x| x.0);
                 KeyValue::Sorted(sorted)
             }
             AttrsRep::KV { name, value } => KeyValue::KV {
@@ -332,8 +349,8 @@ impl NixAttrs {
         let iter = match Rc::<AttrsRep>::try_unwrap(self.0) {
             Ok(attrs) => match attrs {
                 AttrsRep::Empty => IntoIterRepr::Empty,
-                AttrsRep::Map(map) => {
-                    IntoIterRepr::Finite(map.into_iter().sorted_by(|(a, _), (b, _)| a.cmp(b)))
+                AttrsRep::Map { attrs, .. } => {
+                    IntoIterRepr::Finite(attrs.into_iter().sorted_by(|(a, _), (b, _)| a.cmp(b)))
                 }
                 AttrsRep::KV { name, value } => IntoIterRepr::Finite(
                     vec![(NAME.clone(), name), (VALUE.clone(), value)].into_iter(),
@@ -341,8 +358,9 @@ impl NixAttrs {
             },
             Err(rc) => match rc.as_ref() {
                 AttrsRep::Empty => IntoIterRepr::Empty,
-                AttrsRep::Map(map) => IntoIterRepr::Finite(
-                    map.iter()
+                AttrsRep::Map { attrs, .. } => IntoIterRepr::Finite(
+                    attrs
+                        .iter()
                         .map(|(k, v)| (k.clone(), v.clone()))
                         .sorted_by(|(a, _), (b, _)| a.cmp(b)),
                 ),
@@ -361,7 +379,7 @@ impl NixAttrs {
             AttrsRep::KV { .. } => KeysInner::KV(IterKV::default()),
 
             // TODO(tazjin): only sort when required, not always.
-            AttrsRep::Map(m) => KeysInner::Map(m.keys()),
+            AttrsRep::Map { attrs, .. } => KeysInner::Map(attrs.keys()),
         })
     }
 
@@ -369,7 +387,7 @@ impl NixAttrs {
     /// iteration being lexicographic.
     pub fn keys_sorted(&self) -> Keys<'_> {
         Keys(match self.0.as_ref() {
-            AttrsRep::Map(map) => KeysInner::Sorted(map.keys().sorted()),
+            AttrsRep::Map { attrs, .. } => KeysInner::Sorted(attrs.keys().sorted()),
             AttrsRep::Empty => KeysInner::Empty,
             AttrsRep::KV { .. } => KeysInner::KV(IterKV::default()),
         })
@@ -380,6 +398,7 @@ impl NixAttrs {
     pub fn construct(
         count: usize,
         mut stack_slice: Vec<Value>,
+        spans: &[Span],
     ) -> Result<Result<Self, CatchableErrorKind>, ErrorKind> {
         debug_assert!(
             stack_slice.len() == count * 2,
@@ -387,6 +406,16 @@ impl NixAttrs {
             count,
             stack_slice.len(),
         );
+        // FUTUREWORK: this invariant will be true once we fully
+        // implement span collection from everywhere e.g. inherit (from),
+        // formals, etc.
+        //
+        // debug_assert!(
+        //     spans.len() == count || spans.is_empty(),
+        //     "construct_attrs called with count == {}, but spans.len() == {}",
+        //     count,
+        //     spans.len(),
+        // );
 
         // Optimisation: Empty attribute set
         if count == 0 {
@@ -401,13 +430,17 @@ impl NixAttrs {
         }
 
         let mut attrs_map = FxHashMap::with_capacity_and_hasher(count, rustc_hash::FxBuildHasher);
+        let mut attrs_pos =
+            FxHashMap::with_capacity_and_hasher(spans.len(), rustc_hash::FxBuildHasher);
+        let mut spans = spans.iter().rev().copied();
 
         for _ in 0..count {
             let value = stack_slice.pop().unwrap();
             let key = stack_slice.pop().unwrap();
+            let span = spans.next();
 
             match key {
-                Value::String(ks) => set_attr(&mut attrs_map, ks, value)?,
+                Value::String(ks) => set_attr(&mut attrs_map, ks, value, &mut attrs_pos, span)?,
 
                 Value::Null => {
                     // This is in fact valid, but leads to the value
@@ -422,7 +455,15 @@ impl NixAttrs {
             }
         }
 
-        Ok(Ok(AttrsRep::Map(attrs_map).into()))
+        Ok(Ok(AttrsRep::Map {
+            attrs: attrs_map,
+            pos: if attrs_pos.is_empty() {
+                None
+            } else {
+                Some(Box::new(attrs_pos))
+            },
+        }
+        .into()))
     }
 
     /// Construct an optimized "KV"-style attribute set given the value for the
@@ -436,7 +477,7 @@ impl NixAttrs {
     pub(crate) fn intersect(&self, other: &Self) -> NixAttrs {
         match (self.0.as_ref(), other.0.as_ref()) {
             (AttrsRep::Empty, _) | (_, AttrsRep::Empty) => AttrsRep::Empty.into(),
-            (AttrsRep::Map(lhs), AttrsRep::Map(rhs)) => {
+            (AttrsRep::Map { attrs: lhs, .. }, AttrsRep::Map { attrs: rhs, .. }) => {
                 let mut out = FxHashMap::with_capacity_and_hasher(
                     std::cmp::min(lhs.len(), rhs.len()),
                     rustc_hash::FxBuildHasher,
@@ -454,14 +495,18 @@ impl NixAttrs {
                         }
                     }
                 };
-                out.into()
+                AttrsRep::Map {
+                    attrs: out,
+                    pos: None,
+                }
+                .into()
             }
-            (AttrsRep::Map(map), AttrsRep::KV { name, value }) => {
+            (AttrsRep::Map { attrs, .. }, AttrsRep::KV { name, value }) => {
                 let mut out = FxHashMap::with_capacity_and_hasher(2, rustc_hash::FxBuildHasher);
-                if map.contains_key(NAME.as_bstr()) {
+                if attrs.contains_key(NAME.as_bstr()) {
                     out.insert(NAME.clone(), name.clone());
                 }
-                if map.contains_key(VALUE.as_bstr()) {
+                if attrs.contains_key(VALUE.as_bstr()) {
                     out.insert(VALUE.clone(), value.clone());
                 }
 
@@ -471,19 +516,23 @@ impl NixAttrs {
                     out.into()
                 }
             }
-            (AttrsRep::KV { .. }, AttrsRep::Map(map)) => {
+            (AttrsRep::KV { .. }, AttrsRep::Map { attrs, .. }) => {
                 let mut out = FxHashMap::with_capacity_and_hasher(2, rustc_hash::FxBuildHasher);
-                if let Some(name) = map.get(NAME.as_bstr()) {
+                if let Some(name) = attrs.get(NAME.as_bstr()) {
                     out.insert(NAME.clone(), name.clone());
                 }
-                if let Some(value) = map.get(VALUE.as_bstr()) {
+                if let Some(value) = attrs.get(VALUE.as_bstr()) {
                     out.insert(VALUE.clone(), value.clone());
                 }
 
                 if out.is_empty() {
                     NixAttrs::empty()
                 } else {
-                    out.into()
+                    AttrsRep::Map {
+                        attrs: out,
+                        pos: None,
+                    }
+                    .into()
                 }
             }
             (AttrsRep::KV { .. }, AttrsRep::KV { .. }) => other.clone(),
@@ -497,6 +546,16 @@ impl NixAttrs {
         };
         *kind == "derivation"
     }
+
+    pub fn get_attr_pos<K>(&self, key: &K) -> Option<Span>
+    where
+        K: Borrow<BStr> + ?Sized,
+    {
+        match self.0.as_ref() {
+            AttrsRep::Map { pos, .. } => pos.as_ref()?.get(key.borrow()).copied(),
+            _ => None,
+        }
+    }
 }
 
 impl IntoIterator for NixAttrs {
@@ -509,7 +568,7 @@ impl IntoIterator for NixAttrs {
             AttrsRep::KV { name, value } => OwnedAttrsIterator(IntoIterRepr::Finite(
                 vec![(NAME.clone(), name), (VALUE.clone(), value)].into_iter(),
             )),
-            AttrsRep::Map(map) => OwnedAttrsIterator(IntoIterRepr::Map(map.into_iter())),
+            AttrsRep::Map { attrs, .. } => OwnedAttrsIterator(IntoIterRepr::Map(attrs.into_iter())),
         }
     }
 }
@@ -552,6 +611,8 @@ fn set_attr(
     map: &mut FxHashMap<NixString, Value>,
     key: NixString,
     value: Value,
+    pos: &mut FxHashMap<NixString, Span>,
+    span: Option<Span>,
 ) -> Result<(), ErrorKind> {
     match map.entry(key) {
         hash_map::Entry::Occupied(entry) => Err(ErrorKind::DuplicateAttrsKey {
@@ -559,6 +620,9 @@ fn set_attr(
         }),
 
         hash_map::Entry::Vacant(entry) => {
+            if let Some(span) = span {
+                pos.insert(entry.key().clone(), span);
+            }
             entry.insert(value);
             Ok(())
         }

@@ -23,6 +23,9 @@ paths = [
   # Newer Nix versions return an attr set, while 2.3 returns null
   "builtins/unsafeGetAttrPos/corepkgs",
 
+  # 2.3 returns the full /nix/store path
+  "builtins/unsafeGetAttrPos/derivation",
+
   # Nix2.3 produces a path below:
   #   /nix/store/lc5bhdsagh8mrxkdbvdkmw9nv1vykavn-foo.drv
   "builtins/derivation/invalid-structured-attrs",
@@ -40,7 +43,7 @@ paths = [
   # The likely change is https://github.com/NixOS/nix/commit/ea95327e72f5781295417b0eae46a5e351bebebd
   "builtins/storePath/path-with-subpath",
 ]
-builtins = ["readFileType"]
+builtins = ["readFileType", "zipAttrsWith"]
 features = ["flakes", "pipe-operators", "path-interpolation"]
 
 [lix_latest]
@@ -49,6 +52,9 @@ paths = [
 
   # Newer Nix versions return an attr set, while Lix returns null
   "builtins/unsafeGetAttrPos/corepkgs",
+
+  # Returns null instead of attrset
+  "builtins/unsafeGetAttrPos/derivation",
 
   # Lix produces a path below:
   #   /nix/store/lc5bhdsagh8mrxkdbvdkmw9nv1vykavn-foo.drv

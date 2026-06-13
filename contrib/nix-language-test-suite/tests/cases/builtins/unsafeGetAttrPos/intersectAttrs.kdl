@@ -1,0 +1,11 @@
+lang {
+  builtins "unsafeGetAttrPos" "intersectAttrs"
+}
+
+environment {
+  work-dir "/pwd/lang"
+}
+
+runtime-opts {
+  eval-strict
+}

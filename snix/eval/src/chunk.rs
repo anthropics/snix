@@ -33,6 +33,15 @@ struct SourceSpan {
 pub struct Chunk {
     pub code: Vec<u8>,
     pub constants: Vec<Value>,
+
+    /// Spans for AttrSet's keys. Needed for `unsafeGetAttrPos` builtin.
+    ///
+    /// This code assumes that each Chunk can contain at most one AttrSet.
+    ///
+    /// This assumption is based on how AttrSets compiled now. Each
+    /// AttrSet emits its own thunk and each thunk creates its own Chunk.
+    pub attrsets_pos_spans: Vec<codemap::Span>,
+
     spans: Vec<SourceSpan>,
 
     /// Index of the last operation (i.e. not data) written to the code vector.

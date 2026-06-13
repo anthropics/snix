@@ -1674,21 +1674,17 @@ mod placeholder_builtins {
     #[builtin("unsafeGetAttrPos")]
     async fn builtin_unsafe_get_attr_pos(
         co: GenCo,
-        _name: Value,
-        _attrset: Value,
+        name: Value,
+        attrset: Value,
     ) -> Result<Value, ErrorKind> {
-        // TODO: implement for nixpkgs compatibility
-        generators::emit_warning_kind(
-            &co,
-            WarningKind::NotImplemented("builtins.unsafeGetAttrsPos"),
-        )
-        .await;
-        let res = [
-            ("line", 42.into()),
-            ("column", 42.into()),
-            ("file", Value::String("/deep/thought".into())),
-        ];
-        Ok(Value::attrs(NixAttrs::from_iter(res)))
+        let attrs = attrset.to_attrs()?;
+        let span = attrs.get_attr_pos(&name.to_str()?);
+
+        let Some(span) = span else {
+            return Ok(Value::Null);
+        };
+
+        Ok(generators::request_span_pos(&co, span).await)
     }
 }
 

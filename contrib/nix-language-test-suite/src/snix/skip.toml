@@ -15,8 +15,21 @@ paths = [
 
   # Nix fails, but Snix only emits a "UselessInherit" warning
   "scope/dup-inherit",
+
+  # File and line differ
+  "builtins/unsafeGetAttrPos/derivation",
+
+  # Not implemented yet
+  "builtins/unsafeGetAttrPos/foldl",
+  "builtins/unsafeGetAttrPos/update",
+  "builtins/unsafeGetAttrPos/listToAttrs",
+  "builtins/unsafeGetAttrPos/corepkgs",
+  "builtins/unsafeGetAttrPos/removeAttrs",
+  "builtins/unsafeGetAttrPos/intersectAttrs",
+  "builtins/unsafeGetAttrPos/eval-okay-inherit-attr-pos",
+  "builtins/unsafeGetAttrPos/eval-okay-getattrpos-functionargs",
 ]
 
-builtins = ["readFile", "__nixPath", "unsafeGetAttrPos"]
+builtins = ["readFile", "__nixPath"]
 
 features = ["pipe-operators"]

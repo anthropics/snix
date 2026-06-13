@@ -4,10 +4,6 @@ lang {
 
 environment {
   work-dir "/pwd/lang"
-
-  fixtures {
-    file "foo.nix" content="{ y = \"x\"; }"
-  }
 }
 
 runtime-opts {

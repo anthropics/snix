@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn test_empty_attrs() {
-    let attrs = NixAttrs::construct(0, vec![])
+    let attrs = NixAttrs::construct(0, vec![], &[])
         .expect("empty attr construction should succeed")
         .unwrap();
 
@@ -16,12 +16,12 @@ fn test_empty_attrs() {
 
 #[test]
 fn test_simple_attrs() {
-    let attrs = NixAttrs::construct(1, vec![Value::from("key"), Value::from("value")])
+    let attrs = NixAttrs::construct(1, vec![Value::from("key"), Value::from("value")], &[])
         .expect("simple attr construction should succeed")
         .unwrap();
 
     assert!(
-        matches!(attrs.0.as_ref(), AttrsRep::Map(_)),
+        matches!(attrs.0.as_ref(), AttrsRep::Map { .. }),
         "simple attribute set should use map representation",
     )
 }
@@ -41,6 +41,7 @@ fn test_kv_attrs() {
             name_val,
             meaning_val.clone(),
         ],
+        &[],
     )
     .expect("constructing K/V pair attrs should succeed")
     .unwrap();
@@ -56,7 +57,7 @@ fn test_kv_attrs() {
 
 #[test]
 fn test_empty_attrs_iter() {
-    let attrs = NixAttrs::construct(0, vec![]).unwrap().unwrap();
+    let attrs = NixAttrs::construct(0, vec![], &[]).unwrap().unwrap();
     assert!(attrs.iter().next().is_none());
 }
 
@@ -75,6 +76,7 @@ fn test_kv_attrs_iter() {
             name_val,
             meaning_val.clone(),
         ],
+        &[],
     )
     .expect("constructing K/V pair attrs should succeed")
     .unwrap();
@@ -91,7 +93,7 @@ fn test_kv_attrs_iter() {
 
 #[test]
 fn test_map_attrs_iter() {
-    let attrs = NixAttrs::construct(1, vec![Value::from("key"), Value::from("value")])
+    let attrs = NixAttrs::construct(1, vec![Value::from("key"), Value::from("value")], &[])
         .expect("simple attr construction should succeed")
         .unwrap();
 

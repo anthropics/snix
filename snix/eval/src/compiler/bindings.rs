@@ -48,7 +48,15 @@ struct AttributeSet {
     inherits: Vec<ast::Inherit>,
 
     /// All internal entries
-    entries: Vec<(Span, PeekableAttrs, ast::Expr)>,
+    entries: Vec<AttributeEntry>,
+}
+
+#[derive(Clone)]
+struct AttributeEntry {
+    span: Span,
+    lowered_from: Option<Span>,
+    remaining_path: PeekableAttrs,
+    expr: ast::Expr,
 }
 
 impl ToSpan for AttributeSet {
@@ -74,13 +82,11 @@ impl AttributeSet {
             inherits: ast::HasEntry::inherits(node).collect(),
 
             entries: ast::HasEntry::attrpath_values(node)
-                .map(|entry| {
-                    let span = c.span_for(&entry);
-                    (
-                        span,
-                        entry.attrpath().unwrap().attrs().peekable(),
-                        entry.value().unwrap(),
-                    )
+                .map(|entry| AttributeEntry {
+                    span: c.span_for(&entry),
+                    lowered_from: None,
+                    remaining_path: entry.attrpath().unwrap().attrs().peekable(),
+                    expr: entry.value().unwrap(),
                 })
                 .collect(),
         }
@@ -106,13 +112,7 @@ enum Binding {
 impl Binding {
     /// Merge the provided value into the current binding, or emit an
     /// error if this turns out to be impossible.
-    fn merge(
-        &mut self,
-        c: &mut Compiler,
-        span: Span,
-        mut remaining_path: PeekableAttrs,
-        value: ast::Expr,
-    ) {
+    fn merge(&mut self, c: &mut Compiler, mut entry: AttributeEntry) {
         match self {
             Binding::InheritFrom { name, span, .. } => {
                 c.emit_error(span, ErrorKind::UnmergeableInherit { name: name.clone() })
@@ -124,32 +124,32 @@ impl Binding {
                 ast::Expr::AttrSet(existing) => {
                     let nested = AttributeSet::from_ast(c, existing);
                     *self = Binding::Set(nested);
-                    self.merge(c, span, remaining_path, value);
+                    self.merge(c, entry);
                 }
 
-                _ => c.emit_error(&value, ErrorKind::UnmergeableValue),
+                _ => c.emit_error(&entry.expr, ErrorKind::UnmergeableValue),
             },
 
             // If the value is nested further, it is simply inserted into the
             // bindings with its full path and resolved recursively further
             // down.
-            Binding::Set(existing) if remaining_path.peek().is_some() => {
-                existing.entries.push((span, remaining_path, value))
+            Binding::Set(existing) if entry.remaining_path.peek().is_some() => {
+                existing.entries.push(entry)
             }
 
             Binding::Set(existing) => {
-                if let ast::Expr::AttrSet(new) = value {
+                if let ast::Expr::AttrSet(new) = entry.expr {
                     existing.inherits.extend(ast::HasEntry::inherits(&new));
                     existing
                         .entries
-                        .extend(ast::HasEntry::attrpath_values(&new).map(|entry| {
-                            let span = c.span_for(&entry);
-                            (
-                                span,
-                                entry.attrpath().unwrap().attrs().peekable(),
-                                entry.value().unwrap(),
-                            )
-                        }));
+                        .extend(
+                            ast::HasEntry::attrpath_values(&new).map(|entry| AttributeEntry {
+                                span: c.span_for(&entry),
+                                lowered_from: None,
+                                remaining_path: entry.attrpath().unwrap().attrs().peekable(),
+                                expr: entry.value().unwrap(),
+                            }),
+                        );
                 } else {
                     // This branch is unreachable because in cases where the
                     // path is empty (i.e. there is no further nesting), the
@@ -210,42 +210,55 @@ impl TrackedBindings {
     /// that the provided binding is mergable (i.e. either a nested key or an
     /// attribute set literal).
     ///
-    /// Returns true if the binding was merged, false if it needs to be compiled
+    /// Returns `Ok` if the binding was merged, `Err` if it needs to be compiled
     /// separately as a new binding.
     fn try_merge(
         &mut self,
         c: &mut Compiler,
-        span: Span,
         name: &ast::Attr,
-        mut remaining_path: PeekableAttrs,
-        value: ast::Expr,
-    ) -> bool {
+        mut entry: AttributeEntry,
+    ) -> Result<(), AttributeEntry> {
         // If the path has no more entries, and if the entry is not an
         // attribute set literal, the entry can not be merged.
-        if remaining_path.peek().is_none() && !matches!(value, ast::Expr::AttrSet(_)) {
-            return false;
+        if entry.remaining_path.peek().is_none() && !matches!(&entry.expr, ast::Expr::AttrSet(_)) {
+            return Err(entry);
         }
 
         // If the first element of the path is not statically known, the entry
         // can not be merged.
-        let name = match expr_static_attr_str(name) {
+        let name_str = match expr_static_attr_str(name) {
             Some(name) => name,
-            None => return false,
+            None => return Err(entry),
         };
 
         // If there is no existing binding with this key, the entry can not be
         // merged.
         // TODO: benchmark whether using a map or something is useful over the
         // `find` here
-        let binding = match self.bindings.iter_mut().find(|b| b.matches(&name)) {
+        let binding = match self.bindings.iter_mut().find(|b| b.matches(&name_str)) {
             Some(b) => b,
-            None => return false,
+            None => return Err(entry),
         };
 
-        // No more excuses ... the binding can be merged!
-        binding.binding.merge(c, span, remaining_path, value);
+        // To comply with Nix's unsafeGetAttrPos behaviour, lowered attrpath's
+        // position should refer to the first segment of the path.
+        //
+        // example:
+        //   foo.bar.baz = 1
+        //
+        // After consuming `foo`, `remaining_path` is `bar.baz`. Any attrset
+        // generated from this attrpath should refer to position of `foo`.
+        //
+        // If we are recursively compiling an already-lowered attrpath,
+        // preserver the first segment's span.
+        if entry.lowered_from.is_none() && entry.remaining_path.peek().is_some() {
+            entry.lowered_from = Some(c.span_for(name));
+        }
 
-        true
+        // No more excuses ... the binding can be merged!
+        binding.binding.merge(c, entry);
+
+        Ok(())
     }
 
     /// Add a completely new binding to the tracked bindings.
@@ -266,7 +279,7 @@ trait HasEntryProxy {
     fn attributes<'a>(
         &self,
         file: &'a codemap::File,
-    ) -> Box<dyn Iterator<Item = (Span, PeekableAttrs, ast::Expr)> + 'a>;
+    ) -> Box<dyn Iterator<Item = AttributeEntry> + 'a>;
 }
 
 impl<N: HasEntry> HasEntryProxy for N {
@@ -277,14 +290,15 @@ impl<N: HasEntry> HasEntryProxy for N {
     fn attributes<'a>(
         &self,
         file: &'a codemap::File,
-    ) -> Box<dyn Iterator<Item = (Span, PeekableAttrs, ast::Expr)> + 'a> {
-        Box::new(ast::HasEntry::attrpath_values(self).map(move |entry| {
-            (
-                entry.span_for(file),
-                entry.attrpath().unwrap().attrs().peekable(),
-                entry.value().unwrap(),
-            )
-        }))
+    ) -> Box<dyn Iterator<Item = AttributeEntry> + 'a> {
+        Box::new(
+            ast::HasEntry::attrpath_values(self).map(move |entry| AttributeEntry {
+                span: entry.span_for(file),
+                lowered_from: None,
+                remaining_path: entry.attrpath().unwrap().attrs().peekable(),
+                expr: entry.value().unwrap(),
+            }),
+        )
     }
 }
 
@@ -296,7 +310,7 @@ impl HasEntryProxy for AttributeSet {
     fn attributes<'a>(
         &self,
         _: &'a codemap::File,
-    ) -> Box<dyn Iterator<Item = (Span, PeekableAttrs, ast::Expr)> + 'a> {
+    ) -> Box<dyn Iterator<Item = AttributeEntry> + 'a> {
         Box::new(self.entries.clone().into_iter())
     }
 }
@@ -467,17 +481,22 @@ impl Compiler<'_, '_> {
     ) where
         N: ToSpan + HasEntryProxy,
     {
-        for (span, mut path, value) in node.attributes(self.file) {
-            let key = path.next().unwrap();
+        for mut entry in node.attributes(self.file) {
+            let key = entry.remaining_path.next().unwrap();
 
-            if bindings.try_merge(self, span, &key, path.clone(), value.clone()) {
+            let mut entry = match bindings.try_merge(self, &key, entry) {
                 // Binding is nested, or already exists and was merged, move on.
-                continue;
-            }
+                Ok(()) => continue,
+                Err(entry) => entry,
+            };
 
             *count += 1;
 
             let key_span = self.span_for(&key);
+
+            let pos_span = entry.lowered_from.unwrap_or(key_span);
+            self.push_attrset_pos(pos_span);
+
             let key_slot = match expr_static_attr_str(&key) {
                 Some(name) if kind.is_attrs() => KeySlot::Static {
                     name,
@@ -517,15 +536,18 @@ impl Compiler<'_, '_> {
                 BindingsKind::Attrs => self.scope_mut().declare_phantom(key_span, false),
             };
 
-            let binding = if path.peek().is_some() {
+            let binding = if entry.remaining_path.peek().is_some() {
+                let span = entry.span;
+                entry.lowered_from = Some(pos_span);
+
                 Binding::Set(AttributeSet {
                     span,
                     kind: BindingsKind::Attrs,
                     inherits: vec![],
-                    entries: vec![(span, path, value)],
+                    entries: vec![entry],
                 })
             } else {
-                Binding::Plain { expr: value }
+                Binding::Plain { expr: entry.expr }
             };
 
             bindings.track_new(key_slot, value_slot, binding);

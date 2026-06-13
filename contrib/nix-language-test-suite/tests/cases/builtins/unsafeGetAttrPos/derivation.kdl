@@ -1,0 +1,8 @@
+lang {
+  builtins "unsafeGetAttrPos" "derivation"
+}
+
+// Without strict evaluation, Nix returns thunked column and line
+runtime-opts {
+  eval-strict
+}

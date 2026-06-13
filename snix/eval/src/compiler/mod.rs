@@ -340,6 +340,12 @@ impl Compiler<'_, '_> {
             }
         }
     }
+
+    fn push_attrset_pos(&mut self, span: Span) {
+        if self.file.name() != crate::REPL_LOCATION {
+            self.chunk().attrsets_pos_spans.push(span);
+        }
+    }
 }
 
 // Actual code-emitting AST traversal methods.
