@@ -1,0 +1,7 @@
+lang {
+  builtins "any" "all"
+}
+
+runtime-opts {
+  eval-strict
+}

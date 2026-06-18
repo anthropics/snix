@@ -1,0 +1,7 @@
+lang {
+  builtins "all" "map" "tryEval" "throw"
+}
+
+runtime-opts {
+  eval-strict
+}

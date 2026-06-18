@@ -1,0 +1,7 @@
+lang {
+  builtins "any" "abort"
+}
+
+runtime-opts {
+  eval-strict
+}
