@@ -118,6 +118,7 @@ pub trait DirectoryPutter: Send {
 pub(crate) fn register_directory_services(reg: &mut Registry) {
     reg.register::<Box<dyn ServiceBuilder<Output = dyn DirectoryService>>, super::directoryservice::combinators::CacheConfig>("cache");
     reg.register::<Box<dyn ServiceBuilder<Output = dyn DirectoryService>>, super::directoryservice::combinators::PriorityConfig>("priority");
+    reg.register::<Box<dyn ServiceBuilder<Output = dyn DirectoryService>>, super::directoryservice::combinators::RaceConfig>("race");
     reg.register::<Box<dyn ServiceBuilder<Output = dyn DirectoryService>>, super::directoryservice::GRPCDirectoryServiceConfig>("grpc");
     reg.register::<Box<dyn ServiceBuilder<Output = dyn DirectoryService>>, super::directoryservice::ObjectStoreDirectoryServiceConfig>("objectstore");
     reg.register::<Box<dyn ServiceBuilder<Output = dyn DirectoryService>>, super::directoryservice::RedbDirectoryServiceConfig>("redb");
