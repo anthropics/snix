@@ -27,6 +27,11 @@ impl<DS> Race<DS> {
             services: Vec::from_iter(iter),
         }
     }
+
+    /// Add another sevice to the list.
+    pub fn add(&mut self, svc: DS) {
+        self.services.push(svc);
+    }
 }
 
 #[async_trait]

@@ -11,7 +11,7 @@ use tracing::instrument;
 use crate::{
     B3Digest, Directory,
     composition::{CompositionContext, CompositionError, ServiceBuilder},
-    directoryservice::{self, DirectoryPutter, DirectoryService, FailingPutter},
+    directoryservice::{self, DirectoryPutter, DirectoryService, FailingPutter, combinators::Race},
 };
 
 /// Holds references to many different directory services, each with an associated priority.
@@ -22,7 +22,7 @@ pub struct Priority<DS> {
     instance_name: String,
     /// The services, keyed by their priority.
     // NOTE: Arc<dyn DS> implements DS too, so you can put different service types in here.
-    services: BTreeMap<Prio, DS>,
+    services: BTreeMap<Prio, Race<DS>>,
 }
 
 impl From<u64> for Prio {
@@ -49,13 +49,10 @@ impl<DS> Priority<DS> {
         for (prio, service) in iter {
             match services.entry(prio) {
                 btree_map::Entry::Vacant(entry) => {
-                    entry.insert(service);
+                    // add a Race combinator with a single item
+                    entry.insert(Race::new(format!("{instance_name}-{prio}-race"), [service]));
                 }
-                btree_map::Entry::Occupied(_entry) => {
-                    unimplemented!(
-                        "already got another service at prio {prio}, race not implemented"
-                    );
-                }
+                btree_map::Entry::Occupied(mut entry) => entry.get_mut().add(service),
             }
         }
 
