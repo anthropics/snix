@@ -7,6 +7,7 @@ use tonic::async_trait;
 
 pub mod combinators;
 mod directory_graph;
+mod failing_putter;
 mod from_addr;
 mod grpc;
 mod object_store;
@@ -19,6 +20,7 @@ pub mod traversal;
 pub mod tests;
 
 pub use self::directory_graph::{DirectoryGraph, DirectoryGraphBuilder};
+pub use self::failing_putter::FailingPutter;
 pub use self::from_addr::from_addr;
 pub use self::grpc::{GRPCDirectoryService, GRPCDirectoryServiceConfig};
 pub use self::object_store::{ObjectStoreDirectoryService, ObjectStoreDirectoryServiceConfig};

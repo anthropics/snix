@@ -11,7 +11,7 @@ use tracing::instrument;
 use crate::{
     B3Digest, Directory,
     composition::{CompositionContext, CompositionError, ServiceBuilder},
-    directoryservice::{self, DirectoryPutter, DirectoryService},
+    directoryservice::{self, DirectoryPutter, DirectoryService, FailingPutter},
 };
 
 /// Holds references to many different directory services, each with an associated priority.
@@ -120,19 +120,7 @@ where
 
     #[instrument(skip_all)]
     fn put_multiple_start(&self) -> Box<dyn DirectoryPutter + '_> {
-        struct FailingPutter();
-
-        #[async_trait]
-        impl DirectoryPutter for FailingPutter {
-            async fn put(&mut self, _directory: Directory) -> Result<(), directoryservice::Error> {
-                Err(Error::Unimplemented)?
-            }
-            async fn close(&mut self) -> Result<B3Digest, directoryservice::Error> {
-                Err(Error::Unimplemented)?
-            }
-        }
-
-        Box::new(FailingPutter())
+        Box::new(FailingPutter)
     }
 }
 
@@ -199,7 +187,7 @@ mod test {
 
     use super::*;
     use crate::{
-        directoryservice::MockDirectoryService,
+        directoryservice::{MockDirectoryService, failing_putter},
         fixtures::{DIRECTORY_A, DIRECTORY_B, DIRECTORY_WITH_KEEP},
     };
 
@@ -435,7 +423,7 @@ mod test {
             .expect_err("must fail")
             .0;
 
-        let err = err.downcast_ref::<Error>().unwrap();
-        assert_matches!(err, Error::Unimplemented);
+        let err = err.downcast_ref::<failing_putter::Error>().unwrap();
+        assert_matches!(err, failing_putter::Error::Unimplemented);
     }
 }
