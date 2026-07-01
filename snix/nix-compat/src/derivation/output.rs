@@ -1,18 +1,16 @@
 use std::str::FromStr;
 
 use crate::nixhash;
-use crate::nixhash::CAHash;
 use crate::nixhash::HashAlgo;
 use crate::nixhash::NixHash;
-use crate::store_path::ParseStorePathError;
 use crate::store_path::StorePath;
 
-/// References the derivation output.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+/// References the derivation output in its serialized form.
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub struct Output {
+pub(super) struct Output {
     /// Store path of build result.
-    pub path: Option<StorePath>,
+    pub path: StorePath,
 
     #[cfg_attr(feature = "serde", serde(flatten))]
     pub output_hash: Option<OutputHash>,
@@ -27,7 +25,9 @@ pub struct Output {
 ///  - `hash`: hexlower-encoded digest
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OutputHash {
+    /// Hashing mode for this output. Either `Flat` or `Recursive`.
     pub mode: OutputHashMode,
+    /// The expected hash for this output.
     pub hash: NixHash,
 }
 
@@ -40,12 +40,15 @@ pub struct OutputHash {
 )]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum OutputHashMode {
+    ///The output uses flat hashing mode.
     #[default]
     Flat,
+    ///The output uses recursive hashing mode. This is also called NAR hashing mode.
     Recursive,
 }
 
 impl OutputHashMode {
+    /// Return the prefix for this `OutputMode` as used in ATerm representation.
     pub const fn as_mode_prefix(&self) -> &'static str {
         match self {
             OutputHashMode::Flat => "",
@@ -145,7 +148,7 @@ impl<'de> serde::Deserialize<'de> for Output {
         })?;
 
         Ok(Self {
-            path: Some(path),
+            path,
             // deserialize Option<OutputHash>. we don't do this in a `impl Deserialize for OutputHash`,
             // as this is flattened and we don't want to silently swallow errors.
             output_hash: match (fields.get("hash"), fields.get("hashAlgo")) {
@@ -190,18 +193,6 @@ impl<'de> serde::Deserialize<'de> for Output {
 pub enum ParseOutputHashModeError {
     #[error("Invalid hash mode: {0}")]
     InvalidHashMode(String),
-}
-
-/// Errors that can occur during the validation of a specific
-// [crate::derivation::Output] of a [crate::derivation::Derivation].
-#[derive(Debug, thiserror::Error, PartialEq)]
-pub enum ParseOutputError {
-    #[error("Invalid output path {0}: {1}")]
-    InvalidOutputPath(String, ParseStorePathError),
-    #[error("Missing output path")]
-    MissingOutputPath,
-    #[error("Invalid CAHash: {:?}", .0)]
-    InvalidCAHash(CAHash),
 }
 
 impl Output {

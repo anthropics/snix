@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, path::Path};
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use mimalloc::MiMalloc;
-use nix_compat::derivation::Derivation;
+use nix_compat::derivation::UnverifiedDerivation;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -39,12 +39,12 @@ fn criterion_benchmark(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("from_aterm_bytes", drv_name),
             &drv_bytes,
-            |b, i| b.iter(|| Derivation::from_aterm_bytes(black_box(i.as_slice()))),
+            |b, i| b.iter(|| UnverifiedDerivation::from_aterm_bytes(black_box(i.as_slice()))),
         );
         group.bench_with_input(
             BenchmarkId::new("to_aterm_bytes", drv_name),
             &drv_bytes,
-            |b, i| b.iter(|| Derivation::from_aterm_bytes(black_box(i.as_slice()))),
+            |b, i| b.iter(|| UnverifiedDerivation::from_aterm_bytes(black_box(i.as_slice()))),
         );
     }
 }

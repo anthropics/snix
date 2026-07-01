@@ -1,4 +1,4 @@
-//! This module constructs a [Derivation] by parsing its [ATerm][]
+//! This module constructs a [UnverifiedDerivation] by parsing its [ATerm][]
 //! serialization.
 //!
 //! [ATerm]: http://program-transformation.org/Tools/ATermFormat.html
@@ -12,13 +12,15 @@ use nom::sequence::{delimited, preceded, separated_pair, terminated};
 use std::collections::{BTreeMap, BTreeSet, btree_map};
 use thiserror;
 
-use crate::derivation::output::OutputHash;
+use crate::derivation::output::{Output, OutputHash};
 use crate::derivation::parse_error::{ErrorKind, NomError, NomResult, into_nomerror};
-use crate::derivation::{Derivation, Output, OutputName, Outputs, write};
+use crate::derivation::{DerivationBuilder, OutputName, Outputs, UnverifiedDerivation, write};
 use crate::store_path::{self, StorePath};
 use crate::{aterm, nixhash};
 
 #[derive(Debug, thiserror::Error)]
+/// The error type for derivation parsing errors
+#[allow(missing_docs)]
 pub enum Error<I> {
     #[error("parsing error: {0}")]
     Parser(#[from] NomError<I>),
@@ -42,16 +44,14 @@ impl From<Error<&[u8]>> for Error<Vec<u8>> {
     }
 }
 
-pub(crate) fn parse(i: &[u8]) -> Result<Derivation, Error<&[u8]>> {
+pub fn parse(i: &[u8]) -> Result<UnverifiedDerivation, Error<&[u8]>> {
     match all_consuming(parse_derivation).parse(i) {
-        Ok((rest, derivation)) => {
+        Ok((rest, (builder, outputs))) => {
             // this shouldn't happen, as all_consuming shouldn't return.
             debug_assert!(rest.is_empty());
 
             // invoke validate
-            derivation.validate().map_err(Error::Validation)?;
-
-            Ok(derivation)
+            builder.build_unverified(outputs).map_err(Error::Validation)
         }
         Err(nom::Err::Incomplete(_)) => Err(Error::Incomplete),
         Err(nom::Err::Error(e) | nom::Err::Failure(e)) => Err(e.into()),
@@ -63,15 +63,14 @@ pub(crate) fn parse(i: &[u8]) -> Result<Derivation, Error<&[u8]>> {
 /// If the parse is unsuccessful, either it returns incomplete or an error with the input as
 /// leftover.
 #[allow(dead_code)]
-pub fn parse_streaming(i: &[u8]) -> (Result<Derivation, Error<&[u8]>>, &[u8]) {
+pub fn parse_streaming(i: &[u8]) -> (Result<UnverifiedDerivation, Error<&[u8]>>, &[u8]) {
     match consumed(parse_derivation).parse(i) {
-        Ok((_, (rest, derivation))) => {
+        Ok((_, (rest, (builder, outputs)))) => {
             // invoke validate
-            if let Err(e) = derivation.validate().map_err(Error::Validation) {
-                return (Err(e), i);
+            match builder.build_unverified(outputs) {
+                Ok(derivation) => (Ok(derivation), rest),
+                Err(e) => (Err(Error::Validation(e)), i),
             }
-
-            (Ok(derivation), rest)
         }
         Err(nom::Err::Incomplete(_)) => (Err(Error::Incomplete), i),
         Err(nom::Err::Error(e) | nom::Err::Failure(e)) => (Err(e.into()), i),
@@ -105,12 +104,12 @@ fn parse_output(i: &[u8]) -> NomResult<&[u8], (OutputName, Output)> {
 
                 // This can't be an empty string in ATerms written to disk.
                 // This being an empty string can only occur during output path calculation.
-                let output_path = string_to_store_path(i, &output_path_str)?;
+                let path = string_to_store_path(i, &output_path_str)?;
 
                 Ok::<_, nom::Err<NomError<&[u8]>>>((
                     output_name,
                     Output {
-                        path: Some(output_path),
+                        path,
                         output_hash: if algo_and_mode.is_empty() && encoded_digest.is_empty() {
                             None
                         } else {
@@ -161,7 +160,7 @@ fn parse_outputs(i: &[u8]) -> NomResult<&[u8], Outputs> {
 
     match res {
         Ok((rst, outputs_lst)) => {
-            let outputs = Outputs::try_from_iter(outputs_lst).map_err(|err| {
+            let outputs = Outputs::try_from_output_iter(outputs_lst).map_err(|err| {
                 nom::Err::Failure(NomError {
                     input: i,
                     code: ErrorKind::InvalidOutputs(err),
@@ -250,7 +249,7 @@ fn string_to_store_path<'i>(
     Ok(path)
 }
 
-pub fn parse_derivation(i: &[u8]) -> NomResult<&[u8], Derivation> {
+pub fn parse_derivation(i: &[u8]) -> NomResult<&[u8], (DerivationBuilder, Outputs)> {
     use nom::Parser;
     preceded(
         tag(write::DERIVATION_PREFIX),
@@ -295,19 +294,21 @@ pub fn parse_derivation(i: &[u8]) -> NomResult<&[u8], Derivation> {
                 input_derivations,
                 input_sources,
                 system,
-                builder,
+                command,
                 arguments,
                 environment,
             )| {
-                Derivation {
+                let outputs_builder = outputs.clone().into_builder();
+                let builder = DerivationBuilder {
                     arguments,
-                    builder,
+                    command,
                     environment,
                     input_derivations,
                     input_sources,
-                    outputs,
+                    outputs: outputs_builder,
                     system,
-                }
+                };
+                (builder, outputs)
             },
         ),
     )
@@ -372,7 +373,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::OutputHash;
-    use crate::derivation::{Output, OutputHashMode, OutputName, Outputs};
+    use crate::derivation::output::Output;
+    use crate::derivation::{OutputHashMode, OutputName, Outputs};
     use crate::store_path::StorePathRef;
     use crate::{
         derivation::{NixHash, parse_error::ErrorKind},
@@ -386,30 +388,19 @@ mod tests {
     use rstest::rstest;
 
     static EXP_MULTI_OUTPUTS: LazyLock<Outputs> = LazyLock::new(|| {
-        let mut b = BTreeMap::new();
-        b.insert(
-            "lib".parse().expect("valid OutputName"),
-            Output {
-                path: Some(
-                    StorePath::from_bytes(b"2vixb94v0hy2xc6p7mbnxxcyc095yyia-has-multi-out-lib")
-                        .unwrap(),
-                ),
-                output_hash: None,
-            },
-        );
-        b.insert(
-            "out".parse().expect("valid OutputName"),
-            Output {
-                path: Some(
-                    StorePath::from_bytes(
-                        b"55lwldka5nyxa08wnvlizyqw02ihy8ic-has-multi-out".as_bytes(),
-                    )
+        Outputs::input_addressed_from_iter([
+            (
+                OutputName::from_static("lib").unwrap(),
+                StorePath::from_bytes(b"2vixb94v0hy2xc6p7mbnxxcyc095yyia-has-multi-out-lib")
                     .unwrap(),
-                ),
-                output_hash: None,
-            },
-        );
-        b.try_into().unwrap()
+            ),
+            (
+                OutputName::out(),
+                StorePath::from_bytes(b"55lwldka5nyxa08wnvlizyqw02ihy8ic-has-multi-out".as_bytes())
+                    .unwrap(),
+            ),
+        ])
+        .expect("valid outputs")
     });
 
     static EXP_AB_MAP: LazyLock<BTreeMap<String, BString>> = LazyLock::new(|| {
@@ -576,17 +567,15 @@ mod tests {
     #[case::simple(
         br#"("out","/nix/store/5vyvcwah9l9kf07d52rcgdk70g2f4y13-foo","","")"#,
         (OutputName::out(), Output {
-            path: Some(
-                StorePathRef::from_absolute_path("/nix/store/5vyvcwah9l9kf07d52rcgdk70g2f4y13-foo".as_bytes()).unwrap().to_owned()),
+            path: StorePathRef::from_absolute_path("/nix/store/5vyvcwah9l9kf07d52rcgdk70g2f4y13-foo".as_bytes()).unwrap().to_owned(),
             output_hash: None
         })
     )]
     #[case::fod(
         br#"("out","/nix/store/4q0pg5zpfmznxscq3avycvf9xdvx50n3-bar","r:sha256","08813cbee9903c62be4c5027726a418a300da4500b2d369d3af9286f4815ceba")"#,
         (OutputName::out(), Output {
-            path: Some(
-                StorePathRef::from_absolute_path(
-                "/nix/store/4q0pg5zpfmznxscq3avycvf9xdvx50n3-bar".as_bytes()).unwrap().to_owned()),
+            path: StorePathRef::from_absolute_path(
+                "/nix/store/4q0pg5zpfmznxscq3avycvf9xdvx50n3-bar".as_bytes()).unwrap().to_owned(),
             output_hash: Some(OutputHash{
                 mode: OutputHashMode::Recursive,
                 hash: NixHash::Sha256(hex!("08813cbee9903c62be4c5027726a418a300da4500b2d369d3af9286f4815ceba")),

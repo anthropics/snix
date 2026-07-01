@@ -18,6 +18,7 @@ use crate::store_path;
 pub struct OutputName(SmolStr);
 
 impl OutputName {
+    /// Return this output name as a str
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
@@ -29,6 +30,7 @@ impl OutputName {
         Ok(Self(SmolStr::new_static(s)))
     }
 
+    /// Return `OutputName` for default output named `"out"`.
     pub const fn out() -> Self {
         Self(SmolStr::new_static("out"))
     }
@@ -135,7 +137,9 @@ impl From<&OutputName> for String {
     }
 }
 
+/// The error type for when parsing an [`OutputName`] fails.
 #[derive(thiserror::Error, Debug, PartialEq)]
+#[allow(missing_docs)]
 pub enum ParseOutputNameError {
     #[error("Invalid length")]
     InvalidLength,

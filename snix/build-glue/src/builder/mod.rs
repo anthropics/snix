@@ -9,14 +9,13 @@ use async_stream::try_stream;
 use bstr::BString;
 use bytes::Bytes;
 use futures::Stream;
-use nix_compat::derivation::{Output, OutputName};
+use nix_compat::derivation::{OutputName, UnverifiedDerivation};
 use nix_compat::nixhash::Sha256;
 use nix_compat::store_path::hash_placeholder;
 use nix_compat::{derivation::Derivation, nixbase32, store_path::StorePath};
 use snix_build::buildservice::{AdditionalFile, BuildConstraints, BuildRequest, EnvVar};
 use snix_castore::Node;
 use snix_store::path_info::PathInfo;
-use tracing::warn;
 
 use crate::builder::structured_attrs::handle_structured_attrs;
 use crate::known_paths::KnownPaths;
@@ -54,25 +53,19 @@ where
 {
     let mut visited: HashSet<StorePath> = HashSet::new();
     let mut queue: VecDeque<StorePath> = derivation
-        .input_sources
+        .input_sources()
         .iter()
         .cloned()
         .chain(
             derivation
-                .input_derivations
+                .input_derivations()
                 .iter()
                 .flat_map(|(drv_path, outs)| {
                     let drv = known_paths
                         .get_drv_by_drvpath(&drv_path.as_ref())
                         .expect("drv Bug!!");
                     outs.iter().map(move |output| {
-                        drv.outputs
-                            .get(output)
-                            .expect("No output bug!")
-                            .path
-                            .as_ref()
-                            .expect("output has no store path")
-                            .clone()
+                        drv.outputs().get(output).expect("No output bug!").clone()
                     })
                 }),
         )
@@ -93,19 +86,23 @@ where
     }
 }
 
-/// Takes a [Derivation] and turns it into a [snix_build::buildservice::BuildRequest].
-/// It assumes the Derivation has been validated, and all referenced output paths are present in `inputs`.
-pub(crate) fn derivation_into_build_request(
-    mut derivation: Derivation,
+/// Takes a [`UnverifiedDerivation`] and turns it into a [`BuildRequest`].
+///
+/// **NOTE:** This takes a [`UnverifiedDerivation`] and not a [`Derivation`] because we want
+/// to support the `BuildDerivation` daemon operation. And that operation sends a modified derivation
+/// where `input_derivations` have been converted to output store paths and moved to `input_sources`
+/// which can therefore not be verified.
+pub(crate) fn derivation_into_build_request<D: Into<UnverifiedDerivation>>(
+    derivation: D,
     inputs: &BTreeMap<StorePath, Node>,
 ) -> std::io::Result<BuildRequest> {
-    debug_assert!(derivation.validate().is_ok(), "drv must validate");
+    let derivation = derivation.into();
 
     // produce command_args, which is builder and arguments in a Vec, replacing any placeholders.
     let command_args: Vec<String> = Vec::from_iter(
-        std::iter::once(&derivation.builder)
-            .chain(&derivation.arguments)
-            .map(|s| replace_placeholders(s, &derivation.outputs)),
+        std::iter::once(derivation.command())
+            .chain(derivation.arguments().iter().map(|a| a.as_str()))
+            .map(|s| replace_placeholders(s, derivation.outputs())),
     );
 
     // Produce environment_vars and additional files.
@@ -121,31 +118,25 @@ pub(crate) fn derivation_into_build_request(
             .map(|(k, v)| (k.to_string(), v.to_owned().into())),
     );
 
-    if let Some(json_str) = derivation.environment.remove(structured_attrs::JSON_KEY) {
+    if let Some(json_str) = derivation.environment().get(structured_attrs::JSON_KEY) {
         // Replace placeholders directly inside json, if any.
-        let json_str = replace_placeholders_b(&json_str, &derivation.outputs);
+        let json_str = replace_placeholders_b(json_str, derivation.outputs());
         handle_structured_attrs(
             &json_str,
-            derivation.outputs.iter().map(|(out_name, output)| {
-                (
-                    out_name.as_str(),
-                    output
-                        .path
-                        .as_ref()
-                        .expect("Snix bug: output has no path")
-                        .as_ref(),
-                )
-            }),
+            derivation
+                .outputs()
+                .iter()
+                .map(|(out_name, path)| (out_name.as_str(), path.as_ref())),
             &mut environment_vars,
             &mut additional_files,
         )?;
     } else {
         // If we're not in the structured_attrs case, add other keys set in the
         // derivation environment itself.
-        environment_vars.extend(derivation.environment.into_iter().map(|(k, v)| {
+        environment_vars.extend(derivation.environment().iter().map(|(k, v)| {
             (
                 k.clone(),
-                replace_placeholders_b(&v, &derivation.outputs).into(),
+                replace_placeholders_b(v, derivation.outputs()).into(),
             )
         }));
 
@@ -155,17 +146,11 @@ pub(crate) fn derivation_into_build_request(
 
     // Produce constraints.
     let mut constraints = HashSet::from([
-        BuildConstraints::System(derivation.system.to_owned()),
+        BuildConstraints::System(derivation.system().to_owned()),
         BuildConstraints::ProvideBinSh,
     ]);
 
-    if derivation.outputs.len() == 1
-        && derivation
-            .outputs
-            .get(&OutputName::out())
-            .expect("Snix bug: Derivation has no out output")
-            .is_fixed()
-    {
+    if derivation.outputs().is_fixed() {
         constraints.insert(BuildConstraints::NetworkAccess);
     }
 
@@ -173,23 +158,18 @@ pub(crate) fn derivation_into_build_request(
         // Importantly, this must match the order of get_refscan_needles, since users may use that
         // function to map back from the found needles to a store path
         refscan_needles: derivation
-            .outputs
-            .values()
-            .filter_map(|output| output.path.as_ref())
+            .outputs()
+            .store_paths()
             .map(|path| nixbase32::encode(path.digest()))
             .chain(inputs.keys().map(|path| nixbase32::encode(path.digest())))
             .collect(),
         command_args,
 
         outputs: derivation
-            .outputs
-            .values()
-            .map(|output| {
-                let s = output
-                    .path
-                    .as_ref()
-                    .expect("Snix bug: Output has no path")
-                    .to_absolute_path();
+            .outputs()
+            .store_paths()
+            .map(|path| {
+                let s = path.to_absolute_path();
                 PathBuf::from(s[1..].to_owned())
             })
             .collect(),
@@ -297,19 +277,12 @@ fn calculate_pass_as_file_env(k: &str) -> (String, String) {
 /// Replace all references to `placeholder outputName` inside the derivation
 fn replace_placeholders<'i, I>(s: &str, outputs: I) -> String
 where
-    I: IntoIterator<Item = (&'i OutputName, &'i Output)>,
+    I: IntoIterator<Item = (&'i OutputName, &'i StorePath)>,
 {
     let mut s = s.to_owned();
-    for (out_name, output) in outputs {
+    for (out_name, path) in outputs {
         let placeholder = hash_placeholder(out_name.as_str());
-        if let Some(path) = output.path.as_ref() {
-            s = s.replace(&placeholder, &path.to_absolute_path());
-        } else {
-            warn!(
-                output.name = %out_name,
-                "output should have a path during placeholder replacement"
-            );
-        }
+        s = s.replace(&placeholder, &path.to_absolute_path());
     }
     s
 }
@@ -317,22 +290,15 @@ where
 /// Replace all references to `placeholder outputName` inside the derivation
 fn replace_placeholders_b<'i, I>(s: &BString, outputs: I) -> BString
 where
-    I: IntoIterator<Item = (&'i OutputName, &'i Output)>,
+    I: IntoIterator<Item = (&'i OutputName, &'i StorePath)>,
 {
     use bstr::ByteSlice;
     let mut s = s.clone();
-    for (out_name, output) in outputs {
+    for (out_name, path) in outputs {
         let placeholder = hash_placeholder(out_name.as_str());
-        if let Some(path) = output.path.as_ref() {
-            s = s
-                .replace(placeholder.as_bytes(), path.to_absolute_path().as_bytes())
-                .into();
-        } else {
-            warn!(
-                output.name = %out_name,
-                "output should have a path during placeholder replacement"
-            );
-        }
+        s = s
+            .replace(placeholder.as_bytes(), path.to_absolute_path().as_bytes())
+            .into();
     }
     s
 }
@@ -340,8 +306,8 @@ where
 #[cfg(test)]
 mod test {
     use bytes::Bytes;
-    use nix_compat::store_path::hash_placeholder;
-    use nix_compat::{derivation::Derivation, store_path::StorePath};
+    use nix_compat::derivation::UnverifiedDerivation;
+    use nix_compat::store_path::{StorePath, hash_placeholder};
     use snix_castore::fixtures::DUMMY_DIGEST;
     use snix_castore::{Node, PathComponent};
     use std::collections::{BTreeMap, HashSet};
@@ -370,19 +336,25 @@ mod test {
         let dep_drv_bytes =
             include_bytes!("../../test-data/ss2p4wmxijn652haqyd7dckxwl4c7hxx-bar.drv");
 
-        let derivation1 = Derivation::from_aterm_bytes(aterm_bytes).expect("drv1 must parse");
+        let derivation1 =
+            UnverifiedDerivation::from_aterm_bytes(aterm_bytes).expect("drv1 must parse");
         let drv_path1 =
             StorePath::from_bytes("ch49594n9avinrf8ip0aslidkc4lxkqv-foo.drv".as_bytes())
                 .expect("drv path1 must parse");
-        let derivation2 = Derivation::from_aterm_bytes(dep_drv_bytes).expect("drv2 must parse");
+        let derivation2 =
+            UnverifiedDerivation::from_aterm_bytes(dep_drv_bytes).expect("drv2 must parse");
         let drv_path2 =
             StorePath::from_bytes("ss2p4wmxijn652haqyd7dckxwl4c7hxx-bar.drv".as_bytes())
                 .expect("drv path2 must parse");
 
         let mut known_paths = KnownPaths::default();
 
-        known_paths.add_derivation(drv_path2, derivation2);
-        known_paths.add_derivation(drv_path1, derivation1.clone());
+        known_paths
+            .add_derivation(drv_path2, derivation2)
+            .expect("must succeed");
+        known_paths
+            .add_derivation(drv_path1, derivation1.clone())
+            .expect("must succeed");
 
         let build_request = derivation_into_build_request(
             derivation1.clone(),
@@ -418,7 +390,7 @@ mod test {
                 )]),
                 inputs_dir: "nix/store".into(),
                 constraints: HashSet::from([
-                    BuildConstraints::System(derivation1.system.to_owned()),
+                    BuildConstraints::System(derivation1.system().to_owned()),
                     BuildConstraints::ProvideBinSh
                 ]),
                 additional_files: vec![],
@@ -438,7 +410,7 @@ mod test {
         let aterm_bytes = include_bytes!(
             "../../test-data/18m7y1d025lqgrzx8ypnhjbvq23z2kda-with-placeholders.drv"
         );
-        let derivation = Derivation::from_aterm_bytes(aterm_bytes).expect("must parse");
+        let derivation = UnverifiedDerivation::from_aterm_bytes(aterm_bytes).expect("must parse");
 
         let mut expected_environment_vars: BTreeMap<&str, String> =
             BTreeMap::from_iter(NIX_ENVIRONMENT_VARS.map(|(k, v)| (k, v.to_owned())));
@@ -480,8 +452,7 @@ mod test {
             inputs: BTreeMap::new(),
             inputs_dir: "nix/store".into(),
             constraints: HashSet::from([
-                BuildConstraints::System(derivation.system.clone()),
-                BuildConstraints::System(derivation.system.to_owned()),
+                BuildConstraints::System(derivation.system().to_owned()),
                 BuildConstraints::ProvideBinSh,
             ]),
             additional_files: vec![],
@@ -502,7 +473,7 @@ mod test {
         let aterm_bytes =
             include_bytes!("../../test-data/0hm2f1psjpcwg8fijsmr4wwxrx59s092-bar.drv");
 
-        let derivation = Derivation::from_aterm_bytes(aterm_bytes).expect("must parse");
+        let derivation = UnverifiedDerivation::from_aterm_bytes(aterm_bytes).expect("must parse");
 
         let mut expected_environment_vars = BTreeMap::from_iter(NIX_ENVIRONMENT_VARS);
         expected_environment_vars.extend([
@@ -530,8 +501,8 @@ mod test {
             inputs: BTreeMap::new(),
             inputs_dir: "nix/store".into(),
             constraints: HashSet::from([
-                BuildConstraints::System(derivation.system.to_owned()),
-                BuildConstraints::System(derivation.system.to_owned()),
+                BuildConstraints::System(derivation.system().to_owned()),
+                BuildConstraints::System(derivation.system().to_owned()),
                 BuildConstraints::NetworkAccess,
                 BuildConstraints::ProvideBinSh,
             ]),
@@ -552,7 +523,7 @@ mod test {
         // (builtins.derivation { "name" = "foo"; passAsFile = ["bar" "baz"]; bar = "baz"; baz = "bar"; system = ":"; builder = ":";}).drvPath
         let aterm_bytes = r#"Derive([("out","/nix/store/pp17lwra2jkx8rha15qabg2q3wij72lj-foo","","")],[],[],":",":",[],[("bar","baz"),("baz","bar"),("builder",":"),("name","foo"),("out","/nix/store/pp17lwra2jkx8rha15qabg2q3wij72lj-foo"),("passAsFile","bar baz"),("system",":")])"#.as_bytes();
 
-        let derivation = Derivation::from_aterm_bytes(aterm_bytes).expect("must parse");
+        let derivation = UnverifiedDerivation::from_aterm_bytes(aterm_bytes).expect("must parse");
 
         let mut expected_environment_vars = BTreeMap::from_iter(NIX_ENVIRONMENT_VARS);
         expected_environment_vars.extend([
@@ -586,7 +557,7 @@ mod test {
             inputs: BTreeMap::new(),
             inputs_dir: "nix/store".into(),
             constraints: HashSet::from([
-                BuildConstraints::System(derivation.system.to_owned()),
+                BuildConstraints::System(derivation.system().to_owned()),
                 BuildConstraints::ProvideBinSh,
             ]),
             additional_files: vec![
@@ -617,7 +588,7 @@ mod test {
         // (builtins.derivation { name = "script.sh"; system = builtins.currentSystem; PATH = lib.makeBinPath [pkgs.coreutils]; ""="bar"; k = {"bar" = true; b =1.0; c = false; d = true;}; l = 42; m = false; n = 1.1; builder="${bash}/bin/bash"; hello = placeholder "out"; args = ["-xc" "source \${NIX_ATTRS_SH_FILE:-/dev/null}; cat \${NIX_ATTRS_JSON_FILE:-/dev/null}; out=\${out:-\${outputs[out]}}; cat \${NIX_ATTRS_JSON_FILE:-/dev/null} >\$out; exit 0"];__structuredAttrs = true;})
         let aterm_bytes = r#"Derive([("out","/nix/store/knq92bscsfi5xzvhf8icj2kbwddkk5m4-script.sh","","")],[("/nix/store/l6bi2ln3vlv6mkkw95bvh09pgy4d3xra-coreutils-9.10.drv",["out"]),("/nix/store/s9b1a2zhv6l7x8ady5vfbj5kg8rkvznx-bash-interactive-5.3p9.drv",["out"])],[],"x86_64-linux","/nix/store/sfvyavxai6qvzmv9p9x6mp4wwdz4v41m-bash-interactive-5.3p9/bin/bash",["-xc","source ${NIX_ATTRS_SH_FILE:-/dev/null}; cat ${NIX_ATTRS_JSON_FILE:-/dev/null}; out=${out:-${outputs[out]}}; cat ${NIX_ATTRS_JSON_FILE:-/dev/null} >$out; exit 0"],[("__json","{\"\":\"bar\",\"PATH\":\"/nix/store/74sind1d6vf2bfwd7yklg8chsvzqxmmq-coreutils-9.10/bin\",\"builder\":\"/nix/store/sfvyavxai6qvzmv9p9x6mp4wwdz4v41m-bash-interactive-5.3p9/bin/bash\",\"hello\":\"/1rz4g4znpzjwh1xymhjpm42vipw92pr73vdgl6xs1hycac8kf2n9\",\"k\":{\"b\":1.0,\"bar\":true,\"c\":false,\"d\":true},\"l\":42,\"m\":false,\"n\":1.1,\"name\":\"script.sh\",\"system\":\"x86_64-linux\"}"),("out","/nix/store/knq92bscsfi5xzvhf8icj2kbwddkk5m4-script.sh")])"#.as_bytes();
 
-        let derivation = Derivation::from_aterm_bytes(aterm_bytes).expect("must parse");
+        let derivation = UnverifiedDerivation::from_aterm_bytes(aterm_bytes).expect("must parse");
 
         let mut expected_environment_vars = BTreeMap::from_iter(NIX_ENVIRONMENT_VARS);
         expected_environment_vars.extend([
@@ -660,7 +631,7 @@ mod test {
                 inputs: BTreeMap::new(),
                 inputs_dir: "nix/store".into(),
                 constraints: HashSet::from([
-                BuildConstraints::System(derivation.system.to_owned()),
+                BuildConstraints::System(derivation.system().to_owned()),
                     BuildConstraints::ProvideBinSh,
                 ]),
                 additional_files: vec![

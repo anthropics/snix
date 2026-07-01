@@ -1,117 +1,63 @@
 //! Outputs for a derivation.
-use std::{collections::BTreeMap, fmt::Write as _};
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 
 use crate::{
-    derivation::{Output, OutputHash, OutputHashMode, OutputName, output::ParseOutputError},
-    nixhash::Sha256,
-    store_path,
+    derivation::{OutputHash, OutputName, output::Output},
+    store_path::{self, StorePath},
 };
 
-/// Errors that can occur during the creation and validation of [`Outputs`].
-#[derive(Debug, PartialEq, thiserror::Error)]
-pub enum OutputsError {
-    #[error("no outputs defined")]
-    NoOutputs(),
-    #[error("invalid output name: {0}")]
-    InvalidOutputName(String),
-    #[error("duplicate output name: {0}")]
-    DuplicateOutputName(OutputName),
-    #[error("encountered fixed-output derivation, but more than 1 output in total")]
-    MoreThanOneOutputButFixed(),
-    #[error("invalid output name for fixed-output derivation: {0}")]
-    InvalidOutputNameForFixed(String),
-    #[error("unable to validate output {0}: {1}")]
-    InvalidOutput(String, #[source] ParseOutputError),
-    #[error("invalid calculated output derivation path name: {0}")]
-    InvalidOutputDerivationPath(String, #[source] store_path::ParseStorePathError),
-}
-
-/// An iterator over the entries of `Outputs`.
+/// Derivation outputs with filled out [`StorePath`].
 ///
-/// This `struct` is created by the [`iter`] method on [`Outputs`]. See its
-/// documentation for more.
+/// Each output has an [`OutputName`] and a [`StorePath`] and `Outputs`
+/// provides a map of [`OutputName`] to [`StorePath`]  to provide easy
+/// access while still maintaining invariants.
 ///
-/// [`iter`]: Outputs::iter
-pub struct Iter<'a>(IterI<'a>);
-
-enum IterI<'a> {
-    Fixed(std::iter::Once<(&'a OutputName, &'a Output)>),
-    InputAddressed(std::collections::btree_map::Iter<'a, OutputName, Output>),
-}
-
-impl<'a> Iterator for Iter<'a> {
-    type Item = (&'a OutputName, &'a Output);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match &mut self.0 {
-            IterI::Fixed(it) => it.next(),
-            IterI::InputAddressed(it) => it.next(),
-        }
-    }
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        match &self.0 {
-            IterI::Fixed(it) => it.size_hint(),
-            IterI::InputAddressed(it) => it.size_hint(),
-        }
-    }
-}
-
-impl<'a> ExactSizeIterator for Iter<'a> {}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum OutputsInner {
-    Fixed(Output),
-    InputAddressed(BTreeMap<OutputName, Output>),
-}
-
-/// Derivation outputs.
-///
-/// Outputs are generally mappings from [`OutputName`] to a [`Output`] but
-/// with some extra invariants.
+/// In general there are two types of outputs: fixed or input addressed.
+/// And while the fixed output also has a name and a [`StorePath`] it
+/// addtionally also has a [`OutputHash`].
 ///
 /// # Invariants
 /// - Only a single FOD output is allowed and it must be named `out`
 /// - Duplicately named outputs is an error
 /// - Outputs can not be empty
 ///
-/// # `StorePath` for an `Output`
-/// When a derivation is being constructed the [`StorePath`] of each output
-/// is not known yet and so `Outputs` does support this.
-///
-/// But generally you should call [`calculate_output_paths`] and after that
-/// the [`StorePath`] of each output is available and will never change.
-///
-/// It is for this reason that the only method mutating `Outputs` after
-/// construction is [`calculate_output_paths`].
-///
-/// [`StorePath`]: store_path::StorePath
-/// [`calculate_output_paths`]: Outputs::calculate_output_paths
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Outputs(OutputsInner);
 
 impl Outputs {
-    /// Return `Ouputs` with single fixed-output that matches `output_hash`.
+    /// Create `Outputs` with a fixed output with provided `output_hash` and `store_path`.
     ///
-    /// # Examples
-    /// ```
-    /// use nix_compat::derivation::{Outputs, OutputName};
-    /// # use nix_compat::derivation::{OutputHash, OutputHashMode};
-    /// # use nix_compat::nixhash::NixHash;
+    /// This single fixed output is always named `out`.
+    pub fn fixed_output(output_hash: OutputHash, store_path: StorePath) -> Self {
+        Outputs(OutputsInner::Fixed {
+            output_hash,
+            store_path,
+        })
+    }
+
+    /// Try to create input addressed `Outputs` from the provided iterator.
     ///
-    /// # const DIGEST_SHA256: [u8; 32] =
-    /// #     hex_literal::hex!("a5ce9c155ed09397614646c9717fc7cd94b1023d7b76b618d409e4fefd6e9d39");
-    /// # const NIXHASH_SHA256: NixHash = NixHash::Sha256(DIGEST_SHA256);
-    /// # let output_hash = OutputHash { mode: OutputHashMode::Flat, hash: NIXHASH_SHA256.clone() };
-    /// let b = Outputs::from_fod_hash(output_hash);
-    /// assert!(b.is_single());
-    /// assert!(b.is_fixed());
-    /// assert!(b.contains_key(&OutputName::out()));
-    /// ```
-    pub const fn from_fod_hash(output_hash: OutputHash) -> Self {
-        Outputs(OutputsInner::Fixed(Output {
-            path: None,
-            output_hash: Some(output_hash),
-        }))
+    /// This will return a [`OutputsError`] if the [`OutputName`], [`StorePath`] pairs
+    /// in the iterator don't follow the [invariants].
+    ///
+    /// [invariants]: #invariants
+    pub fn input_addressed_from_iter<I>(it: I) -> Result<Self, OutputsError>
+    where
+        I: IntoIterator<Item = (OutputName, StorePath)>,
+    {
+        let mut it = it.into_iter();
+        let Some((output_name, output_path)) = it.next() else {
+            return Err(OutputsError::NoOutputs());
+        };
+        let mut outputs = BTreeMap::new();
+        outputs.insert(output_name, output_path);
+        for (output_name, output_path) in it {
+            if outputs.insert(output_name.clone(), output_path).is_some() {
+                return Err(OutputsError::DuplicateOutputName(output_name));
+            }
+        }
+        Ok(Outputs(OutputsInner::InputAddressed(outputs)))
     }
 
     /// Try to make `Outputs` from the provided iterator.
@@ -120,30 +66,37 @@ impl Outputs {
     /// in the iterator don't follow the [invariants].
     ///
     /// [invariants]: #invariants
-    pub fn try_from_iter<I>(it: I) -> Result<Self, OutputsError>
+    pub(super) fn try_from_output_iter<I>(it: I) -> Result<Self, OutputsError>
     where
         I: IntoIterator<Item = (OutputName, Output)>,
     {
-        let mut it = it.into_iter().peekable();
+        let mut it = it.into_iter();
         let Some((output_name, output)) = it.next() else {
             return Err(OutputsError::NoOutputs());
         };
         let mut outputs = BTreeMap::new();
-        if output.is_fixed() {
-            if it.peek().is_some() {
+        if let Output {
+            path: store_path,
+            output_hash: Some(output_hash),
+        } = output
+        {
+            if it.next().is_some() {
                 return Err(OutputsError::MoreThanOneOutputButFixed());
             }
             if output_name != OutputName::out() {
                 return Err(OutputsError::InvalidOutputName(output_name.to_string()));
             }
-            Ok(Outputs(OutputsInner::Fixed(output)))
+            Ok(Outputs(OutputsInner::Fixed {
+                store_path,
+                output_hash,
+            }))
         } else {
-            outputs.insert(output_name, output);
+            outputs.insert(output_name, output.path);
             for (output_name, output) in it {
                 if output.is_fixed() {
                     return Err(OutputsError::MoreThanOneOutputButFixed());
                 }
-                if outputs.insert(output_name.clone(), output).is_some() {
+                if outputs.insert(output_name.clone(), output.path).is_some() {
                     return Err(OutputsError::DuplicateOutputName(output_name));
                 }
             }
@@ -151,19 +104,54 @@ impl Outputs {
         }
     }
 
+    /// Return output hash if this `Outputs` is fixed.
+    pub fn as_fixed_output_hash(&self) -> Option<&OutputHash> {
+        if let OutputsInner::Fixed { output_hash, .. } = &self.0 {
+            Some(output_hash)
+        } else {
+            None
+        }
+    }
+
+    /// Return output hash and store path if this `Outputs` is fixed.
+    pub fn as_fixed_output(&self) -> Option<(&OutputHash, &StorePath)> {
+        if let OutputsInner::Fixed {
+            output_hash,
+            store_path,
+        } = &self.0
+        {
+            Some((output_hash, store_path))
+        } else {
+            None
+        }
+    }
+
+    /// Convert this `Outputs` into an `OutputsBuilder` with the same type and output names.
+    pub fn into_builder(self) -> OutputsBuilder {
+        match self.0 {
+            OutputsInner::Fixed { output_hash, .. } => OutputsBuilder::Fixed(output_hash),
+            OutputsInner::InputAddressed(outputs) => {
+                let output_names = outputs.into_keys().collect();
+                OutputsBuilder::InputAddressed(output_names)
+            }
+        }
+    }
+
     /// Returns `true` if the outputs contains an output with the specified `name`.
     #[must_use]
     pub fn contains_key(&self, name: &OutputName) -> bool {
         match &self.0 {
-            OutputsInner::Fixed(_) => *name == OutputName::out(),
+            OutputsInner::Fixed { .. } => *name == OutputName::out(),
             OutputsInner::InputAddressed(outputs) => outputs.contains_key(name),
         }
     }
 
-    /// Returns a reference to the [`Output`] corresponding to the provided `name`.
-    pub fn get(&self, name: &OutputName) -> Option<&Output> {
+    /// Returns a reference to the [`StorePath`] corresponding to the provided `name`.
+    pub fn get(&self, name: &OutputName) -> Option<&StorePath> {
         match &self.0 {
-            OutputsInner::Fixed(output) if *name == OutputName::out() => Some(output),
+            OutputsInner::Fixed { store_path, .. } if *name == OutputName::out() => {
+                Some(store_path)
+            }
             OutputsInner::InputAddressed(outputs) => outputs.get(name),
             _ => None,
         }
@@ -172,11 +160,22 @@ impl Outputs {
     /// Gets an iterator over the entries of the outputs, sorted by name.
     pub fn iter(&self) -> Iter<'_> {
         match &self.0 {
-            OutputsInner::Fixed(output) => {
+            OutputsInner::Fixed { store_path, .. } => {
                 const OUT: &OutputName = &OutputName::out();
-                Iter(IterI::Fixed(std::iter::once((OUT, output))))
+                Iter(IterI::Fixed(std::iter::once((OUT, store_path))))
             }
             OutputsInner::InputAddressed(outputs) => Iter(IterI::InputAddressed(outputs.iter())),
+        }
+    }
+
+    fn into_iter_internal(self) -> IntoIter {
+        match self.0 {
+            OutputsInner::Fixed { store_path, .. } => IntoIter(IntoIterI::Fixed(std::iter::once(
+                (OutputName::out(), store_path),
+            ))),
+            OutputsInner::InputAddressed(outputs) => {
+                IntoIter(IntoIterI::InputAddressed(outputs.into_iter()))
+            }
         }
     }
 
@@ -185,35 +184,60 @@ impl Outputs {
     /// # Examples
     /// ```
     /// use nix_compat::derivation::{Outputs, OutputName};
+    /// use nix_compat::store_path::StorePath;
     ///
-    /// let a = Outputs::try_from_iter([
-    ///     (OutputName::out(), Default::default()),
-    ///     (OutputName::from_static("bin").unwrap(), Default::default()),
+    /// let out_sp : StorePath = "2vixb94v0hy2xc6p7mbnxxcyc095yyia-has-multi-out".parse().unwrap();
+    /// let bin_sp : StorePath = "2vixb94v0hy2xc6p7mbnxxcyc095yyib-has-multi-out-bin".parse().unwrap();
+    /// let a = Outputs::input_addressed_from_iter([
+    ///     (OutputName::out(), out_sp),
+    ///     (OutputName::from_static("bin").unwrap(), bin_sp),
     /// ]).expect("multiple outputs");
     ///
-    /// let keys: Vec<OutputName> = a.keys().cloned().collect();
-    /// assert_eq!(keys, [
+    /// let names: Vec<OutputName> = a.names().cloned().collect();
+    /// assert_eq!(names, [
     ///     OutputName::from_static("bin").unwrap(),
     ///     OutputName::out(),
     /// ]);
     /// ```
-    pub fn keys(&self) -> impl Iterator<Item = &OutputName> {
-        self.iter().map(|(name, _)| name)
+    pub fn names(&self) -> OutputNames<'_> {
+        match &self.0 {
+            OutputsInner::Fixed { .. } => {
+                const OUT: &OutputName = &OutputName::out();
+                OutputNames(OutputNameInner::Single(std::iter::once(OUT)))
+            }
+            OutputsInner::InputAddressed(outputs) => {
+                OutputNames(OutputNameInner::BTreeMap(outputs.keys()))
+            }
+        }
     }
 
-    /// Gets an iterator over the [`Output`] values of the outputs, in order by name.
+    /// Convert this `Outputs` to an iterator over the names of the outputs, in sorted order.
+    pub fn into_names(self) -> IntoOutputNames {
+        match self.0 {
+            OutputsInner::Fixed { .. } => IntoOutputNames(IntoOutputNameInner::Single(
+                std::iter::once(OutputName::out()),
+            )),
+            OutputsInner::InputAddressed(outputs) => {
+                IntoOutputNames(IntoOutputNameInner::BTreeMap(outputs.into_keys()))
+            }
+        }
+    }
+
+    /// Gets an iterator over the [`StorePath`] values of the outputs, in order by name.
     ///
     /// # Examples
     /// ```
-    /// use nix_compat::derivation::{Output, Outputs, OutputName};
+    /// use nix_compat::derivation::{Outputs, OutputName};
+    /// use nix_compat::store_path::StorePath;
     ///
-    /// let a = Outputs::default();
+    /// let out_sp : StorePath = "2vixb94v0hy2xc6p7mbnxxcyc095yyia-has-multi-out".parse().unwrap();
+    /// let a = Outputs::input_addressed_from_iter([(OutputName::out(), out_sp.clone())]).unwrap();
     ///
-    /// let values: Vec<Output> = a.values().cloned().collect();
-    /// assert_eq!(values, [Output::default()]);
+    /// let values: Vec<StorePath> = a.store_paths().cloned().collect();
+    /// assert_eq!(values, [out_sp]);
     /// ```
-    pub fn values(&self) -> impl Iterator<Item = &Output> {
-        self.iter().map(|(_, output)| output)
+    pub fn store_paths(&self) -> impl Iterator<Item = &StorePath> {
+        self.iter().map(|(_, path)| path)
     }
 
     /// Returns the number of outputs
@@ -221,20 +245,23 @@ impl Outputs {
     /// # Examples
     /// ```
     /// use nix_compat::derivation::{Outputs, OutputName};
+    /// use nix_compat::store_path::StorePath;
     ///
-    /// let a = Outputs::default();
+    /// let out_sp : StorePath = "2vixb94v0hy2xc6p7mbnxxcyc095yyia-has-multi-out".parse().unwrap();
+    /// let a = Outputs::input_addressed_from_iter([(OutputName::out(), out_sp.clone())]).unwrap();
     /// assert_eq!(a.len(), 1);
     ///
-    /// let b = Outputs::try_from_iter([
-    ///     (OutputName::out(), Default::default()),
-    ///     (OutputName::from_static("bin").unwrap(), Default::default()),
+    /// let bin_sp : StorePath = "2vixb94v0hy2xc6p7mbnxxcyc095yyib-has-multi-out-bin".parse().unwrap();
+    /// let b = Outputs::input_addressed_from_iter([
+    ///     (OutputName::out(), out_sp),
+    ///     (OutputName::from_static("bin").unwrap(), bin_sp),
     /// ]).expect("multiple outputs");
     /// assert_eq!(b.len(), 2);
     /// ```
     #[expect(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         match &self.0 {
-            OutputsInner::Fixed(_) => 1,
+            OutputsInner::Fixed { .. } => 1,
             OutputsInner::InputAddressed(outputs) => outputs.len(),
         }
     }
@@ -247,20 +274,24 @@ impl Outputs {
     /// use nix_compat::derivation::{Outputs, OutputName};
     /// # use nix_compat::derivation::{OutputHash, OutputHashMode};
     /// # use nix_compat::nixhash::NixHash;
+    /// use nix_compat::store_path::StorePath;
     ///
-    /// let a = Outputs::default();
-    /// assert!(a.is_single());
+    /// let out_sp : StorePath = "2vixb94v0hy2xc6p7mbnxxcyc095yyia-has-multi-out".parse().unwrap();
     ///
     /// # const DIGEST_SHA256: [u8; 32] =
     /// #     hex_literal::hex!("a5ce9c155ed09397614646c9717fc7cd94b1023d7b76b618d409e4fefd6e9d39");
     /// # const NIXHASH_SHA256: NixHash = NixHash::Sha256(DIGEST_SHA256);
     /// # let output_hash = OutputHash { mode: OutputHashMode::Flat, hash: NIXHASH_SHA256.clone() };
-    /// let b = Outputs::from_fod_hash(output_hash);
+    /// let a = Outputs::fixed_output(output_hash, out_sp.clone());
+    /// assert!(a.is_single());
+    ///
+    /// let b = Outputs::input_addressed_from_iter([(OutputName::out(), out_sp.clone())]).unwrap();
     /// assert!(b.is_single());
     ///
-    /// let c = Outputs::try_from_iter([
-    ///     (OutputName::out(), Default::default()),
-    ///     (OutputName::from_static("bin").unwrap(), Default::default()),
+    /// let bin_sp : StorePath = "2vixb94v0hy2xc6p7mbnxxcyc095yyib-has-multi-out-bin".parse().unwrap();
+    /// let c = Outputs::input_addressed_from_iter([
+    ///     (OutputName::out(), out_sp),
+    ///     (OutputName::from_static("bin").unwrap(), bin_sp),
     /// ]).unwrap();
     /// assert!(!c.is_single());
     /// ```
@@ -270,94 +301,47 @@ impl Outputs {
     }
 
     /// Returns `true` if this is a single fixed-output.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use nix_compat::derivation::{Outputs, OutputName};
+    /// # use nix_compat::derivation::{OutputHash, OutputHashMode};
+    /// # use nix_compat::nixhash::NixHash;
+    /// use nix_compat::store_path::StorePath;
+    ///
+    /// let out_sp : StorePath = "2vixb94v0hy2xc6p7mbnxxcyc095yyia-has-multi-out".parse().unwrap();
+    /// # const DIGEST_SHA256: [u8; 32] =
+    /// #     hex_literal::hex!("a5ce9c155ed09397614646c9717fc7cd94b1023d7b76b618d409e4fefd6e9d39");
+    /// # const NIXHASH_SHA256: NixHash = NixHash::Sha256(DIGEST_SHA256);
+    /// # let output_hash = OutputHash { mode: OutputHashMode::Flat, hash: NIXHASH_SHA256.clone() };
+    /// let a = Outputs::fixed_output(output_hash, out_sp.clone());
+    /// assert!(a.is_fixed());
+    ///
+    /// let b = Outputs::input_addressed_from_iter([(OutputName::out(), out_sp.clone())]).unwrap();
+    /// assert!(!b.is_fixed());
+    ///
+    /// let bin_sp : StorePath = "2vixb94v0hy2xc6p7mbnxxcyc095yyib-has-multi-out-bin".parse().unwrap();
+    /// let c = Outputs::input_addressed_from_iter([
+    ///     (OutputName::out(), out_sp),
+    ///     (OutputName::from_static("bin").unwrap(), bin_sp),
+    /// ]).unwrap();
+    /// assert!(!c.is_fixed());
+    /// ```
     #[must_use]
     pub fn is_fixed(&self) -> bool {
-        matches!(&self.0, OutputsInner::Fixed(_))
+        matches!(&self.0, OutputsInner::Fixed { .. })
     }
+}
 
-    /// This calculates all output paths of a `Outputs` and updates the struct.
-    ///
-    /// It requires the struct to be initially without output paths.
-    /// This means, [`Output::path`] needs to be `None` for each output.
-    ///
-    /// Output path calculation requires knowledge of the
-    /// [`hash_derivation_modulo`], which (in case of non-fixed-output
-    /// derivations) also requires knowledge of the
-    /// [`hash_derivation_modulo`] of input derivations (recursively).
-    ///
-    /// To avoid recursing and doing unnecessary calculation, we simply
-    /// ask the caller of this function to provide the result of the
-    /// [`hash_derivation_modulo`] call of the current [`Derivation`],
-    /// and leave it up to them to calculate it when needed.
-    ///
-    /// On completion, [`Output::path`] of each output is set to the calculated output path.
-    ///
-    /// [`hash_derivation_modulo`]: super::Derivation::hash_derivation_modulo
-    /// [`Derivation`]: super::Derivation
-    pub fn calculate_output_paths(
-        &mut self,
-        drv_name: &str,
-        hash_derivation_modulo: &Sha256,
-    ) -> Result<(), OutputsError> {
-        match &mut self.0 {
-            OutputsInner::Fixed(output) => {
-                // Assert that outputs are not yet populated, to avoid using this function wrongly.
-                // We don't also go over self.environment, but it's a sufficient
-                // footgun prevention mechanism.
-                assert!(output.path.is_none());
-
-                // Assemble the name, which is either the drv-name suffixed `-{output_name}`,
-                // except in the `out` case, where it's omitted.
-                let name = drv_name.to_owned();
-
-                // For fixed output derivation we use [build_ca_path], otherwise we
-                // use [build_output_path] with [hash_derivation_modulo].
-                let store_path = if let Some(output_hash) = &output.output_hash {
-                    store_path::build_ca_path(
-                        &name,
-                        output_hash.mode == OutputHashMode::Recursive,
-                        &output_hash.hash,
-                        [],
-                        false,
-                    )
-                } else {
-                    store_path::build_output_path(&name, hash_derivation_modulo, &OutputName::out())
-                }
-                .map_err(|e| OutputsError::InvalidOutputDerivationPath(name.to_string(), e))?;
-
-                output.path = Some(store_path.to_owned());
-            }
-            OutputsInner::InputAddressed(outputs) => {
-                for (output_name, output) in outputs.iter_mut() {
-                    debug_assert!(!output.is_fixed(), "Snix bug: multiple FOD");
-
-                    // Assemble the name, which is either the drv-name suffixed `-{output_name}`,
-                    // except in the `out` case, where it's omitted.
-                    let name = {
-                        let mut name = drv_name.to_owned();
-                        if output_name != &OutputName::out() {
-                            name.write_fmt(format_args!("-{output_name}")).unwrap();
-                        }
-                        name
-                    };
-
-                    // use [build_output_path] with [hash_derivation_modulo].
-                    let store_path =
-                        store_path::build_output_path(&name, hash_derivation_modulo, output_name)
-                            .map_err(|e| {
-                            OutputsError::InvalidOutputDerivationPath(name.to_string(), e)
-                        })?;
-
-                    output.path = Some(store_path.to_owned());
-                }
-            }
-        }
-        Ok(())
+impl From<Outputs> for OutputsBuilder {
+    fn from(value: Outputs) -> Self {
+        value.into_builder()
     }
 }
 
 impl<'a> IntoIterator for &'a Outputs {
-    type Item = (&'a OutputName, &'a Output);
+    type Item = (&'a OutputName, &'a StorePath);
 
     type IntoIter = Iter<'a>;
 
@@ -366,37 +350,13 @@ impl<'a> IntoIterator for &'a Outputs {
     }
 }
 
-impl Default for Outputs {
-    fn default() -> Self {
-        Self(OutputsInner::InputAddressed(BTreeMap::from_iter([(
-            OutputName::out(),
-            Output::default(),
-        )])))
-    }
-}
+impl IntoIterator for Outputs {
+    type Item = (OutputName, StorePath);
 
-impl TryFrom<BTreeMap<OutputName, Output>> for Outputs {
-    type Error = OutputsError;
+    type IntoIter = IntoIter;
 
-    fn try_from(outputs: BTreeMap<OutputName, Output>) -> Result<Self, Self::Error> {
-        Self::try_from_iter(outputs)
-    }
-}
-
-#[cfg(test)]
-impl Outputs {
-    /// Clear any [`StorePath`] from each output.
-    pub fn trim_store_paths(&mut self) {
-        match &mut self.0 {
-            OutputsInner::Fixed(output) => {
-                output.path = None;
-            }
-            OutputsInner::InputAddressed(outputs) => {
-                for output in outputs.values_mut() {
-                    output.path = None;
-                }
-            }
-        }
+    fn into_iter(self) -> Self::IntoIter {
+        self.into_iter_internal()
     }
 }
 
@@ -432,8 +392,8 @@ impl<'de> serde::Deserialize<'de> for Outputs {
                         ));
                     }
                     let mut outputs = BTreeMap::new();
-                    outputs.insert(output_name, output);
-                    if outputs.insert(second_name, second_output).is_some() {
+                    outputs.insert(output_name, output.path);
+                    if outputs.insert(second_name, second_output.path).is_some() {
                         return Err(A::Error::custom(format_args!(
                             "duplicate derivation output"
                         )));
@@ -447,24 +407,28 @@ impl<'de> serde::Deserialize<'de> for Outputs {
                                 &"non-FOD outputs",
                             ));
                         }
-                        if outputs.insert(output_name, output).is_some() {
+                        if outputs.insert(output_name, output.path).is_some() {
                             return Err(A::Error::custom(format_args!(
                                 "duplicate derivation output"
                             )));
                         }
                     }
                     Ok(Outputs(OutputsInner::InputAddressed(outputs)))
-                } else if output.is_fixed() {
-                    if output_name != OutputName::out() {
-                        return Err(A::Error::invalid_value(
+                } else if let Some(output_hash) = output.output_hash {
+                    if output_name == OutputName::out() {
+                        Ok(Outputs(OutputsInner::Fixed {
+                            output_hash,
+                            store_path: output.path,
+                        }))
+                    } else {
+                        Err(A::Error::invalid_value(
                             Unexpected::Other(output_name.as_str()),
                             &"single derivation output named 'out'",
-                        ));
+                        ))
                     }
-                    Ok(Outputs(OutputsInner::Fixed(output)))
                 } else {
                     Ok(Outputs(OutputsInner::InputAddressed(BTreeMap::from_iter(
-                        [(output_name, output)],
+                        [(output_name, output.path)],
                     ))))
                 }
             }
@@ -489,15 +453,307 @@ impl serde::Serialize for Outputs {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum OutputsInner {
+    Fixed {
+        output_hash: OutputHash,
+        store_path: StorePath,
+    },
+    InputAddressed(BTreeMap<OutputName, StorePath>),
+}
+
+/// A builder for outputs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize), serde(from = "Outputs"))]
+pub enum OutputsBuilder {
+    /// A fixed ouput
+    Fixed(OutputHash),
+    /// Input addressed outputs
+    InputAddressed(BTreeSet<OutputName>),
+}
+
+impl OutputsBuilder {
+    /// Gets an iterator over the names of the outputs, in sorted order.
+    pub fn names(&self) -> OutputNames<'_> {
+        const OUT: &OutputName = &OutputName::out();
+        match self {
+            OutputsBuilder::Fixed(_) => OutputNames(OutputNameInner::Single(std::iter::once(OUT))),
+            OutputsBuilder::InputAddressed(outputs) => {
+                OutputNames(OutputNameInner::BTreeSet(outputs.iter()))
+            }
+        }
+    }
+
+    /// Convert this `OutputsBuilder` to an iterator over the names of the outputs, in sorted order.
+    pub fn into_names(self) -> IntoOutputNames {
+        match self {
+            OutputsBuilder::Fixed(_) => IntoOutputNames(IntoOutputNameInner::Single(
+                std::iter::once(OutputName::out()),
+            )),
+            OutputsBuilder::InputAddressed(outputs) => {
+                IntoOutputNames(IntoOutputNameInner::BTreeSet(outputs.into_iter()))
+            }
+        }
+    }
+
+    /// Return count of names in this `OutputsBuilder`.
+    pub fn len(&self) -> usize {
+        match self {
+            OutputsBuilder::Fixed(_) => 1,
+            OutputsBuilder::InputAddressed(outputs) => outputs.len(),
+        }
+    }
+
+    /// Returns `true` if the builder contains no outputs.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Returns `true` if the builder contains a single output.
+    pub fn is_single(&self) -> bool {
+        self.len() == 1
+    }
+
+    /// Returns `true` if the builder contains a fixed output.
+    pub fn is_fixed(&self) -> bool {
+        matches!(self, Self::Fixed(_))
+    }
+
+    /// Returns `true` if the builder contains an output with the provided `name`.
+    pub fn contains(&self, name: &OutputName) -> bool {
+        match self {
+            OutputsBuilder::Fixed(_) => *name == OutputName::out(),
+            OutputsBuilder::InputAddressed(output_names) => output_names.contains(name),
+        }
+    }
+}
+
+impl Default for OutputsBuilder {
+    fn default() -> Self {
+        Self::InputAddressed(BTreeSet::from_iter([OutputName::out()]))
+    }
+}
+
+impl PartialEq<Outputs> for OutputsBuilder {
+    fn eq(&self, other: &Outputs) -> bool {
+        self.is_fixed() == other.is_fixed() && self.names().eq(other.names())
+    }
+}
+
+impl PartialEq<OutputsBuilder> for Outputs {
+    fn eq(&self, other: &OutputsBuilder) -> bool {
+        self.is_fixed() == other.is_fixed() && self.names().eq(other.names())
+    }
+}
+
+impl<'a> IntoIterator for &'a OutputsBuilder {
+    type Item = &'a OutputName;
+
+    type IntoIter = OutputNames<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.names()
+    }
+}
+
+impl IntoIterator for OutputsBuilder {
+    type Item = OutputName;
+
+    type IntoIter = IntoOutputNames;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.into_names()
+    }
+}
+
+impl FromIterator<OutputName> for OutputsBuilder {
+    fn from_iter<T: IntoIterator<Item = OutputName>>(iter: T) -> Self {
+        OutputsBuilder::InputAddressed(iter.into_iter().collect())
+    }
+}
+
+/// Errors that can occur during the creation and validation of [`Outputs`].
+#[derive(Debug, PartialEq, thiserror::Error)]
+#[allow(missing_docs)]
+pub enum OutputsError {
+    #[error("no outputs defined")]
+    NoOutputs(),
+    #[error("outputs failed verification")]
+    VerificationError(),
+    #[error("invalid output name: {0}")]
+    InvalidOutputName(String),
+    #[error("duplicate output name: {0}")]
+    DuplicateOutputName(OutputName),
+    #[error("encountered fixed-output derivation, but more than 1 output in total")]
+    MoreThanOneOutputButFixed(),
+    #[error("invalid output name for fixed-output derivation: {0}")]
+    InvalidOutputNameForFixed(String),
+    #[error("invalid calculated output derivation path name: {0}")]
+    InvalidOutputDerivationPath(String, #[source] store_path::ParseStorePathError),
+}
+
+/// An iterator over the entries of `Outputs`.
+///
+/// This `struct` is created by the [`iter`] method on [`Outputs`]. See its
+/// documentation for more.
+///
+/// [`iter`]: Outputs::iter
+pub struct Iter<'a>(IterI<'a>);
+impl fmt::Debug for Iter<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Iter")
+    }
+}
+
+enum IterI<'a> {
+    Fixed(std::iter::Once<(&'a OutputName, &'a StorePath)>),
+    InputAddressed(std::collections::btree_map::Iter<'a, OutputName, StorePath>),
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = (&'a OutputName, &'a StorePath);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.0 {
+            IterI::Fixed(it) => it.next(),
+            IterI::InputAddressed(it) => it.next(),
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match &self.0 {
+            IterI::Fixed(it) => it.size_hint(),
+            IterI::InputAddressed(it) => it.size_hint(),
+        }
+    }
+}
+
+impl<'a> ExactSizeIterator for Iter<'a> {}
+
+/// An iterator over the entries of `Outputs`.
+///
+/// This `struct` is created by the [`into_iter`] method on [`Outputs`]. See its
+/// documentation for more.
+///
+/// [`into_iter`]: Outputs::into_iter
+pub struct IntoIter(IntoIterI);
+
+impl fmt::Debug for IntoIter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("IntoIter")
+    }
+}
+
+enum IntoIterI {
+    Fixed(std::iter::Once<(OutputName, StorePath)>),
+    InputAddressed(std::collections::btree_map::IntoIter<OutputName, StorePath>),
+}
+
+impl Iterator for IntoIter {
+    type Item = (OutputName, StorePath);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.0 {
+            IntoIterI::Fixed(it) => it.next(),
+            IntoIterI::InputAddressed(it) => it.next(),
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match &self.0 {
+            IntoIterI::Fixed(it) => it.size_hint(),
+            IntoIterI::InputAddressed(it) => it.size_hint(),
+        }
+    }
+}
+
+impl ExactSizeIterator for IntoIter {}
+
+/// An iterator over the names of outputs.
+///
+/// This `struct` is created by [`OutputsBuilder::names`] and [`Outputs::names`].
+/// See their documentation for more.
+pub struct OutputNames<'a>(OutputNameInner<'a>);
+
+impl fmt::Debug for OutputNames<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("OutputNames")
+    }
+}
+
+impl<'a> Iterator for OutputNames<'a> {
+    type Item = &'a OutputName;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.0 {
+            OutputNameInner::Single(it) => it.next(),
+            OutputNameInner::BTreeSet(it) => it.next(),
+            OutputNameInner::BTreeMap(it) => it.next(),
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match &self.0 {
+            OutputNameInner::Single(it) => it.size_hint(),
+            OutputNameInner::BTreeSet(it) => it.size_hint(),
+            OutputNameInner::BTreeMap(it) => it.size_hint(),
+        }
+    }
+}
+impl<'a> ExactSizeIterator for OutputNames<'a> {}
+
+enum OutputNameInner<'a> {
+    Single(std::iter::Once<&'a OutputName>),
+    BTreeSet(std::collections::btree_set::Iter<'a, OutputName>),
+    BTreeMap(std::collections::btree_map::Keys<'a, OutputName, StorePath>),
+}
+
+/// An iterator over the owned names of outputs.
+///
+/// This `struct` is created by [`OutputsBuilder::into_names`] and [`Outputs::into_names`].
+/// See their documentation for more.
+pub struct IntoOutputNames(IntoOutputNameInner);
+impl fmt::Debug for IntoOutputNames {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("IntoOutputNames")
+    }
+}
+
+impl Iterator for IntoOutputNames {
+    type Item = OutputName;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.0 {
+            IntoOutputNameInner::Single(it) => it.next(),
+            IntoOutputNameInner::BTreeSet(it) => it.next(),
+            IntoOutputNameInner::BTreeMap(it) => it.next(),
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match &self.0 {
+            IntoOutputNameInner::Single(it) => it.size_hint(),
+            IntoOutputNameInner::BTreeSet(it) => it.size_hint(),
+            IntoOutputNameInner::BTreeMap(it) => it.size_hint(),
+        }
+    }
+}
+impl ExactSizeIterator for IntoOutputNames {}
+
+enum IntoOutputNameInner {
+    Single(std::iter::Once<OutputName>),
+    BTreeSet(std::collections::btree_set::IntoIter<OutputName>),
+    BTreeMap(std::collections::btree_map::IntoKeys<OutputName, StorePath>),
+}
+
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, sync::LazyLock};
+    use std::sync::LazyLock;
 
     use rstest::rstest;
 
     use crate::{
-        derivation::{Output, OutputHash, OutputHashMode, OutputName, Outputs},
+        derivation::{
+            OutputHash, OutputHashMode, OutputName, Outputs, OutputsBuilder, output::Output,
+        },
         nixhash::NixHash,
+        store_path::StorePath,
     };
 
     const DIGEST_SHA256: [u8; 32] =
@@ -506,167 +762,278 @@ mod tests {
         mode: OutputHashMode::Flat,
         hash: NixHash::Sha256(DIGEST_SHA256),
     };
-    const FOD_OUTPUT: Output = Output {
-        output_hash: Some(OutputHash {
-            mode: OutputHashMode::Flat,
-            hash: NixHash::Sha256(DIGEST_SHA256),
-        }),
-        path: None,
-    };
+    static STORE_PATH: LazyLock<StorePath> = LazyLock::new(|| {
+        StorePath::from_bytes(b"2vixb94v0hy2xc6p7mbnxxcyc095yyia-has-multi-out-lib").unwrap()
+    });
 
-    const FOD_OUTPUTS: Outputs = Outputs::from_fod_hash(OutputHash {
+    static FOD_OUTPUT: LazyLock<Output> = LazyLock::new(|| Output {
+        output_hash: Some(OUTPUT_HASH.clone()),
+        path: STORE_PATH.clone(),
+    });
+    static SINGLE_OUTPUT: LazyLock<Output> = LazyLock::new(|| Output {
+        output_hash: None,
+        path: STORE_PATH.clone(),
+    });
+
+    const FOD_OUTPUTS_BUILDER: OutputsBuilder = OutputsBuilder::Fixed(OutputHash {
         mode: OutputHashMode::Flat,
         hash: NixHash::Sha256(DIGEST_SHA256),
     });
-    static TRY_SINGLE: LazyLock<Outputs> = LazyLock::new(|| {
-        Outputs::try_from_iter([(OutputName::out(), Default::default())]).expect("single output")
+    static SINGLE_OUTPUTS_BUILDER: LazyLock<OutputsBuilder> =
+        LazyLock::new(|| OutputsBuilder::from_iter([OutputName::out()]));
+    static SINGLE_NON_OUT_OUTPUTS_BUILDER: LazyLock<OutputsBuilder> =
+        LazyLock::new(|| OutputsBuilder::from_iter([OutputName::from_static("bin").unwrap()]));
+    static MULTIPLE_OUTPUTS_BUILDER: LazyLock<OutputsBuilder> = LazyLock::new(|| {
+        OutputsBuilder::from_iter([
+            OutputName::from_static("dev").unwrap(),
+            OutputName::from_static("bin").unwrap(),
+        ])
     });
-    static TRY_SINGLE_NON_OUT: LazyLock<Outputs> = LazyLock::new(|| {
-        Outputs::try_from_iter([(OutputName::from_static("bin").unwrap(), Default::default())])
+
+    static FOD_OUTPUTS: LazyLock<Outputs> =
+        LazyLock::new(|| Outputs::fixed_output(OUTPUT_HASH.clone(), STORE_PATH.clone()));
+    static TRY_SINGLE_OUTPUTS: LazyLock<Outputs> = LazyLock::new(|| {
+        Outputs::input_addressed_from_iter([(OutputName::out(), STORE_PATH.clone())])
             .expect("single output")
     });
-    static TRY_FOD: LazyLock<Outputs> = LazyLock::new(|| -> Outputs {
-        Outputs::try_from_iter([(
+    static TRY_SINGLE_NON_OUT_OUTPUTS: LazyLock<Outputs> = LazyLock::new(|| {
+        Outputs::input_addressed_from_iter([(
+            OutputName::from_static("bin").unwrap(),
+            STORE_PATH.clone(),
+        )])
+        .expect("single output")
+    });
+    static TRY_FOD_OUTPUTS: LazyLock<Outputs> = LazyLock::new(|| -> Outputs {
+        Outputs::try_from_output_iter([(
             OutputName::out(),
             Output {
-                path: None,
+                path: STORE_PATH.clone(),
                 output_hash: Some(OUTPUT_HASH.clone()),
             },
         )])
         .expect("single fod")
     });
-    static TRY_MULTIPLE: LazyLock<Outputs> = LazyLock::new(|| -> Outputs {
-        Outputs::try_from_iter([
-            (OutputName::from_static("dev").unwrap(), Default::default()),
-            (OutputName::from_static("bin").unwrap(), Default::default()),
+    static TRY_MULTIPLE_OUTPUTS: LazyLock<Outputs> = LazyLock::new(|| -> Outputs {
+        Outputs::input_addressed_from_iter([
+            (OutputName::from_static("dev").unwrap(), STORE_PATH.clone()),
+            (OutputName::from_static("bin").unwrap(), STORE_PATH.clone()),
         ])
         .expect("multiple")
     });
+
+    mod outputs_builder {
+        use super::*;
+        use rstest::rstest;
+
+        #[rstest]
+        #[case::single(&SINGLE_OUTPUTS_BUILDER)]
+        #[case::single_non_out(&SINGLE_NON_OUT_OUTPUTS_BUILDER)]
+        #[case::fod(&FOD_OUTPUTS_BUILDER)]
+        #[case::default(&Default::default())]
+        fn is_single(#[case] value: &OutputsBuilder) {
+            assert!(value.is_single())
+        }
+
+        #[rstest]
+        #[case::multiple(&MULTIPLE_OUTPUTS_BUILDER)]
+        fn is_not_single(#[case] value: &OutputsBuilder) {
+            assert!(!value.is_single())
+        }
+
+        #[rstest]
+        #[case::fod(&FOD_OUTPUTS_BUILDER)]
+        fn is_fixed(#[case] value: &OutputsBuilder) {
+            assert!(value.is_fixed())
+        }
+
+        #[rstest]
+        #[case::single(&SINGLE_OUTPUTS_BUILDER)]
+        #[case::single_non_out(&SINGLE_NON_OUT_OUTPUTS_BUILDER)]
+        #[case::multiple(&MULTIPLE_OUTPUTS_BUILDER)]
+        #[case::default(&Default::default())]
+        fn is_not_fixed(#[case] value: &OutputsBuilder) {
+            assert!(!value.is_fixed())
+        }
+
+        #[rstest]
+        #[case::single(&SINGLE_OUTPUTS_BUILDER, 1)]
+        #[case::single_non_out(&SINGLE_NON_OUT_OUTPUTS_BUILDER, 1)]
+        #[case::fod(&FOD_OUTPUTS_BUILDER, 1)]
+        #[case::multiple(&MULTIPLE_OUTPUTS_BUILDER, 2)]
+        #[case::default(&Default::default(), 1)]
+        fn len(#[case] value: &OutputsBuilder, #[case] expected: usize) {
+            assert_eq!(value.len(), expected)
+        }
+
+        #[rstest]
+        #[case::single(&SINGLE_OUTPUTS_BUILDER, OutputName::out())]
+        #[case::single_non_out(&SINGLE_NON_OUT_OUTPUTS_BUILDER, "bin")]
+        #[case::fod(&FOD_OUTPUTS_BUILDER, OutputName::out())]
+        #[case::multiple_bin(&MULTIPLE_OUTPUTS_BUILDER, "bin")]
+        #[case::default(&Default::default(), OutputName::out())]
+        fn contains(#[case] value: &OutputsBuilder, #[case] name: OutputName) {
+            assert!(value.contains(&name))
+        }
+
+        #[rstest]
+        #[case::single(&SINGLE_OUTPUTS_BUILDER, "bin")]
+        #[case::single_non_out(&SINGLE_NON_OUT_OUTPUTS_BUILDER, "out")]
+        #[case::fod(&FOD_OUTPUTS_BUILDER, "bin")]
+        #[case::multiple_out(&MULTIPLE_OUTPUTS_BUILDER, OutputName::out())]
+        fn does_not_contain(#[case] value: &OutputsBuilder, #[case] name: OutputName) {
+            assert!(!value.contains(&name))
+        }
+
+        #[rstest]
+        #[case::single(&SINGLE_OUTPUTS_BUILDER, vec![OutputName::out()])]
+        #[case::single_non_out(&SINGLE_NON_OUT_OUTPUTS_BUILDER, vec![OutputName::from_static("bin").unwrap()])]
+        #[case::fod(&FOD_OUTPUTS_BUILDER, vec![OutputName::out()])]
+        #[case::multiple(&MULTIPLE_OUTPUTS_BUILDER, vec![
+            OutputName::from_static("bin").unwrap(),
+            OutputName::from_static("dev").unwrap(),
+        ])]
+        #[case::default(&Default::default(), vec![OutputName::out()])]
+        fn names(#[case] value: &OutputsBuilder, #[case] expected: Vec<OutputName>) {
+            let actual: Vec<_> = value.names().cloned().collect();
+            assert_eq!(actual, expected);
+        }
+
+        #[rstest]
+        #[case::single(&SINGLE_OUTPUTS_BUILDER, vec![OutputName::out()])]
+        #[case::single_non_out(&SINGLE_NON_OUT_OUTPUTS_BUILDER, vec![OutputName::from_static("bin").unwrap()])]
+        #[case::fod(&FOD_OUTPUTS_BUILDER, vec![OutputName::out()])]
+        #[case::multiple(&MULTIPLE_OUTPUTS_BUILDER, vec![
+            OutputName::from_static("bin").unwrap(),
+            OutputName::from_static("dev").unwrap(),
+        ])]
+        #[case::default(&Default::default(), vec![OutputName::out()])]
+        fn into_names(#[case] value: &OutputsBuilder, #[case] expected: Vec<OutputName>) {
+            let actual: Vec<_> = value.clone().into_names().collect();
+            assert_eq!(actual, expected);
+        }
+    }
 
     #[rstest]
     #[should_panic(expected = "no outputs defined")]
     #[case::empty(&[])]
     #[should_panic(expected = "invalid output name: bin")]
-    #[case::fod_non_out(&[(OutputName::from_static("bin").unwrap(), FOD_OUTPUT)])]
+    #[case::fod_non_out(&[(OutputName::from_static("bin").unwrap(), FOD_OUTPUT.clone())])]
     #[should_panic(expected = "duplicate output name: bin")]
     #[case::duplicate(&[
-        (OutputName::from_static("bin").unwrap(), Default::default()),
-        (OutputName::from_static("bin").unwrap(), Default::default()),
+        (OutputName::from_static("bin").unwrap(), SINGLE_OUTPUT.clone()),
+        (OutputName::from_static("bin").unwrap(), SINGLE_OUTPUT.clone()),
     ])]
     #[should_panic(
         expected = "encountered fixed-output derivation, but more than 1 output in total"
     )]
     #[case::mixed(&[
         (OutputName::from_static("bin").unwrap(), FOD_OUTPUT.clone()),
-        (OutputName::from_static("dev").unwrap(), Default::default()),
+        (OutputName::from_static("dev").unwrap(), SINGLE_OUTPUT.clone()),
     ])]
-    fn try_from_iter_failure(#[case] it: &[(OutputName, Output)]) {
+    fn try_from_output_iter_failure(#[case] it: &[(OutputName, Output)]) {
         panic!(
             "{}",
-            Outputs::try_from_iter(it.iter().cloned()).expect_err("try_from_iter succeeded")
+            Outputs::try_from_output_iter(it.iter().cloned()).expect_err("try_from_iter succeeded")
         );
     }
 
     #[rstest]
     #[should_panic(expected = "no outputs defined")]
     #[case::empty(&[])]
-    #[should_panic(expected = "invalid output name: bin")]
-    #[case::fod_non_out(&[(OutputName::from_static("bin").unwrap(), FOD_OUTPUT)])]
-    #[should_panic(
-        expected = "encountered fixed-output derivation, but more than 1 output in total"
-    )]
-    #[case::mixed(&[
-        (OutputName::from_static("bin").unwrap(), FOD_OUTPUT.clone()),
-        (OutputName::from_static("dev").unwrap(), Default::default()),
+    #[should_panic(expected = "duplicate output name: bin")]
+    #[case::duplicate(&[
+        (OutputName::from_static("bin").unwrap(), STORE_PATH.clone()),
+        (OutputName::from_static("bin").unwrap(), STORE_PATH.clone()),
     ])]
-    fn try_from_failure(#[case] it: &[(OutputName, Output)]) {
-        let b = BTreeMap::from_iter(it.iter().cloned());
-        panic!("{}", Outputs::try_from(b).expect_err("try_from succeeded"));
+    fn input_addressed_from_iter_failure(#[case] it: &[(OutputName, StorePath)]) {
+        panic!(
+            "{}",
+            Outputs::input_addressed_from_iter(it.iter().cloned())
+                .expect_err("try_from_iter succeeded")
+        );
     }
 
     #[rstest]
     #[case::fod(&FOD_OUTPUTS)]
-    #[case::try_single(&TRY_SINGLE)]
-    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT)]
-    #[case::try_fod(&TRY_FOD)]
-    #[case::default(&Default::default())]
+    #[case::try_single(&TRY_SINGLE_OUTPUTS)]
+    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT_OUTPUTS)]
+    #[case::try_fod(&TRY_FOD_OUTPUTS)]
     fn is_single(#[case] value: &Outputs) {
         assert!(value.is_single())
     }
 
     #[rstest]
-    #[case::multiple(&TRY_MULTIPLE)]
+    #[case::multiple(&TRY_MULTIPLE_OUTPUTS)]
     fn is_not_single(#[case] value: &Outputs) {
         assert!(!value.is_single())
     }
 
     #[rstest]
     #[case::fod(&FOD_OUTPUTS)]
-    #[case::try_fod(&TRY_FOD)]
+    #[case::try_fod(&TRY_FOD_OUTPUTS)]
     fn is_fixed(#[case] value: &Outputs) {
         assert!(value.is_fixed())
     }
 
     #[rstest]
-    #[case::try_single(&TRY_SINGLE)]
-    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT)]
-    #[case::multiple(&TRY_MULTIPLE)]
-    #[case::default(&Default::default())]
+    #[case::try_single(&TRY_SINGLE_OUTPUTS)]
+    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT_OUTPUTS)]
+    #[case::multiple(&TRY_MULTIPLE_OUTPUTS)]
     fn is_not_fixed(#[case] value: &Outputs) {
         assert!(!value.is_fixed())
     }
 
     #[rstest]
     #[case::fod(&FOD_OUTPUTS, 1)]
-    #[case::try_fod(&TRY_FOD, 1)]
-    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT, 1)]
-    #[case::try_single(&TRY_SINGLE, 1)]
-    #[case::multiple(&TRY_MULTIPLE, 2)]
-    #[case::default(&Default::default(), 1)]
+    #[case::try_fod(&TRY_FOD_OUTPUTS, 1)]
+    #[case::try_single(&TRY_SINGLE_OUTPUTS, 1)]
+    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT_OUTPUTS, 1)]
+    #[case::multiple(&TRY_MULTIPLE_OUTPUTS, 2)]
     fn len(#[case] value: &Outputs, #[case] expected: usize) {
         assert_eq!(value.len(), expected)
     }
 
     #[rstest]
-    #[case::fod(&FOD_OUTPUTS, OutputName::out(), Some(&FOD_OUTPUT))]
-    #[case::try_fod(&TRY_FOD, OutputName::out(), Some(&FOD_OUTPUT))]
-    #[case::try_single(&TRY_SINGLE, OutputName::out(), Some(&Default::default()))]
-    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT, OutputName::from_static("bin").unwrap(), Some(&Default::default()))]
-    #[case::multiple_out(&TRY_MULTIPLE, OutputName::out(), None)]
-    #[case::multiple_bin(&TRY_MULTIPLE, OutputName::from_static("bin").unwrap(), Some(&Default::default()))]
-    #[case::default(&Default::default(), OutputName::out(), Some(&Default::default()))]
-    fn get(#[case] value: &Outputs, #[case] name: OutputName, #[case] expected: Option<&Output>) {
+    #[case::fod(&FOD_OUTPUTS, OutputName::out(), Some(&*STORE_PATH))]
+    #[case::try_fod(&TRY_FOD_OUTPUTS, OutputName::out(), Some(&*STORE_PATH))]
+    #[case::try_single(&TRY_SINGLE_OUTPUTS, OutputName::out(), Some(&*STORE_PATH))]
+    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT_OUTPUTS, OutputName::from_static("bin").unwrap(), Some(&*STORE_PATH))]
+    #[case::multiple_out(&TRY_MULTIPLE_OUTPUTS, OutputName::out(), None)]
+    #[case::multiple_bin(&TRY_MULTIPLE_OUTPUTS, OutputName::from_static("bin").unwrap(), Some(&*STORE_PATH))]
+    fn get(
+        #[case] value: &Outputs,
+        #[case] name: OutputName,
+        #[case] expected: Option<&StorePath>,
+    ) {
         assert_eq!(value.get(&name), expected)
     }
 
     #[rstest]
     #[case::fod(&FOD_OUTPUTS, OutputName::out())]
-    #[case::try_fod(&TRY_FOD, OutputName::out())]
-    #[case::try_single(&TRY_SINGLE, OutputName::out())]
-    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT, OutputName::from_static("bin").unwrap())]
-    #[case::multiple_bin(&TRY_MULTIPLE, OutputName::from_static("bin").unwrap())]
-    #[case::default(&Default::default(), OutputName::out())]
+    #[case::try_fod(&TRY_FOD_OUTPUTS, OutputName::out())]
+    #[case::try_single(&TRY_SINGLE_OUTPUTS, OutputName::out())]
+    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT_OUTPUTS, OutputName::from_static("bin").unwrap())]
+    #[case::multiple_bin(&TRY_MULTIPLE_OUTPUTS, OutputName::from_static("bin").unwrap())]
     fn contains_key(#[case] value: &Outputs, #[case] name: OutputName) {
         assert!(value.contains_key(&name))
     }
 
     #[rstest]
-    #[case::multiple_out(&TRY_MULTIPLE, OutputName::out())]
+    #[case::multiple_out(&TRY_MULTIPLE_OUTPUTS, OutputName::out())]
     fn does_not_contain_key(#[case] value: &Outputs, #[case] name: OutputName) {
         assert!(!value.contains_key(&name))
     }
 
     #[rstest]
-    #[case::fod(&FOD_OUTPUTS, vec![(OutputName::out(), FOD_OUTPUT.clone())])]
-    #[case::try_fod(&TRY_FOD, vec![(OutputName::out(), FOD_OUTPUT.clone())])]
-    #[case::try_single(&TRY_SINGLE, vec![(OutputName::out(), Default::default())])]
-    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT, vec![(OutputName::from_static("bin").unwrap(), Default::default())])]
-    #[case::multiple(&TRY_MULTIPLE, vec![
-        (OutputName::from_static("bin").unwrap(), Default::default()),
-        (OutputName::from_static("dev").unwrap(), Default::default()),
+    #[case::fod(&FOD_OUTPUTS, vec![(OutputName::out(), STORE_PATH.clone())])]
+    #[case::try_fod(&TRY_FOD_OUTPUTS, vec![(OutputName::out(), STORE_PATH.clone())])]
+    #[case::try_single(&TRY_SINGLE_OUTPUTS, vec![(OutputName::out(), STORE_PATH.clone())])]
+    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT_OUTPUTS, vec![(OutputName::from_static("bin").unwrap(), STORE_PATH.clone())])]
+    #[case::multiple(&TRY_MULTIPLE_OUTPUTS, vec![
+        (OutputName::from_static("bin").unwrap(), STORE_PATH.clone()),
+        (OutputName::from_static("dev").unwrap(), STORE_PATH.clone()),
     ])]
-    #[case::default(&Default::default(), vec![(OutputName::out(), Default::default())])]
-    fn iter(#[case] value: &Outputs, #[case] expected: Vec<(OutputName, Output)>) {
+    fn iter(#[case] value: &Outputs, #[case] expected: Vec<(OutputName, StorePath)>) {
         let actual: Vec<_> = value
             .iter()
             .map(|(name, output)| (name.clone(), output.clone()))
@@ -676,28 +1043,40 @@ mod tests {
 
     #[rstest]
     #[case::fod(&FOD_OUTPUTS, vec![OutputName::out()])]
-    #[case::try_fod(&TRY_FOD, vec![OutputName::out()])]
-    #[case::try_single(&TRY_SINGLE, vec![OutputName::out()])]
-    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT, vec![OutputName::from_static("bin").unwrap()])]
-    #[case::multiple(&TRY_MULTIPLE, vec![
+    #[case::try_fod(&TRY_FOD_OUTPUTS, vec![OutputName::out()])]
+    #[case::try_single(&TRY_SINGLE_OUTPUTS, vec![OutputName::out()])]
+    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT_OUTPUTS, vec![OutputName::from_static("bin").unwrap()])]
+    #[case::multiple(&TRY_MULTIPLE_OUTPUTS, vec![
         OutputName::from_static("bin").unwrap(),
         OutputName::from_static("dev").unwrap(),
     ])]
-    #[case::default(&Default::default(), vec![OutputName::out()])]
-    fn keys(#[case] value: &Outputs, #[case] expected: Vec<OutputName>) {
-        let actual: Vec<_> = value.keys().cloned().collect();
+    fn names(#[case] value: &Outputs, #[case] expected: Vec<OutputName>) {
+        let actual: Vec<_> = value.names().cloned().collect();
         assert_eq!(actual, expected);
     }
 
     #[rstest]
-    #[case::fod(&FOD_OUTPUTS, vec![FOD_OUTPUT.clone()])]
-    #[case::try_fod(&TRY_FOD, vec![FOD_OUTPUT.clone()])]
-    #[case::try_single(&TRY_SINGLE, vec![Default::default()])]
-    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT, vec![Default::default()])]
-    #[case::multiple(&TRY_MULTIPLE, vec![Default::default(), Default::default()])]
-    #[case::default(&Default::default(), vec![Default::default()])]
-    fn values(#[case] value: &Outputs, #[case] expected: Vec<Output>) {
-        let actual: Vec<_> = value.values().cloned().collect();
+    #[case::fod(&FOD_OUTPUTS, vec![OutputName::out()])]
+    #[case::try_fod(&TRY_FOD_OUTPUTS, vec![OutputName::out()])]
+    #[case::try_single(&TRY_SINGLE_OUTPUTS, vec![OutputName::out()])]
+    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT_OUTPUTS, vec![OutputName::from_static("bin").unwrap()])]
+    #[case::multiple(&TRY_MULTIPLE_OUTPUTS, vec![
+        OutputName::from_static("bin").unwrap(),
+        OutputName::from_static("dev").unwrap(),
+    ])]
+    fn into_names(#[case] value: &Outputs, #[case] expected: Vec<OutputName>) {
+        let actual: Vec<_> = value.clone().into_names().collect();
+        assert_eq!(actual, expected);
+    }
+
+    #[rstest]
+    #[case::fod(&FOD_OUTPUTS, vec![STORE_PATH.clone()])]
+    #[case::try_fod(&TRY_FOD_OUTPUTS, vec![STORE_PATH.clone()])]
+    #[case::try_single(&TRY_SINGLE_OUTPUTS, vec![STORE_PATH.clone()])]
+    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT_OUTPUTS, vec![STORE_PATH.clone()])]
+    #[case::multiple(&TRY_MULTIPLE_OUTPUTS, vec![STORE_PATH.clone(), STORE_PATH.clone()])]
+    fn values(#[case] value: &Outputs, #[case] expected: Vec<StorePath>) {
+        let actual: Vec<_> = value.store_paths().cloned().collect();
         assert_eq!(actual, expected);
     }
 }

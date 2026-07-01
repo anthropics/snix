@@ -2,7 +2,7 @@
 use crate::builtins::DerivationError;
 use crate::snix_store_io::SnixStoreIO;
 use bstr::BString;
-use nix_compat::derivation::{Derivation, OutputHash, OutputName};
+use nix_compat::derivation::{DerivationBuilder, OutputHash, OutputName};
 use nix_compat::store_path::{StorePath, StorePathRef};
 use snix_build_glue::known_paths::KnownPaths;
 use snix_eval::builtin_macros::builtins;
@@ -19,7 +19,11 @@ pub const STRUCTURED_ATTRS_ENABLE_KEY: &str = "__structuredAttrs";
 
 /// Populate the inputs of a derivation from the build references
 /// found when scanning the derivation's parameters and extracting their contexts.
-fn populate_inputs(drv: &mut Derivation, full_context: NixContext, known_paths: &KnownPaths) {
+fn populate_inputs(
+    drv: &mut DerivationBuilder,
+    full_context: NixContext,
+    known_paths: &KnownPaths,
+) {
     for element in full_context.iter() {
         match element {
             NixContextElement::Plain(source) => {
@@ -74,8 +78,8 @@ fn populate_inputs(drv: &mut Derivation, full_context: NixContext, known_paths: 
                 let output_names = known_paths
                     .get_drv_by_drvpath(&derivation.as_ref())
                     .expect("no known derivation associated to that derivation path")
-                    .outputs
-                    .keys();
+                    .outputs()
+                    .names();
 
                 // FUTUREWORK(performance): ideally, we should be able to clone
                 // cheaply those outputs rather than duplicate them all around.
@@ -102,7 +106,7 @@ pub(crate) mod derivation_builtins {
 
     use bstr::ByteSlice;
 
-    use nix_compat::derivation::{Output, Outputs};
+    use nix_compat::derivation::OutputsBuilder;
     use nix_compat::nixhash::{HashAlgo, NixHash};
     use nix_compat::store_path::hash_placeholder;
     use snix_build_glue::builder;
@@ -157,14 +161,14 @@ pub(crate) mod derivation_builtins {
         }
         let name = name.to_str()?;
 
-        let mut drv = Derivation::default();
+        let mut drv = DerivationBuilder::default();
 
         let mut input_context = NixContext::new();
 
         /// Inserts a key and value into the drv.environment BTreeMap, and fails if the
         /// key did already exist before.
         fn insert_env(
-            drv: &mut Derivation,
+            drv: &mut DerivationBuilder,
             k: &str, /* TODO: non-utf8 env keys */
             v: BString,
         ) -> Result<(), DerivationError> {
@@ -240,14 +244,16 @@ pub(crate) mod derivation_builtins {
 
                         output_names.push(output_name);
                     }
-                    drv.outputs = Outputs::try_from_iter(
-                        output_names
-                            .iter()
-                            .cloned()
-                            .map(|name| (name, Output::default())),
-                    )
-                    .map_err(nix_compat::derivation::DerivationError::from)
-                    .map_err(DerivationError::from)?;
+                    let mut outputs_set: BTreeSet<_> = output_names.iter().cloned().collect();
+                    if outputs_set.len() != output_names.len() {
+                        for output_name in output_names {
+                            if !outputs_set.remove(&output_name) {
+                                return Err(DerivationError::DuplicateOutput(output_name).into());
+                            }
+                        }
+                        unreachable!("should have found the duplicate output name");
+                    }
+                    drv.outputs = OutputsBuilder::InputAddressed(outputs_set);
 
                     match structured_attrs.as_mut() {
                         // add outputs to the json itself (as a list of strings)
@@ -271,7 +277,7 @@ pub(crate) mod derivation_builtins {
                     input_context.mimic(&val_str);
 
                     if arg_name == "builder" {
-                        val_str.to_str()?.clone_into(&mut drv.builder);
+                        val_str.to_str()?.clone_into(&mut drv.command);
                     } else {
                         val_str.to_str()?.clone_into(&mut drv.system);
                     }
@@ -352,7 +358,7 @@ pub(crate) mod derivation_builtins {
 
             // FOD case.
             if let Some(hash_str) = hash_str {
-                if !drv.outputs.is_single() {
+                if !drv.outputs.is_single() && !drv.outputs.contains(&OutputName::out()) {
                     return Err(ErrorKind::SnixError(Arc::new(
                         DerivationError::ConflictingOutputTypes,
                     )));
@@ -380,21 +386,17 @@ pub(crate) mod derivation_builtins {
                 {
                     emit_warning_kind(&co, WarningKind::SRIHashWrongPadding).await;
                 }
-                drv.outputs = Outputs::from_fod_hash(OutputHash { mode, hash });
+                drv.outputs = OutputsBuilder::Fixed(OutputHash { mode, hash });
             }
         }
 
-        // Each output name needs to exist in the environment, at this
-        // point initialised as an empty string, as the ATerm serialization of that is later
-        // used for the output path calculation (which will also update output
-        // paths post-calculation, both in drv.environment and drv.outputs)
-        for output in drv.outputs.keys() {
-            if drv
-                .environment
-                .insert(output.to_string(), String::new().into())
-                .is_some()
-            {
-                emit_warning_kind(&co, WarningKind::ShadowedOutput(output.to_string())).await;
+        // Each output name needs to exist in the environment and will be populated
+        // by the DerivationBuilder. DerivationBuilder will emit a tracing warning
+        // if any environment variables shadow the output name. We though want to emit
+        // our own warning and so we remove the offending variables while emit warnings.
+        for output_name in drv.outputs.names() {
+            if drv.environment.remove(output_name.as_str()).is_some() {
+                emit_warning_kind(&co, WarningKind::ShadowedOutput(output_name.to_string())).await;
             }
         }
 
@@ -409,63 +411,42 @@ pub(crate) mod derivation_builtins {
         let mut known_paths = state.as_ref().build_state.known_paths.borrow_mut();
         populate_inputs(&mut drv, input_context, &known_paths);
 
-        // At this point, derivation fields are fully populated from
-        // eval data structures.
-        drv.validate().map_err(DerivationError::InvalidDerivation)?;
-
-        // Calculate the hash_derivation_modulo for the current derivation..
-        debug_assert!(
-            drv.outputs.values().all(|output| { output.path.is_none() }),
-            "outputs should still be unset"
-        );
-
-        // Mutate the Derivation struct and set output paths
-        drv.calculate_output_paths(
-            name,
-            // This one is still intermediate (so not added to known_paths),
-            // as the outputs are still unset.
-            &drv.hash_derivation_modulo(|drv_path| {
-                *known_paths
-                    .get_hash_derivation_modulo(drv_path)
-                    .unwrap_or_else(|| panic!("{drv_path} not found"))
-            }),
-        )
-        .map_err(DerivationError::InvalidDerivation)?;
-
-        let drv_path = drv
-            .calculate_derivation_path(name)
+        // Build the Derivation struct, validate and set output paths
+        let a_drv = drv
+            .build(name, &*known_paths)
             .map_err(DerivationError::InvalidDerivation)?;
 
         // Assemble the attrset to return from this builtin.
         let out = Value::Attrs(NixAttrs::from_iter(
-            drv.outputs
+            a_drv
+                .outputs()
                 .iter()
-                .map(|(name, output)| {
+                .map(|(output_name, path)| {
                     (
-                        name.into(),
+                        output_name.into(),
                         NixString::new_context_from(
                             NixContextElement::Single {
-                                name: name.into(),
-                                derivation: drv_path.to_absolute_path(),
+                                name: output_name.into(),
+                                derivation: a_drv.drv_path().to_absolute_path(),
                             }
                             .into(),
-                            output.path.as_ref().unwrap().to_absolute_path(),
+                            path.to_absolute_path(),
                         ),
                     )
                 })
                 .chain(std::iter::once((
                     "drvPath".to_owned(),
                     NixString::new_context_from(
-                        NixContextElement::Derivation(drv_path.to_absolute_path()).into(),
-                        drv_path.to_absolute_path(),
+                        NixContextElement::Derivation(a_drv.drv_path().to_absolute_path()).into(),
+                        a_drv.drv_path().to_absolute_path(),
                     ),
                 ))),
         ));
 
         // If the derivation is a fake derivation (builtin:fetchurl),
         // synthesize a [Fetch] and add it there, too.
-        if drv.builder == "builtin:fetchurl" {
-            let (name, fetch) = fetchurl_derivation_to_fetch(&drv)
+        if a_drv.command() == "builtin:fetchurl" {
+            let (name, fetch) = fetchurl_derivation_to_fetch(&a_drv)
                 .map_err(|e| ErrorKind::SnixError(Arc::from(e)))?;
 
             known_paths
@@ -474,7 +455,9 @@ pub(crate) mod derivation_builtins {
         }
 
         // Register the Derivation in known_paths.
-        known_paths.add_derivation(drv_path, drv);
+        known_paths
+            .add_verified_derivation(a_drv)
+            .map_err(|e| ErrorKind::SnixError(Arc::from(e)))?;
 
         Ok(out)
     }

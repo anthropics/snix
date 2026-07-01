@@ -1,6 +1,6 @@
 //! This contains the code translating from a `builtin:derivation` [Derivation]
 //! to a [Fetch].
-use nix_compat::derivation::{Derivation, OutputHash, OutputName};
+use nix_compat::derivation::{Derivation, OutputHash};
 use snix_build_glue::fetchers::Fetch;
 use tracing::instrument;
 use url::Url;
@@ -9,32 +9,24 @@ use url::Url;
 /// synthesized [Fetch] for it, as well as the name.
 #[instrument]
 pub(crate) fn fetchurl_derivation_to_fetch(drv: &Derivation) -> Result<(String, Fetch), Error> {
-    if drv.builder != "builtin:fetchurl" {
+    if drv.command() != "builtin:fetchurl" {
         return Err(Error::BuilderInvalid);
     }
-    if !drv.arguments.is_empty() {
+    if !drv.arguments().is_empty() {
         return Err(Error::ArgumentsInvalud);
     }
-    if drv.system != "builtin" {
+    if drv.system() != "builtin" {
         return Err(Error::SystemInvalid);
     }
 
     // ensure this is a fixed-output derivation
-    if drv.outputs.len() != 1 {
+    let Some(output_hash) = drv.outputs().as_fixed_output_hash() else {
         return Err(Error::NoFOD);
-    }
-    let out_output = &drv.outputs.get(&OutputName::out()).ok_or(Error::NoFOD)?;
-    let output_hash = out_output.output_hash.as_ref().ok_or(Error::NoFOD)?;
+    };
 
-    let name: String = drv
-        .environment
-        .get("name")
-        .ok_or(Error::NameMissing)?
-        .to_owned()
-        .try_into()
-        .map_err(|_| Error::NameInvalid)?;
+    let name = drv.name().to_owned();
 
-    let url: Url = std::str::from_utf8(drv.environment.get("url").ok_or(Error::URLMissing)?)
+    let url: Url = std::str::from_utf8(drv.environment().get("url").ok_or(Error::URLMissing)?)
         .map_err(|_| Error::URLInvalid)?
         .parse()
         .map_err(|_| Error::URLInvalid)?;
@@ -54,7 +46,7 @@ pub(crate) fn fetchurl_derivation_to_fetch(drv: &Derivation) -> Result<(String, 
             mode: nix_compat::derivation::OutputHashMode::Recursive,
             hash,
         } => {
-            if drv.environment.get("executable").map(|v| v.as_slice()) == Some(b"1") {
+            if drv.environment().get("executable").map(|v| v.as_slice()) == Some(b"1") {
                 (
                     name,
                     Fetch::Executable {
@@ -89,8 +81,4 @@ pub(crate) enum Error {
     URLMissing,
     #[error("Invalid URL")]
     URLInvalid,
-    #[error("Missing Name")]
-    NameMissing,
-    #[error("Name invalid")]
-    NameInvalid,
 }

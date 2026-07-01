@@ -10,7 +10,7 @@
 
 use hashbrown::HashMap;
 use nix_compat::{
-    derivation::Derivation,
+    derivation::{Derivation, DerivationError, HashDerivationModuloLookup, UnverifiedDerivation},
     nixhash::Sha256,
     store_path::{ParseStorePathError, StorePath, StorePathRef},
 };
@@ -59,40 +59,52 @@ impl KnownPaths {
         self.outputs_to_drvpath.get(output_path)
     }
 
+    pub fn add_derivation(
+        &mut self,
+        drv_path: StorePath,
+        drv: UnverifiedDerivation,
+    ) -> Result<(), DerivationError> {
+        let drv_name = drv_path.name().strip_suffix(".drv").ok_or_else(|| {
+            DerivationError::InvalidDerivationName(
+                drv_path.name().to_owned(),
+                ParseStorePathError::Name,
+            )
+        })?;
+        let drv = drv.verify(drv_name, &*self)?;
+
+        self.add_verified_derivation(drv)
+    }
+
     /// Insert a new [Derivation] into this struct.
     /// The Derivation struct must pass validation, and its output paths need to
     /// be fully calculated.
     /// All input derivations this refers to must also be inserted to this
     /// struct.
-    pub fn add_derivation(&mut self, drv_path: StorePath, drv: Derivation) {
+    pub fn add_verified_derivation(&mut self, drv: Derivation) -> Result<(), DerivationError> {
         // check input derivations to have been inserted.
         #[cfg(debug_assertions)]
         {
-            for input_drv_path in drv.input_derivations.keys() {
+            for input_drv_path in drv.input_derivations().keys() {
                 debug_assert!(self.derivations.contains_key(input_drv_path));
             }
         }
 
         // compute the hash derivation modulo
-        let hash_derivation_modulo = drv.hash_derivation_modulo(|drv_path| {
-            self.get_hash_derivation_modulo(drv_path)
-                .unwrap_or_else(|| panic!("{drv_path} not found"))
-                .to_owned()
-        });
+        let hash_derivation_modulo = drv.hash_derivation_modulo(&*self)?;
 
         // For all output paths, update our lookup table.
         // We only write into the lookup table once.
-        for output in drv.outputs.values() {
+        for output_path in drv.outputs().store_paths() {
             self.outputs_to_drvpath
-                .entry(output.path.as_ref().expect("missing store path").clone())
-                .or_insert(drv_path.to_owned());
+                .entry(output_path.clone())
+                .or_insert(drv.drv_path().to_owned());
         }
 
         // insert the derivation itself
         #[allow(unused_variables)] // assertions on this only compiled in debug builds
         let old = self
             .derivations
-            .insert(drv_path.to_owned(), (hash_derivation_modulo, drv));
+            .insert(drv.drv_path().to_owned(), (hash_derivation_modulo, drv));
 
         #[cfg(debug_assertions)]
         {
@@ -103,6 +115,7 @@ impl KnownPaths {
                 );
             }
         }
+        Ok(())
     }
 
     /// Insert a new [Fetch] into this struct, which *must* have an expected
@@ -142,13 +155,19 @@ impl KnownPaths {
     }
 }
 
+impl HashDerivationModuloLookup for &KnownPaths {
+    fn lookup_hdm(&self, drv_path: &StorePathRef<'_>) -> Option<Sha256> {
+        self.get_hash_derivation_modulo(drv_path).copied()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::LazyLock;
 
     use hex_literal::hex;
     use nix_compat::{
-        derivation::Derivation,
+        derivation::{Derivation, UnverifiedDerivation},
         nixbase32,
         nixhash::{NixHash, Sha256},
         store_path::StorePath,
@@ -158,15 +177,15 @@ mod tests {
     use super::KnownPaths;
     use crate::fetchers::Fetch;
 
-    static BAR_DRV: LazyLock<Derivation> = LazyLock::new(|| {
-        Derivation::from_aterm_bytes(include_bytes!(
+    static BAR_DRV: LazyLock<UnverifiedDerivation> = LazyLock::new(|| {
+        UnverifiedDerivation::from_aterm_bytes(include_bytes!(
             "../test-data/ss2p4wmxijn652haqyd7dckxwl4c7hxx-bar.drv"
         ))
         .expect("must parse")
     });
 
-    static FOO_DRV: LazyLock<Derivation> = LazyLock::new(|| {
-        Derivation::from_aterm_bytes(include_bytes!(
+    static FOO_DRV: LazyLock<UnverifiedDerivation> = LazyLock::new(|| {
+        UnverifiedDerivation::from_aterm_bytes(include_bytes!(
             "../test-data/ch49594n9avinrf8ip0aslidkc4lxkqv-foo.drv"
         ))
         .expect("must parse")
@@ -215,10 +234,13 @@ mod tests {
     #[test]
     #[should_panic]
     fn drv_reject_if_missing_input_drv() {
-        let mut known_paths = KnownPaths::default();
+        let known_paths = KnownPaths::default();
 
         // FOO_DRV depends on BAR_DRV, which wasn't added.
-        known_paths.add_derivation(FOO_DRV_PATH.clone(), FOO_DRV.clone());
+        FOO_DRV
+            .clone()
+            .verify("foo", &known_paths)
+            .expect("could not verify");
     }
 
     #[test]
@@ -238,12 +260,16 @@ mod tests {
         );
 
         // Add BAR_DRV
-        known_paths.add_derivation(BAR_DRV_PATH.clone(), BAR_DRV.clone());
+        known_paths
+            .add_derivation(BAR_DRV_PATH.clone(), BAR_DRV.clone())
+            .expect("must verify BAR_DRV");
 
         // We should get it back
         assert_eq!(
             Some(&BAR_DRV.clone()),
-            known_paths.get_drv_by_drvpath(&BAR_DRV_PATH.as_ref())
+            known_paths
+                .get_drv_by_drvpath(&BAR_DRV_PATH.as_ref())
+                .map(Derivation::as_unverified)
         );
 
         // Test get_drv_path_for_output_path
@@ -262,11 +288,15 @@ mod tests {
 
         // Now insert FOO_DRV too. It shouldn't panic, as BAR_DRV is already
         // added.
-        known_paths.add_derivation(FOO_DRV_PATH.clone(), FOO_DRV.clone());
+        known_paths
+            .add_derivation(FOO_DRV_PATH.clone(), FOO_DRV.clone())
+            .expect("must verify FOO_DRV");
 
         assert_eq!(
             Some(&FOO_DRV.clone()),
-            known_paths.get_drv_by_drvpath(&FOO_DRV_PATH.as_ref())
+            known_paths
+                .get_drv_by_drvpath(&FOO_DRV_PATH.as_ref())
+                .map(|v| &**v)
         );
         assert_eq!(
             Some(&Sha256::new(hex!(
@@ -316,14 +346,17 @@ mod tests {
         let mut known_paths = KnownPaths::default();
 
         // Add BAR_DRV
-        known_paths.add_derivation(BAR_DRV_PATH.clone(), BAR_DRV.clone());
+        known_paths
+            .add_derivation(BAR_DRV_PATH.clone(), BAR_DRV.clone())
+            .expect("must verify BAR_DRV");
 
         // We should be able to find BAR_DRV_PATH and BAR_DRV as a pair in get_derivations.
         assert_eq!(
             Some((BAR_DRV_PATH.as_ref(), &BAR_DRV.clone())),
             known_paths
                 .get_derivations()
-                .find(|(s, d)| (s, *d) == (&BAR_DRV_PATH.as_ref(), &*BAR_DRV))
+                .find(|(s, d)| (s, d.as_unverified()) == (&BAR_DRV_PATH.as_ref(), &*BAR_DRV))
+                .map(|(s, d)| (s, d.as_unverified()))
         );
     }
 

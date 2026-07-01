@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, io::Read};
 
-use nix_compat::derivation::Derivation;
+use nix_compat::derivation::UnverifiedDerivation;
 use serde_json::json;
 
 use mimalloc::MiMalloc;
@@ -15,15 +15,15 @@ static GLOBAL: MiMalloc = MiMalloc;
 /// use the [std::string::ToString] implementation of [bstr::BString] to get
 /// a UTF-8 string (replacing invalid characters with the Unicode replacement
 /// codepoint).
-fn build_serde_json_value(drv: Derivation) -> serde_json::Value {
+fn build_serde_json_value(drv: &UnverifiedDerivation) -> serde_json::Value {
     json!({
-        "args": drv.arguments,
-        "builder": drv.builder,
-        "env":   drv.environment.into_iter().map(|(k,v)| (k, v.to_string())).collect::<BTreeMap<String, String>>(),
-        "inputDrvs": drv.input_derivations,
-        "inputSrcs": drv.input_sources,
-        "outputs": drv.outputs,
-        "system": drv.system,
+        "args": drv.arguments(),
+        "builder": drv.command(),
+        "env":   drv.environment().iter().map(|(k,v)| (k.clone(), v.to_string())).collect::<BTreeMap<String, String>>(),
+        "inputDrvs": drv.input_derivations(),
+        "inputSrcs": drv.input_sources(),
+        "outputs": drv.outputs(),
+        "system": drv.system(),
     })
 }
 
@@ -39,11 +39,11 @@ fn main() {
         panic!("Derivation may not contain trailing whitespace, bailing out!");
     }
 
-    match Derivation::from_aterm_bytes(&buf) {
+    match UnverifiedDerivation::from_aterm_bytes(&buf) {
         Ok(drv) => {
             println!(
                 "{}",
-                serde_json::to_string_pretty(&build_serde_json_value(drv))
+                serde_json::to_string_pretty(&build_serde_json_value(&drv))
                     .expect("unable to serialize")
             );
         }
