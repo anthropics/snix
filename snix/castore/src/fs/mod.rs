@@ -326,6 +326,7 @@ where
                 }
             },
             mode,
+            nlink: 1, // 0 would prevent lndir from recursing into directories.
             mtime: 1, // Everything in /nix/store must have timestamp "1".
             ..Default::default()
         };
