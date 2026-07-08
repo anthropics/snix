@@ -36,7 +36,8 @@ fn checked_sum(iter: impl IntoIterator<Item = u64>) -> Option<u64> {
 
 impl Directory {
     /// The size of a directory is the number of all regular and symlink elements,
-    /// the number of directory elements, and their size fields.
+    /// the number of directory elements (counted twice for historical reasons),
+    /// and their size fields.
     pub fn size(&self) -> u64 {
         if cfg!(debug_assertions) {
             self.size_checked()
@@ -50,6 +51,8 @@ impl Directory {
         checked_sum([
             self.files.len().try_into().ok()?,
             self.symlinks.len().try_into().ok()?,
+            // counted twice.
+            self.directories.len().try_into().ok()?,
             self.directories.len().try_into().ok()?,
             checked_sum(self.directories.iter().map(|e| e.size))?,
         ])

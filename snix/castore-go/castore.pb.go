@@ -103,6 +103,7 @@ type DirectoryEntry struct {
 	// The blake3 digest of a Directory message.
 	Digest []byte `protobuf:"bytes,2,opt,name=digest,proto3" json:"digest,omitempty"`
 	// Number of child elements in the Directory referred to by `digest`.
+	// Child directory elements are counted twice for historical reasons.
 	// Calculated by summing up the numbers of `directories`, `files` and
 	// `symlinks`, and for each directory, its size field. Used for inode number
 	// calculation.

@@ -20,7 +20,8 @@ fn size() {
             }],
             ..Default::default()
         };
-        assert_eq!(d.size(), 1);
+        // directories are counted twice for historical reasons.
+        assert_eq!(d.size(), 2);
     }
     {
         let d = Directory {
@@ -31,7 +32,8 @@ fn size() {
             }],
             ..Default::default()
         };
-        assert_eq!(d.size(), 5);
+        // directories are counted twice for historical reasons.
+        assert_eq!(d.size(), 6);
     }
     {
         let d = Directory {
@@ -97,7 +99,7 @@ fn size_checked() {
             directories: vec![DirectoryEntry {
                 name: "foo".into(),
                 digest: DUMMY_DIGEST.to_vec().into(),
-                size: u64::MAX - 1,
+                size: u64::MAX - 2,
             }],
             ..Default::default()
         };
@@ -108,7 +110,7 @@ fn size_checked() {
             directories: vec![DirectoryEntry {
                 name: "foo".into(),
                 digest: DUMMY_DIGEST.to_vec().into(),
-                size: u64::MAX,
+                size: u64::MAX - 1,
             }],
             ..Default::default()
         };
@@ -125,7 +127,7 @@ fn size_checked() {
                 DirectoryEntry {
                     name: "foo".into(),
                     digest: DUMMY_DIGEST.to_vec().into(),
-                    size: u64::MAX / 2,
+                    size: u64::MAX / 2 - 1,
                 },
             ],
             ..Default::default()

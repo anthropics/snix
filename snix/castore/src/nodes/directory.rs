@@ -38,18 +38,17 @@ impl Directory {
     }
 
     /// The size of a directory is the number of all regular and symlink elements,
-    /// the number of directory elements, and their size fields.
+    /// the number of directory elements (counted twice for historical reasons),
+    /// and their size fields.
     pub fn size(&self) -> u64 {
         // It's impossible to create a Directory where the size overflows, because we
         // check before every add() that the size won't overflow.
-        (self.nodes.len() as u64)
-            + self
-                .nodes()
-                .map(|(_name, n)| match n {
-                    Node::Directory { size, .. } => 1 + size,
-                    Node::File { .. } | Node::Symlink { .. } => 1,
-                })
-                .sum::<u64>()
+        self.nodes()
+            .map(|(_name, n)| match n {
+                Node::Directory { size, .. } => 2 + size,
+                Node::File { .. } | Node::Symlink { .. } => 1,
+            })
+            .sum::<u64>()
     }
 
     /// Calculates the digest of a Directory, which is the blake3 hash of a
@@ -102,7 +101,7 @@ fn check_insert_node(
     // overflow
     let new_size = checked_sum([
         current_size,
-        1,
+        2,
         match node {
             Node::Directory { size, .. } => size,
             _ => 0,
@@ -238,6 +237,39 @@ mod test {
         // Convert to proto struct and back to ensure we are not generating any invalid structures
         crate::Directory::try_from(crate::proto::Directory::from(d))
             .expect("directory should be valid");
+    }
+
+    #[test]
+    fn size() {
+        let d = Directory::try_from_iter([
+            (
+                "a".try_into().unwrap(),
+                Node::Directory {
+                    digest: *DUMMY_DIGEST,
+                    size: 4,
+                },
+            ),
+            (
+                "b".try_into().unwrap(),
+                Node::File {
+                    digest: *DUMMY_DIGEST,
+                    size: 42,
+                    executable: false,
+                },
+            ),
+            (
+                "c".try_into().unwrap(),
+                Node::Symlink {
+                    target: "a".try_into().unwrap(),
+                },
+            ),
+        ])
+        .unwrap();
+        // One file, one symlink, one directory node (counted twice for historical reasons),
+        // plus the size field of the single child directory.
+        assert_eq!(d.size(), 1 + 1 + 2 + 4);
+        // Must agree with the proto implementation.
+        assert_eq!(d.size(), crate::proto::Directory::from(d).size());
     }
 
     #[test]
