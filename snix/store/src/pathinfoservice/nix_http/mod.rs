@@ -127,7 +127,15 @@ where
 
         Ok(Self {
             instance_name,
-            base_url: config.base_url,
+            base_url: {
+                // Help https://example.com/cache survive Url::join
+                let mut base_url = config.base_url;
+                if !base_url.path().ends_with('/') {
+                    let with_slash = format!("{}/", base_url.path());
+                    base_url.set_path(&with_slash);
+                }
+                base_url
+            },
             http_client: reqwest_middleware::ClientBuilder::new(
                 reqwest::Client::builder()
                     .user_agent(crate::USER_AGENT)
