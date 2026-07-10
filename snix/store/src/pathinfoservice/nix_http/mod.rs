@@ -312,8 +312,13 @@ where
                     as Box<dyn AsyncRead + Send + Unpin>,
                 Some("xz") => Box::new(async_compression::tokio::bufread::XzDecoder::new(r))
                     as Box<dyn AsyncRead + Send + Unpin>,
-                Some("zstd") => Box::new(async_compression::tokio::bufread::ZstdDecoder::new(r))
-                    as Box<dyn AsyncRead + Send + Unpin>,
+                Some("zstd") => {
+                    // NARs are often many concatenated zstd frames; the default decoder
+                    // stops after the first.
+                    let mut decoder = async_compression::tokio::bufread::ZstdDecoder::new(r);
+                    decoder.multiple_members(true);
+                    Box::new(decoder) as Box<dyn AsyncRead + Send + Unpin>
+                }
                 Some(comp_str) => Err(Error::UnsupportedNARCompression(comp_str.to_owned()))?,
             };
 
