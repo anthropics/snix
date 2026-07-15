@@ -349,19 +349,14 @@ fn attr_to_fuse_entry(attr: Attr) -> Entry {
     }
 }
 
-/// Returns the u32 fuse type
-fn node_to_fuse_type(node: &Node) -> u32 {
-    #[allow(clippy::let_and_return)]
+/// Returns the readdir `d_type` (a `libc::DT_*` value) for a node.
+fn node_to_dirent_type(node: &Node) -> u32 {
     let ty = match node {
-        Node::Directory { .. } => libc::S_IFDIR,
-        Node::File { .. } => libc::S_IFREG,
-        Node::Symlink { .. } => libc::S_IFLNK,
+        Node::Directory { .. } => libc::DT_DIR,
+        Node::File { .. } => libc::DT_REG,
+        Node::Symlink { .. } => libc::DT_LNK,
     };
-    // libc::S_IFDIR is u32 on Linux and u16 on MacOS
-    #[cfg(target_os = "macos")]
-    let ty = ty as u32;
-
-    ty
+    ty as u32
 }
 
 const XATTR_NAME_DIRECTORY_DIGEST: &[u8] = b"user.snix.castore.directory.digest";
@@ -574,7 +569,7 @@ where
                 let written = add_entry(fuse_backend_rs::api::filesystem::DirEntry {
                     ino,
                     offset: offset + (i as u64) + 1,
-                    type_: node_to_fuse_type(&node),
+                    type_: node_to_dirent_type(&node),
                     name: name.as_ref(),
                 })?;
                 // If the buffer is full, add_entry will return `Ok(0)`.
@@ -596,7 +591,7 @@ where
             let written = add_entry(fuse_backend_rs::api::filesystem::DirEntry {
                 ino,
                 offset: offset + (i as u64) + 1,
-                type_: node_to_fuse_type(&child_node),
+                type_: node_to_dirent_type(&child_node),
                 name: child_name.as_ref(),
             })?;
             // If the buffer is full, add_entry will return `Ok(0)`.
@@ -660,7 +655,7 @@ where
                     fuse_backend_rs::api::filesystem::DirEntry {
                         ino,
                         offset: offset + (i as u64) + 1,
-                        type_: node_to_fuse_type(&node),
+                        type_: node_to_dirent_type(&node),
                         name: name.as_ref(),
                     },
                     attr_to_fuse_entry(self.inode_data_to_attr(&inode_data, ino)),
@@ -685,7 +680,7 @@ where
                 fuse_backend_rs::api::filesystem::DirEntry {
                     ino,
                     offset: offset + (i as u64) + 1,
-                    type_: node_to_fuse_type(&child_node),
+                    type_: node_to_dirent_type(&child_node),
                     name: name.as_ref(),
                 },
                 attr_to_fuse_entry(self.inode_data_to_attr(&inode_data, ino)),
