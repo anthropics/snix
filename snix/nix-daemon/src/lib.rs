@@ -9,7 +9,7 @@ use nix_compat::{
     derived_path::DerivedPath,
     nix_daemon::{
         NixDaemonIO,
-        types::{BuildMode, NarHash, UnkeyedValidPathInfo, ValidPathInfo},
+        types::{BuildMode, KeyedBuildResult, NarHash, UnkeyedValidPathInfo, ValidPathInfo},
     },
     nixbase32,
     nixhash::CAHashMode,
@@ -137,6 +137,16 @@ impl NixDaemonIO for SnixDaemon {
 
     async fn build_paths(&self, _derived_paths: Vec<DerivedPath>, _mode: BuildMode) -> Result<()> {
         Ok(())
+    }
+
+    async fn build_paths_with_results(
+        &self,
+        _derived_paths: Vec<DerivedPath>,
+        _mode: BuildMode,
+    ) -> Result<Vec<KeyedBuildResult>> {
+        Err(std::io::Error::other(
+            "Operation BuildPathsWithResults is not implemented",
+        ))
     }
 }
 

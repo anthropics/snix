@@ -6,7 +6,11 @@ use tokio::io::AsyncRead;
 use tracing::warn;
 use types::{QueryValidPaths, UnkeyedValidPathInfo, ValidPathInfo};
 
-use crate::{derived_path::DerivedPath, nix_daemon::types::BuildMode, store_path::StorePath};
+use crate::{
+    derived_path::DerivedPath,
+    nix_daemon::types::{BuildMode, KeyedBuildResult},
+    store_path::StorePath,
+};
 
 pub mod framing;
 pub mod handler;
@@ -80,6 +84,12 @@ pub trait NixDaemonIO: Sync {
         derived_paths: Vec<DerivedPath>,
         mode: BuildMode,
     ) -> impl std::future::Future<Output = Result<()>> + Send;
+
+    fn build_paths_with_results(
+        &self,
+        derived_paths: Vec<DerivedPath>,
+        mode: BuildMode,
+    ) -> impl std::future::Future<Output = Result<Vec<KeyedBuildResult>>> + Send;
 }
 
 #[cfg(test)]
@@ -133,6 +143,16 @@ mod tests {
             _mode: super::types::BuildMode,
         ) -> std::io::Result<()> {
             Ok(())
+        }
+
+        async fn build_paths_with_results(
+            &self,
+            _derived_paths: Vec<DerivedPath>,
+            _mode: super::types::BuildMode,
+        ) -> std::io::Result<Vec<super::types::KeyedBuildResult>> {
+            Err(std::io::Error::other(
+                "Operation BuildPathsWithResults is not implemented",
+            ))
         }
     }
 

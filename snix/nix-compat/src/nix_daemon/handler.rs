@@ -269,6 +269,14 @@ where
                         Self::handle(&self.writer, self.io.build_paths(args.paths, args.mode))
                             .await?
                     }
+                    Operation::BuildPathsWithResults => {
+                        let args: BuildPaths = self.reader.read_value().await?;
+                        Self::handle(
+                            &self.writer,
+                            self.io.build_paths_with_results(args.paths, args.mode),
+                        )
+                        .await?
+                    }
                     _ => {
                         return Err(std::io::Error::other(format!(
                             "Operation {operation:?} is not implemented"
