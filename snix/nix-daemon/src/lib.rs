@@ -9,7 +9,10 @@ use nix_compat::{
     derived_path::DerivedPath,
     nix_daemon::{
         NixDaemonIO,
-        types::{BuildMode, KeyedBuildResult, NarHash, UnkeyedValidPathInfo, ValidPathInfo},
+        types::{
+            BuildMode, KeyedBuildResult, NarHash, QueryMissingResult, UnkeyedValidPathInfo,
+            ValidPathInfo,
+        },
     },
     nixbase32,
     nixhash::CAHashMode,
@@ -146,6 +149,12 @@ impl NixDaemonIO for SnixDaemon {
     ) -> Result<Vec<KeyedBuildResult>> {
         Err(std::io::Error::other(
             "Operation BuildPathsWithResults is not implemented",
+        ))
+    }
+
+    async fn query_missing(&self, _derived_paths: Vec<DerivedPath>) -> Result<QueryMissingResult> {
+        Err(std::io::Error::other(
+            "Operation QueryMissing is not implemented",
         ))
     }
 }

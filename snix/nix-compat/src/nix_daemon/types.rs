@@ -324,3 +324,12 @@ pub struct KeyedBuildResult {
     pub path: DerivedPath,
     pub result: BuildResult,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, NixDeserialize, NixSerialize)]
+pub struct QueryMissingResult {
+    pub will_build: Vec<StorePath>,
+    pub will_substitute: Vec<StorePath>,
+    pub unknown: Vec<StorePath>,
+    pub download_size: u64,
+    pub nar_size: u64,
+}

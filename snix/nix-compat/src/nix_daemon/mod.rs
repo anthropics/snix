@@ -4,7 +4,7 @@ use std::io::Result;
 
 use tokio::io::AsyncRead;
 use tracing::warn;
-use types::{QueryValidPaths, UnkeyedValidPathInfo, ValidPathInfo};
+use types::{QueryMissingResult, QueryValidPaths, UnkeyedValidPathInfo, ValidPathInfo};
 
 use crate::{
     derived_path::DerivedPath,
@@ -67,6 +67,11 @@ pub trait NixDaemonIO: Sync {
             Ok(result)
         }
     }
+
+    fn query_missing(
+        &self,
+        derived_paths: Vec<DerivedPath>,
+    ) -> impl std::future::Future<Output = Result<QueryMissingResult>> + Send;
 
     #[cfg_attr(test, mockall::concretize)]
     fn add_to_store_nar<R>(
@@ -152,6 +157,15 @@ mod tests {
         ) -> std::io::Result<Vec<super::types::KeyedBuildResult>> {
             Err(std::io::Error::other(
                 "Operation BuildPathsWithResults is not implemented",
+            ))
+        }
+
+        async fn query_missing(
+            &self,
+            _derived_paths: Vec<DerivedPath>,
+        ) -> std::io::Result<super::types::QueryMissingResult> {
+            Err(std::io::Error::other(
+                "Operation QueryMissing is not implemented",
             ))
         }
     }
