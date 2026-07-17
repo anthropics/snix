@@ -26,6 +26,19 @@ pub trait NixDaemonIO: Sync {
         async move { Ok(self.query_path_info(path).await?.is_some()) }
     }
 
+    fn ensure_path(
+        &self,
+        path: &StorePath,
+    ) -> impl std::future::Future<Output = Result<()>> + Send {
+        async move {
+            if self.is_valid_path(path).await? {
+                Ok(())
+            } else {
+                Err(std::io::Error::other(format!("unknown path {}", path)))
+            }
+        }
+    }
+
     fn query_path_info(
         &self,
         path: &StorePath,
