@@ -18,7 +18,7 @@ without documenting their functionality.
 
 See also [the Nix manual](https://nixos.org/manual/nix/stable/expressions/builtins.html).
 
-The `impl` column indicates implementation status in tvix:
+The `impl` column indicates implementation status in snix:
 - implemented: "" (empty cell)
 - not yet implemented, but not blocked: `todo`
 - not yet implemented, but blocked by other prerequisites:
@@ -131,7 +131,6 @@ The `impl` column indicates implementation status in tvix:
 | unsafeDiscardOutputDependency | false  |       |       |         |
 | unsafeDiscardStringContext    | false  |       |       |         |
 | unsafeGetAttrPos              | false  |       |       | todo    |
-| valueSize                     | false  |       |       | todo    |
 
 ## Added after C++ Nix 2.3 (without Flakes enabled)
 
