@@ -1,0 +1,7 @@
+lang {
+  builtins "toFile" "getContext"
+}
+
+runtime-opts {
+  eval-strict
+}

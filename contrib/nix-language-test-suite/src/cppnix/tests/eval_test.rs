@@ -288,6 +288,10 @@ fn matches_expected_error(version: NixVersion, error_string: &str, expected: &Er
         ErrorKind::UnexpectedArgument => &["unsupported argument"][..],
         ErrorKind::VariableAlreadyDefined => &["already defined at"][..],
         ErrorKind::DuplicateAttrsKey => &["already defined at"][..],
+        ErrorKind::UnexpectedContext => match version {
+            NixVersion::CppNix23 => &["cannot refer to derivation outputs"][..],
+            _ => &["files created by builtins.toFile may not reference derivations"][..],
+        },
     };
 
     must_contain.iter().any(|x| error_string.contains(x))

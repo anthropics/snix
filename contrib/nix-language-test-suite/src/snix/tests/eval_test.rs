@@ -280,6 +280,9 @@ fn matches_expected_error(result: &snix_eval::EvaluationResult, exp_kind: &Error
         ErrorKind::DuplicateAttrsKey => {
             matches!(snix_kind, snix_eval::ErrorKind::DuplicateAttrsKey { .. })
         }
+        ErrorKind::UnexpectedContext => {
+            matches!(snix_kind, snix_eval::ErrorKind::UnexpectedContext)
+        }
     }
 }
 

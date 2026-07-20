@@ -79,6 +79,7 @@ pub enum ErrorKind {
     UnexpectedArgument,
     DuplicateAttrsKey,
     VariableAlreadyDefined,
+    UnexpectedContext,
 }
 
 impl std::str::FromStr for ErrorKind {
@@ -96,6 +97,7 @@ impl std::str::FromStr for ErrorKind {
             "UnexpectedArgument" => Ok(ErrorKind::UnexpectedArgument),
             "DuplicateAttrsKey" => Ok(ErrorKind::DuplicateAttrsKey),
             "VariableAlreadyDefined" => Ok(ErrorKind::VariableAlreadyDefined),
+            "UnexpectedContext" => Ok(ErrorKind::UnexpectedContext),
             other => Err(format!("unknown error kind: {other}")),
         }
     }

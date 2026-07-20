@@ -1,0 +1,9 @@
+lang {
+  builtins "toFile"
+}
+
+environment {
+  fixtures {
+    file "hello.txt" content=""
+  }
+}

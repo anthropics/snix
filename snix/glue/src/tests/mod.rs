@@ -140,11 +140,3 @@ fn eval_test(code_path: PathBuf, expect_success: bool) {
 fn eval_okay(#[files("src/tests/snix_tests/eval-okay-*.nix")] code_path: PathBuf) {
     eval_test(code_path, true)
 }
-
-// eval-fail-* tests contain a snippet of Nix code, which is
-// expected to fail evaluation.  The exact type of failure
-// (assertion, parse error, etc) is not currently checked.
-#[rstest]
-fn eval_fail(#[files("src/tests/snix_tests/eval-fail-*.nix")] code_path: PathBuf) {
-    eval_test(code_path, false)
-}
