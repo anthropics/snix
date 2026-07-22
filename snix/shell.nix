@@ -25,7 +25,7 @@ pkgs.mkShell {
     pkgs.tracy_0_13
   ]
   ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-    pkgs.perf-with-rust-addr2line
+    pkgs.perf
     pkgs.bubblewrap
     pkgs.cbtemulator
     pkgs.google-cloud-bigtable-tool

@@ -39,14 +39,5 @@ depot.nix.readTree.drvTargets {
     vendorHash = "sha256-aynhBko6ecYyyMG9XO5315kLerWDFZ6V8LQ/WIkvC70=";
   });
 
-  # The binutils addr2line is timing out on our large binaries,
-  # using the addr2line rust rewrite solves the issue.
-  # See: https://github.com/flamegraph-rs/flamegraph/issues/341#issuecomment-2483294165
-  perf-with-rust-addr2line = prev.perf.override ({
-    binutils-unwrapped = prev.writeShellScriptBin "addr2line" "exec ${prev.rust-addr2line}/bin/addr2line \"$@\"";
-  });
-
-  cargo-flamegraph = prev.cargo-flamegraph.override { perf = final.perf-with-rust-addr2line; };
-
   watch-store = prev.callPackage ./pkgs/watch-store.nix { };
 }
