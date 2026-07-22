@@ -10,7 +10,6 @@ pkgs.mkShell {
     pkgs.cargo-flamegraph
     pkgs.cargo-nextest
     pkgs.clippy
-    pkgs.evans
     pkgs.fuse
     pkgs.go
     pkgs.grpcurl
