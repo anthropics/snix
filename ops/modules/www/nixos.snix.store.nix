@@ -7,6 +7,9 @@
   # Microbenchmark
   # hyperfine --warmup 1 'rm -rf /tmp/cache; nix copy --from https://nixos.snix.store/ --to "file:///tmp/cache?compression=none" /nix/store/jlkypcf54nrh4n6r0l62ryx93z752hb2-firefox-132.0'
   services.nginx = {
+    eventsConfig = ''
+      worker_connections 4096;
+    '';
     virtualHosts."nixos.snix.store" =
       let
         passToSnixStoreDaemonAll = ''
