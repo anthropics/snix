@@ -2,7 +2,7 @@ pub mod worker_protocol;
 
 use std::{collections::BTreeMap, io::Result};
 
-use tokio::io::AsyncRead;
+use tokio::io::{AsyncBufRead, AsyncRead};
 use tracing::warn;
 use types::{QueryMissingResult, QueryValidPaths, UnkeyedValidPathInfo, ValidPathInfo};
 
@@ -103,6 +103,11 @@ pub trait NixDaemonIO: Sync {
     where
         R: AsyncRead + Send + Unpin;
 
+    fn nar_from_path(
+        &self,
+        path: &StorePath,
+    ) -> impl std::future::Future<Output = Result<Box<dyn AsyncBufRead + Unpin + Send>>> + Send;
+
     fn build_paths(
         &self,
         derived_paths: Vec<DerivedPath>,
@@ -162,6 +167,15 @@ mod tests {
             R: tokio::io::AsyncRead + Send + Unpin,
         {
             Ok(())
+        }
+
+        async fn nar_from_path(
+            &self,
+            _path: &StorePath,
+        ) -> std::io::Result<Box<dyn tokio::io::AsyncBufRead + Unpin + Send>> {
+            Err(std::io::Error::other(
+                "Operation NarFromPath is not implemented",
+            ))
         }
 
         async fn build_paths(

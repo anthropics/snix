@@ -140,6 +140,15 @@ impl NixDaemonIO for SnixDaemon {
         Ok(())
     }
 
+    async fn nar_from_path(
+        &self,
+        _path: &StorePath,
+    ) -> std::io::Result<Box<dyn tokio::io::AsyncBufRead + Unpin + Send>> {
+        Err(std::io::Error::other(
+            "Operation NarFromPath is not implemented",
+        ))
+    }
+
     async fn build_paths(&self, _derived_paths: Vec<DerivedPath>, _mode: BuildMode) -> Result<()> {
         Ok(())
     }

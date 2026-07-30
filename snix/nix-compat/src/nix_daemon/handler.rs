@@ -2,7 +2,7 @@ use std::{future::Future, ops::DerefMut, sync::Arc};
 
 use bytes::Bytes;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf, split},
+    io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf, copy_buf, split},
     sync::Mutex,
 };
 use tracing::{debug, warn};
@@ -292,6 +292,27 @@ where
                             self.io.query_derivation_output_map(&store_path),
                         )
                         .await?
+                    }
+                    Operation::NarFromPath => {
+                        let store_path = self.reader.read_value().await?;
+                        let result = self.io.nar_from_path(&store_path).await;
+                        let mut writer = self.writer.lock().await;
+
+                        match result {
+                            Ok(mut reader) => {
+                                // the protocol requires that we first indicate that we are done sending logs
+                                // by sending STDERR_LAST and then the response.
+                                writer.write_number(STDERR_LAST).await?;
+                                copy_buf(&mut reader, &mut *writer).await?;
+                                writer.flush().await?;
+                            }
+                            Err(err) => {
+                                debug!(%err, "IO error");
+                                writer.write_number(STDERR_ERROR).await?;
+                                writer.write_value(&NixError::new(format!("{err}"))).await?;
+                                writer.flush().await?;
+                            }
+                        }
                     }
                     _ => {
                         return Err(std::io::Error::other(format!(
