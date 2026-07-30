@@ -22,7 +22,10 @@ use nix_compat::{
 };
 use snix_castore::{blobservice::BlobService, directoryservice::DirectoryService};
 use snix_store::{nar::ingest_nar_and_hash, path_info::PathInfo, pathinfoservice::PathInfoService};
+use tokio::io::BufReader;
 use tracing::{instrument, warn};
+
+const NAR_BUF_SIZE: usize = 8 * 1024;
 
 #[allow(dead_code)]
 pub struct SnixDaemon {
@@ -142,11 +145,30 @@ impl NixDaemonIO for SnixDaemon {
 
     async fn nar_from_path(
         &self,
-        _path: &StorePath,
+        path: &StorePath,
     ) -> std::io::Result<Box<dyn tokio::io::AsyncBufRead + Unpin + Send>> {
-        Err(std::io::Error::other(
-            "Operation NarFromPath is not implemented",
-        ))
+        let path_info = self
+            .path_info_service
+            .get(*path.digest())
+            .await
+            .map_err(std::io::Error::other)?
+            .ok_or_else(|| std::io::Error::other("unknown store path"))?;
+
+        let (r, w) = tokio::io::simplex(NAR_BUF_SIZE);
+        let r = BufReader::new(r);
+        let blob_service = self.blob_service.clone();
+        let directory_service = self.directory_service.clone();
+
+        // spawn a task rendering the NAR to the client.
+        tokio::spawn(async move {
+            if let Err(e) =
+                snix_store::nar::write_nar(w, &path_info.node, blob_service, directory_service)
+                    .await
+            {
+                warn!(err=%e, "failed to write out NAR");
+            }
+        });
+        Ok(Box::new(r))
     }
 
     async fn build_paths(&self, _derived_paths: Vec<DerivedPath>, _mode: BuildMode) -> Result<()> {
