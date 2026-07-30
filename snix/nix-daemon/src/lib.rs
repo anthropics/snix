@@ -1,11 +1,13 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 use std::{
+    collections::BTreeMap,
     io::{Error, Result},
     sync::Arc,
 };
 
 use nix_compat::{
+    derivation::OutputName,
     derived_path::DerivedPath,
     nix_daemon::{
         NixDaemonIO,
@@ -155,6 +157,15 @@ impl NixDaemonIO for SnixDaemon {
     async fn query_missing(&self, _derived_paths: Vec<DerivedPath>) -> Result<QueryMissingResult> {
         Err(std::io::Error::other(
             "Operation QueryMissing is not implemented",
+        ))
+    }
+
+    async fn query_derivation_output_map(
+        &self,
+        _drv_path: &StorePath,
+    ) -> Result<BTreeMap<OutputName, Option<StorePath>>> {
+        Err(std::io::Error::other(
+            "Operation QueryDerivationOutputMap is not implemented",
         ))
     }
 }

@@ -285,6 +285,14 @@ where
                         let store_path = self.reader.read_value().await?;
                         Self::handle(&self.writer, self.io.ensure_path(&store_path)).await?
                     }
+                    Operation::QueryDerivationOutputMap => {
+                        let store_path = self.reader.read_value().await?;
+                        Self::handle(
+                            &self.writer,
+                            self.io.query_derivation_output_map(&store_path),
+                        )
+                        .await?
+                    }
                     _ => {
                         return Err(std::io::Error::other(format!(
                             "Operation {operation:?} is not implemented"

@@ -1,12 +1,13 @@
 pub mod worker_protocol;
 
-use std::io::Result;
+use std::{collections::BTreeMap, io::Result};
 
 use tokio::io::AsyncRead;
 use tracing::warn;
 use types::{QueryMissingResult, QueryValidPaths, UnkeyedValidPathInfo, ValidPathInfo};
 
 use crate::{
+    derivation::OutputName,
     derived_path::DerivedPath,
     nix_daemon::types::{BuildMode, KeyedBuildResult},
     store_path::StorePath,
@@ -86,6 +87,11 @@ pub trait NixDaemonIO: Sync {
         derived_paths: Vec<DerivedPath>,
     ) -> impl std::future::Future<Output = Result<QueryMissingResult>> + Send;
 
+    fn query_derivation_output_map(
+        &self,
+        drv_path: &StorePath,
+    ) -> impl std::future::Future<Output = Result<BTreeMap<OutputName, Option<StorePath>>>> + Send;
+
     #[cfg_attr(test, mockall::concretize)]
     fn add_to_store_nar<R>(
         &self,
@@ -113,7 +119,10 @@ pub trait NixDaemonIO: Sync {
 #[cfg(test)]
 mod tests {
 
+    use std::collections::BTreeMap;
+
     use crate::{
+        derivation::OutputName,
         derived_path::DerivedPath,
         nix_daemon::types::{NarHash, QueryValidPaths},
         store_path::StorePath,
@@ -179,6 +188,15 @@ mod tests {
         ) -> std::io::Result<super::types::QueryMissingResult> {
             Err(std::io::Error::other(
                 "Operation QueryMissing is not implemented",
+            ))
+        }
+
+        async fn query_derivation_output_map(
+            &self,
+            _drv_path: &StorePath,
+        ) -> std::io::Result<BTreeMap<OutputName, Option<StorePath>>> {
+            Err(std::io::Error::other(
+                "Operation QueryDerivationOutputMap is not implemented",
             ))
         }
     }

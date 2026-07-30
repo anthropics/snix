@@ -1,3 +1,13 @@
+mod derivation {
+    use crate::derivation::OutputName;
+    use nix_compat_derive::nix_serde_remote;
+
+    nix_serde_remote!(
+        #[nix(from_str, display)]
+        OutputName
+    );
+}
+
 mod derived_path {
     use crate::derived_path::{DerivedPath, LegacyDerivedPath};
     use nix_compat_derive::nix_serde_remote;
