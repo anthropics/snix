@@ -1,3 +1,4 @@
+use bstr::BString;
 use bytes::Bytes;
 
 use super::{Error, NixDeserialize, NixRead};
@@ -8,6 +9,18 @@ impl NixDeserialize for Bytes {
         R: ?Sized + NixRead + Send,
     {
         reader.try_read_bytes().await
+    }
+}
+
+impl NixDeserialize for BString {
+    async fn try_deserialize<R>(reader: &mut R) -> Result<Option<Self>, R::Error>
+    where
+        R: ?Sized + NixRead + Send,
+    {
+        Ok(reader
+            .try_read_bytes()
+            .await?
+            .map(|buf| BString::new(buf.to_vec())))
     }
 }
 

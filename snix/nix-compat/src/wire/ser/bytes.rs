@@ -1,3 +1,4 @@
+use bstr::BString;
 use bytes::Bytes;
 
 use super::{NixSerialize, NixWrite};
@@ -12,6 +13,15 @@ impl NixSerialize for Bytes {
 }
 
 impl NixSerialize for &[u8] {
+    async fn serialize<W>(&self, writer: &mut W) -> Result<(), W::Error>
+    where
+        W: NixWrite,
+    {
+        writer.write_slice(self).await
+    }
+}
+
+impl NixSerialize for BString {
     async fn serialize<W>(&self, writer: &mut W) -> Result<(), W::Error>
     where
         W: NixWrite,
