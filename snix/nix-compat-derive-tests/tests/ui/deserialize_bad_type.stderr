@@ -11,6 +11,7 @@ help: the trait `NixDeserialize` is not implemented for `BadType`
   | ^^^^^^^^^^^^^^^^^^
   = help: the following other types implement trait `NixDeserialize`:
             BTreeMap<K, V>
+            BTreeSet<T>
             Test
             Vec<T>
             bool

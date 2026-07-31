@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, future::Future};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    future::Future,
+};
 
 use super::{NixDeserialize, NixRead};
 
@@ -46,6 +49,31 @@ where
                     let key = reader.read_value().await?;
                     let value = reader.read_value().await?;
                     ret.insert(key, value);
+                }
+                Ok(Some(ret))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+}
+
+#[allow(clippy::manual_async_fn)]
+impl<T> NixDeserialize for BTreeSet<T>
+where
+    T: NixDeserialize + Ord + Send,
+{
+    fn try_deserialize<R>(
+        reader: &mut R,
+    ) -> impl Future<Output = Result<Option<Self>, R::Error>> + Send + '_
+    where
+        R: ?Sized + NixRead + Send,
+    {
+        async move {
+            if let Some(len) = reader.try_read_value::<usize>().await? {
+                let mut ret = BTreeSet::new();
+                for _ in 0..len {
+                    ret.insert(reader.read_value().await?);
                 }
                 Ok(Some(ret))
             } else {
