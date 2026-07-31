@@ -7,13 +7,13 @@ use std::{
 };
 
 use nix_compat::{
-    derivation::OutputName,
+    derivation::{OutputName, UnverifiedDerivation},
     derived_path::DerivedPath,
     nix_daemon::{
         NixDaemonIO,
         types::{
-            BuildMode, KeyedBuildResult, NarHash, QueryMissingResult, UnkeyedValidPathInfo,
-            ValidPathInfo,
+            BuildMode, BuildResult, KeyedBuildResult, NarHash, QueryMissingResult,
+            UnkeyedValidPathInfo, ValidPathInfo,
         },
     },
     nixbase32,
@@ -182,6 +182,16 @@ impl NixDaemonIO for SnixDaemon {
     ) -> Result<Vec<KeyedBuildResult>> {
         Err(std::io::Error::other(
             "Operation BuildPathsWithResults is not implemented",
+        ))
+    }
+    async fn build_derivation(
+        &self,
+        _drv_path: StorePath,
+        _derivation: UnverifiedDerivation,
+        _mode: BuildMode,
+    ) -> std::io::Result<BuildResult> {
+        Err(std::io::Error::other(
+            "Operation BuildDerivation is not implemented",
         ))
     }
 

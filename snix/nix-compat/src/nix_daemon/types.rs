@@ -1,6 +1,7 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
+use crate::derivation::{DerivationBuilder, DerivationError, Outputs, UnverifiedDerivation};
 use crate::derived_path::DerivedPath;
 use crate::nixbase32;
 use crate::realisation::{DrvOutput, Realisation};
@@ -14,6 +15,7 @@ use crate::{
         ser::{NixSerialize, NixWrite},
     },
 };
+use bstr::BString;
 use bytes::Bytes;
 use nix_compat_derive::{NixDeserialize, NixSerialize};
 
@@ -332,4 +334,30 @@ pub struct QueryMissingResult {
     pub unknown: Vec<StorePath>,
     pub download_size: u64,
     pub nar_size: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, NixDeserialize, NixSerialize)]
+pub struct BasicDerivation {
+    pub outputs: Outputs,
+    pub input_sources: BTreeSet<StorePath>,
+    pub system: String,
+    pub command: String,
+    pub arguments: Vec<String>,
+    pub environment: BTreeMap<String, BString>,
+}
+
+impl TryFrom<BasicDerivation> for UnverifiedDerivation {
+    type Error = DerivationError;
+
+    fn try_from(value: BasicDerivation) -> Result<Self, Self::Error> {
+        DerivationBuilder {
+            input_sources: value.input_sources,
+            system: value.system,
+            command: value.command,
+            arguments: value.arguments,
+            environment: value.environment,
+            ..Default::default()
+        }
+        .build_unverified(value.outputs)
+    }
 }

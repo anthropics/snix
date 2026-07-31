@@ -15,7 +15,7 @@ use super::{
 };
 
 use crate::{
-    nix_daemon::types::BuildPaths,
+    nix_daemon::types::{BasicDerivation, BuildPaths},
     store_path::StorePath,
     wire::{
         ProtocolVersion,
@@ -274,6 +274,18 @@ where
                         Self::handle(
                             &self.writer,
                             self.io.build_paths_with_results(args.paths, args.mode),
+                        )
+                        .await?
+                    }
+                    Operation::BuildDerivation => {
+                        let drv_path = self.reader.read_value().await?;
+                        let basic_derivation: BasicDerivation = self.reader.read_value().await?;
+                        let derivation =
+                            basic_derivation.try_into().map_err(std::io::Error::other)?;
+                        let mode = self.reader.read_value().await?;
+                        Self::handle(
+                            &self.writer,
+                            self.io.build_derivation(drv_path, derivation, mode),
                         )
                         .await?
                     }

@@ -7,9 +7,9 @@ use tracing::warn;
 use types::{QueryMissingResult, QueryValidPaths, UnkeyedValidPathInfo, ValidPathInfo};
 
 use crate::{
-    derivation::OutputName,
+    derivation::{OutputName, UnverifiedDerivation},
     derived_path::DerivedPath,
-    nix_daemon::types::{BuildMode, KeyedBuildResult},
+    nix_daemon::types::{BuildMode, BuildResult, KeyedBuildResult},
     store_path::StorePath,
 };
 
@@ -119,6 +119,13 @@ pub trait NixDaemonIO: Sync {
         derived_paths: Vec<DerivedPath>,
         mode: BuildMode,
     ) -> impl std::future::Future<Output = Result<Vec<KeyedBuildResult>>> + Send;
+
+    fn build_derivation(
+        &self,
+        drv_path: StorePath,
+        derivation: UnverifiedDerivation,
+        mode: BuildMode,
+    ) -> impl std::future::Future<Output = Result<BuildResult>> + Send;
 }
 
 #[cfg(test)]
@@ -193,6 +200,17 @@ mod tests {
         ) -> std::io::Result<Vec<super::types::KeyedBuildResult>> {
             Err(std::io::Error::other(
                 "Operation BuildPathsWithResults is not implemented",
+            ))
+        }
+
+        async fn build_derivation(
+            &self,
+            _drv_path: StorePath,
+            _derivation: crate::derivation::UnverifiedDerivation,
+            _mode: super::types::BuildMode,
+        ) -> std::io::Result<super::types::BuildResult> {
+            Err(std::io::Error::other(
+                "Operation BuildDerivation is not implemented",
             ))
         }
 

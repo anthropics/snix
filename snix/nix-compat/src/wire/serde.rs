@@ -1,11 +1,99 @@
 mod derivation {
-    use crate::derivation::OutputName;
+    use crate::{
+        derivation::{OutputHash, OutputName, Outputs, UnverifiedOutputsBuilder},
+        store_path::StorePath,
+        wire::{de::NixDeserialize, ser::NixSerialize},
+    };
+    use data_encoding::HEXLOWER;
     use nix_compat_derive::nix_serde_remote;
 
     nix_serde_remote!(
         #[nix(from_str, display)]
         OutputName
     );
+
+    impl NixSerialize for Option<&'_ OutputHash> {
+        async fn serialize<W>(&self, writer: &mut W) -> Result<(), W::Error>
+        where
+            W: crate::wire::ser::NixWrite,
+        {
+            if let Some(output_hash) = self.as_ref() {
+                writer
+                    .write_slice(output_hash.as_mode_and_algo_str().as_bytes())
+                    .await?;
+                writer
+                    .write_display(
+                        &data_encoding::HEXLOWER.encode_display(output_hash.hash.digest_as_bytes()),
+                    )
+                    .await?;
+            } else {
+                writer.write_slice(&[]).await?;
+                writer.write_slice(&[]).await?;
+            }
+            Ok(())
+        }
+    }
+
+    impl NixDeserialize for Option<OutputHash> {
+        async fn try_deserialize<R>(reader: &mut R) -> Result<Option<Self>, R::Error>
+        where
+            R: ?Sized + crate::wire::de::NixRead + Send,
+        {
+            use crate::wire::de::Error;
+            if let Some(mode_and_algo) = reader.try_read_value::<String>().await? {
+                let hash = reader.read_value::<String>().await?;
+                if mode_and_algo.is_empty() && hash.is_empty() {
+                    return Ok(Some(None));
+                }
+                let digest = HEXLOWER
+                    .decode(hash.as_bytes())
+                    .map_err(R::Error::invalid_data)?;
+                Ok(Some(Some(
+                    OutputHash::from_mode_algo_and_digest(&mode_and_algo, digest)
+                        .map_err(R::Error::invalid_data)?,
+                )))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+
+    impl NixSerialize for Outputs {
+        async fn serialize<W>(&self, writer: &mut W) -> Result<(), W::Error>
+        where
+            W: crate::wire::ser::NixWrite,
+        {
+            for (output_name, path) in self {
+                writer.write_value(output_name).await?;
+                writer.write_value(path).await?;
+                writer.write_value(&self.as_fixed_output_hash()).await?;
+            }
+            Ok(())
+        }
+    }
+
+    impl NixDeserialize for Outputs {
+        async fn try_deserialize<R>(reader: &mut R) -> Result<Option<Self>, R::Error>
+        where
+            R: ?Sized + crate::wire::de::NixRead + Send,
+        {
+            use crate::wire::de::Error;
+            if let Some(len) = reader.try_read_value::<usize>().await? {
+                let mut builder = UnverifiedOutputsBuilder::new();
+                for _ in 0..len {
+                    let output_name = reader.read_value::<OutputName>().await?;
+                    let store_path = reader.read_value::<StorePath>().await?;
+                    let output_hash = reader.read_value::<Option<OutputHash>>().await?;
+                    builder
+                        .try_insert(output_name, store_path, output_hash)
+                        .map_err(R::Error::custom)?;
+                }
+                Ok(Some(builder.try_build().map_err(R::Error::custom)?))
+            } else {
+                Ok(None)
+            }
+        }
+    }
 }
 
 mod derived_path {
