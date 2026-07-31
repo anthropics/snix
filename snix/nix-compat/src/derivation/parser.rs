@@ -12,9 +12,11 @@ use nom::sequence::{delimited, preceded, separated_pair, terminated};
 use std::collections::{BTreeMap, BTreeSet, btree_map};
 use thiserror;
 
-use crate::derivation::output::{Output, OutputHash};
 use crate::derivation::parse_error::{ErrorKind, NomError, NomResult, into_nomerror};
-use crate::derivation::{DerivationBuilder, OutputName, Outputs, UnverifiedDerivation, write};
+use crate::derivation::{
+    DerivationBuilder, OutputHash, OutputName, Outputs, UnverifiedDerivation,
+    UnverifiedOutputsBuilder, write,
+};
 use crate::store_path::{self, StorePath};
 use crate::{aterm, nixhash};
 
@@ -79,8 +81,8 @@ pub fn parse_streaming(i: &[u8]) -> (Result<UnverifiedDerivation, Error<&[u8]>>,
 
 /// Parse one output in ATerm. This is 4 string fields inside parans:
 /// output name, output path, algo (and mode), digest.
-/// Returns the output name and [Output] struct.
-fn parse_output(i: &[u8]) -> NomResult<&[u8], (OutputName, Output)> {
+/// Returns the [`OutputName`], output [`StorePath`] and possible FOD [`OutputHash`].
+fn parse_output(i: &[u8]) -> NomResult<&[u8], (OutputName, StorePath, Option<OutputHash>)> {
     delimited(
         nomchar('('),
         map_res(
@@ -94,7 +96,7 @@ fn parse_output(i: &[u8]) -> NomResult<&[u8], (OutputName, Output)> {
                     .parse(i)
                     .map_err(into_nomerror)
             },
-            |(output_name_str, output_path_str, algo_and_mode, encoded_digest)| {
+            |(output_name_str, output_path_str, algo_and_mode, encoded_digest)| -> Result<_, nom::Err<NomError<&[u8]>>> {
                 let output_name: OutputName = output_name_str.parse().map_err(|err| {
                     nom::Err::Failure(NomError {
                         input: i,
@@ -106,38 +108,33 @@ fn parse_output(i: &[u8]) -> NomResult<&[u8], (OutputName, Output)> {
                 // This being an empty string can only occur during output path calculation.
                 let path = string_to_store_path(i, &output_path_str)?;
 
-                Ok::<_, nom::Err<NomError<&[u8]>>>((
-                    output_name,
-                    Output {
-                        path,
-                        output_hash: if algo_and_mode.is_empty() && encoded_digest.is_empty() {
-                            None
-                        } else {
-                            let digest =
-                                data_encoding::HEXLOWER
-                                    .decode(&encoded_digest)
-                                    .map_err(|err| {
-                                        nom::Err::Failure(NomError {
-                                            input: i,
-                                            code: ErrorKind::NixHashError(
-                                                // TODO: do we still need the outer error?
-                                                nixhash::Error::InvalidBase16Encoding(err),
-                                            ),
-                                        })
-                                    })?;
+                let output_hash = if algo_and_mode.is_empty() && encoded_digest.is_empty() {
+                    None
+                } else {
+                    let digest =
+                        data_encoding::HEXLOWER
+                            .decode(&encoded_digest)
+                            .map_err(|err| {
+                                nom::Err::Failure(NomError {
+                                    input: i,
+                                    code: ErrorKind::NixHashError(
+                                        // TODO: do we still need the outer error?
+                                        nixhash::Error::InvalidBase16Encoding(err),
+                                    ),
+                                })
+                            })?;
 
-                            Some(
-                                OutputHash::from_mode_algo_and_digest(&algo_and_mode, digest)
-                                    .map_err(|err| {
-                                        nom::Err::Failure(NomError {
-                                            input: i,
-                                            code: ErrorKind::NixHashError(err),
-                                        })
-                                    })?,
-                            )
-                        },
-                    },
-                ))
+                    Some(
+                        OutputHash::from_mode_algo_and_digest(&algo_and_mode, digest)
+                            .map_err(|err| {
+                                nom::Err::Failure(NomError {
+                                    input: i,
+                                    code: ErrorKind::NixHashError(err),
+                                })
+                            })?,
+                    )
+                };
+                Ok((output_name, path, output_hash))
             },
         ),
         nomchar(')'),
@@ -160,7 +157,18 @@ fn parse_outputs(i: &[u8]) -> NomResult<&[u8], Outputs> {
 
     match res {
         Ok((rst, outputs_lst)) => {
-            let outputs = Outputs::try_from_output_iter(outputs_lst).map_err(|err| {
+            let mut builder = UnverifiedOutputsBuilder::default();
+            for (output_name, store_path, output_hash) in outputs_lst {
+                builder
+                    .try_insert(output_name, store_path, output_hash)
+                    .map_err(|err| {
+                        nom::Err::Failure(NomError {
+                            input: i,
+                            code: ErrorKind::InvalidOutputs(err),
+                        })
+                    })?;
+            }
+            let outputs = builder.try_build().map_err(|err| {
                 nom::Err::Failure(NomError {
                     input: i,
                     code: ErrorKind::InvalidOutputs(err),
@@ -373,7 +381,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::OutputHash;
-    use crate::derivation::output::Output;
     use crate::derivation::{OutputHashMode, OutputName, Outputs};
     use crate::store_path::StorePathRef;
     use crate::{
@@ -566,23 +573,28 @@ mod tests {
     #[rstest]
     #[case::simple(
         br#"("out","/nix/store/5vyvcwah9l9kf07d52rcgdk70g2f4y13-foo","","")"#,
-        (OutputName::out(), Output {
-            path: StorePathRef::from_absolute_path("/nix/store/5vyvcwah9l9kf07d52rcgdk70g2f4y13-foo".as_bytes()).unwrap().to_owned(),
-            output_hash: None
-        })
+        (
+            OutputName::out(),
+            StorePathRef::from_absolute_path("/nix/store/5vyvcwah9l9kf07d52rcgdk70g2f4y13-foo".as_bytes()).unwrap().to_owned(),
+            None
+        )
     )]
     #[case::fod(
         br#"("out","/nix/store/4q0pg5zpfmznxscq3avycvf9xdvx50n3-bar","r:sha256","08813cbee9903c62be4c5027726a418a300da4500b2d369d3af9286f4815ceba")"#,
-        (OutputName::out(), Output {
-            path: StorePathRef::from_absolute_path(
+        (
+            OutputName::out(),
+            StorePathRef::from_absolute_path(
                 "/nix/store/4q0pg5zpfmznxscq3avycvf9xdvx50n3-bar".as_bytes()).unwrap().to_owned(),
-            output_hash: Some(OutputHash{
+            Some(OutputHash{
                 mode: OutputHashMode::Recursive,
                 hash: NixHash::Sha256(hex!("08813cbee9903c62be4c5027726a418a300da4500b2d369d3af9286f4815ceba")),
             }),
-        })
+        )
     )]
-    fn parse_output(#[case] input: &[u8], #[case] expected: (OutputName, Output)) {
+    fn parse_output(
+        #[case] input: &[u8],
+        #[case] expected: (OutputName, StorePath, Option<OutputHash>),
+    ) {
         let (rest, parsed) = super::parse_output(input).expect("must parse");
         assert!(rest.is_empty());
         assert_eq!(expected, parsed);

@@ -110,7 +110,7 @@ pub use hdm_lookup::{HashDerivationModuloLookup, lookup_fn};
 pub use output::{OutputHash, OutputHashMode};
 pub use output_name::{OutputName, ParseOutputNameError};
 #[doc(inline)]
-pub use outputs::{Outputs, OutputsBuilder};
+pub use outputs::{Outputs, OutputsBuilder, UnverifiedOutputsBuilder};
 pub use parser::Error as ParserError;
 
 /// A verified derivation with its [`StorePath`].
