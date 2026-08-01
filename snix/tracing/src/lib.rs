@@ -463,13 +463,50 @@ fn gen_meter_provider()
         .build())
 }
 
+/// A `TypedValueParser` for `EnumSet<Tracer>` that parses either a single tracer or
+/// an empty string.
+///
+/// This will always return either a single element set or an empty set depending
+/// on the input string either being the name of a tracer or empty.
+#[cfg(all(
+    feature = "clap",
+    any(feature = "otlp", feature = "tracy", feature = "chrome")
+))]
+#[derive(Clone, Debug, Default)]
+struct TracersValueParser(clap::builder::EnumValueParser<Tracer>);
+#[cfg(all(
+    feature = "clap",
+    any(feature = "otlp", feature = "tracy", feature = "chrome")
+))]
+impl clap::builder::TypedValueParser for TracersValueParser {
+    type Value = EnumSet<Tracer>;
+
+    fn parse_ref(
+        &self,
+        cmd: &clap::Command,
+        arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        if value.is_empty() {
+            return Ok(EnumSet::empty());
+        }
+        self.0.parse_ref(cmd, arg, value).map(EnumSet::only)
+    }
+
+    fn possible_values(
+        &self,
+    ) -> Option<Box<dyn Iterator<Item = clap::builder::PossibleValue> + '_>> {
+        self.0.possible_values()
+    }
+}
+
 #[cfg(feature = "clap")]
 #[derive(clap::Parser, Clone)]
 pub struct TracingArgs<L: LogLevel = InfoLevel> {
     #[cfg(any(feature = "otlp", feature = "tracy", feature = "chrome"))]
     /// Which tracers to enable.
-    #[arg(long, value_enum, action(clap::ArgAction::Append), env)]
-    tracer: Vec<Tracer>,
+    #[arg(long, action(clap::ArgAction::Append), env, value_parser=TracersValueParser::default(), value_delimiter=',')]
+    tracer: Vec<EnumSet<Tracer>>,
 
     #[clap(flatten)]
     verbosity: Verbosity<L>,
@@ -479,7 +516,10 @@ pub struct TracingArgs<L: LogLevel = InfoLevel> {
 impl<L: LogLevel> TracingArgs<L> {
     #[cfg(any(feature = "otlp", feature = "tracy", feature = "chrome"))]
     pub fn tracers(&self) -> EnumSet<Tracer> {
-        self.tracer.iter().cloned().collect()
+        self.tracer
+            .iter()
+            .cloned()
+            .fold(EnumSet::empty(), |ret, next| ret.union(next))
     }
 }
 
