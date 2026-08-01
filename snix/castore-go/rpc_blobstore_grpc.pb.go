@@ -49,10 +49,11 @@ type BlobServiceClient interface {
 	// If the backend communicated more granular chunks in the `Stat` request,
 	// this can also be used to read chunks.
 	// This request returns a stream of BlobChunk, which is just a container for
-	// a stream of bytes.
-	// The server may decide on whatever chunking it may seem fit as a size for
-	// the individual BlobChunk sent in the response stream, this is mostly to
-	// keep individual messages at a manageable size.
+	// bytes.
+	// The server may split the blob data into individual BlobChunk messages
+	// streamed however it may see fit.
+	// This is mostly to keep individual messages at a manageable size, not to
+	// inform about a certain chunking potentially used internally.
 	Read(ctx context.Context, in *ReadBlobRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[BlobChunk], error)
 	// Put uploads a Blob, by reading a stream of bytes.
 	//
@@ -133,10 +134,11 @@ type BlobServiceServer interface {
 	// If the backend communicated more granular chunks in the `Stat` request,
 	// this can also be used to read chunks.
 	// This request returns a stream of BlobChunk, which is just a container for
-	// a stream of bytes.
-	// The server may decide on whatever chunking it may seem fit as a size for
-	// the individual BlobChunk sent in the response stream, this is mostly to
-	// keep individual messages at a manageable size.
+	// bytes.
+	// The server may split the blob data into individual BlobChunk messages
+	// streamed however it may see fit.
+	// This is mostly to keep individual messages at a manageable size, not to
+	// inform about a certain chunking potentially used internally.
 	Read(*ReadBlobRequest, grpc.ServerStreamingServer[BlobChunk]) error
 	// Put uploads a Blob, by reading a stream of bytes.
 	//
