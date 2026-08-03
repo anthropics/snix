@@ -1,5 +1,5 @@
 let
-  path = builtins.unsafeDiscardStringContext "${../empty-file}";
+  path = builtins.unsafeDiscardStringContext "${./empty-file}";
   storePath = builtins.storePath path;
   context = builtins.getContext storePath;
 in

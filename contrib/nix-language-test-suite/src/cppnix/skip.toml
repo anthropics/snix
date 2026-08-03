@@ -26,6 +26,12 @@ paths = [
   # Nix2.3 produces a path below:
   #   /nix/store/lc5bhdsagh8mrxkdbvdkmw9nv1vykavn-foo.drv
   "builtins/derivation/invalid-structured-attrs",
+
+  # something changed in storePath behaviour between 2.3 and 2.30,
+  # and it makes the same test failing in 2.3
+  #
+  # The likely change is https://github.com/NixOS/nix/commit/ea95327e72f5781295417b0eae46a5e351bebebd
+  "builtins/storePath/path-with-subpath",
 ]
 builtins = ["readFileType"]
 features = ["flakes", "pipe-operators", "path-interpolation"]
@@ -47,6 +53,12 @@ paths = [
   # The change was initially introduced in https://gerrit.lix.systems/c/lix/+/1102
   # but later reverted are reapplied in https://git.lix.systems/lix-project/lix/commit/87fd1f024c7c979e5d96c41af4ef7e8bdb5792e1
   "builtins/parseFlakeRef/unknown-query-param",
+
+  # something changed in storePath behaviour between 2.3 and 2.30,
+  # and it makes the same test failing in 2.3
+  #
+  # The likely change is https://github.com/NixOS/nix/commit/ea95327e72f5781295417b0eae46a5e351bebebd
+  "builtins/storePath/path-with-subpath",
 ]
 
 [nix_latest]

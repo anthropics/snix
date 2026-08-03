@@ -1,0 +1,15 @@
+lang {
+  builtins "storePath" "unsafeDiscardStringContext" "getContext" "hasContext"
+}
+
+runtime-opts {
+  eval-strict
+}
+
+environment {
+  fixtures {
+    dir "dummy" {
+      file ".keep" content=""
+    }
+  }
+}
