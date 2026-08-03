@@ -1,0 +1,7 @@
+lang {
+  builtins "toXML" "getContext" "hasContext" "derivation"
+}
+
+runtime-opts {
+  eval-strict
+}
