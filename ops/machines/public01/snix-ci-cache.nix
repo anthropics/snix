@@ -20,7 +20,6 @@ in
     enable = true;
     package = depot.snix.cli.store.with-features-xp-store-composition-cli-tonic-reflection-otlp-cloud;
 
-    # FUTUREWORK: snix-store-daemon module doesn't allow us to NOT pass in store composition
     settings = {
       blobservices.root = {
         type = "objectstore";

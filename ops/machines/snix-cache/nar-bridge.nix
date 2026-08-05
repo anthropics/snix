@@ -72,7 +72,6 @@ in
     enable = true;
     package = depot.snix.cli.nar-bridge.with-features-xp-store-composition-cli-otlp;
 
-    # FUTUREWORK: the nar-bridge module doesn't allow us to NOT pass in store composition
     settings = {
       blobservices.root = {
         type = "grpc";
