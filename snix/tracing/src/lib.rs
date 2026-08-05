@@ -167,6 +167,28 @@ pub enum Tracer {
     ChromeStyle,
 }
 
+#[cfg(any(feature = "otlp", feature = "tracy", feature = "chrome"))]
+impl Tracer {
+    /// Return the tracer kind as a str
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            #[cfg(feature = "otlp")]
+            Tracer::Otlp => "otlp",
+            #[cfg(feature = "tracy")]
+            Tracer::Tracy => "tracy",
+            #[cfg(feature = "chrome")]
+            Tracer::ChromeStyle => "chrome-style",
+        }
+    }
+}
+
+#[cfg(any(feature = "otlp", feature = "tracy", feature = "chrome"))]
+impl std::fmt::Display for Tracer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Encodes the verbosity level chosen by the user through CLI arguments.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum ChosenLevel {
@@ -336,6 +358,19 @@ impl TracingBuilder {
             .with(layered)
             .try_init()?;
 
+        #[cfg(any(feature = "otlp", feature = "tracy", feature = "chrome"))]
+        if !self.tracers.is_empty() {
+            let tracers = std::fmt::from_fn(|f| {
+                for (idx, tracer) in self.tracers.iter().enumerate() {
+                    if idx > 0 {
+                        f.write_str(",")?;
+                    }
+                    write!(f, "{tracer}")?;
+                }
+                Ok(())
+            });
+            tracing::debug!(%tracers, "started tracing");
+        }
         Ok(TracingHandle {
             stdout_writer,
             stderr_writer,
