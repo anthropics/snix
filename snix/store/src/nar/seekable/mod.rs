@@ -9,13 +9,10 @@ use std::{
 
 use super::RenderError;
 
-use bytes::{BufMut, Bytes};
-
-use nix_compat::nar::writer::sync as nar_writer;
+use bytes::BufMut;
+use snix_castore::Node;
 use snix_castore::directoryservice::DirectoryService;
-use snix_castore::{B3Digest, Node};
 use snix_castore::{
-    Directory,
     blobservice::{BlobReader, BlobService},
     directoryservice::DirectoryGraphBuilder,
 };
@@ -27,123 +24,16 @@ use futures::future::{BoxFuture, FusedFuture, TryMaybeDone};
 use tokio::io::AsyncSeekExt;
 use tracing::{instrument, warn};
 
-#[derive(Debug)]
-struct BlobRef {
-    digest: B3Digest,
-    size: u64,
-}
-
-#[derive(Debug)]
-enum Data {
-    Literal(Bytes),
-    Blob(BlobRef),
-}
-
-impl Data {
-    pub fn len(&self) -> u64 {
-        match self {
-            Data::Literal(data) => data.len() as u64,
-            Data::Blob(BlobRef { size, .. }) => *size,
-        }
-    }
-}
+mod segments;
+use segments::{Segment, Segments};
 
 pub struct Reader<B: BlobService> {
-    segments: Vec<(u64, Data)>,
+    segments: Segments,
     position_bytes: u64,
     position_index: usize,
     blob_service: Arc<B>,
     seeking: bool,
     current_blob: TryMaybeDone<BoxFuture<'static, io::Result<Box<dyn BlobReader>>>>,
-}
-
-/// Used during construction.
-/// Converts the current buffer (passed as `cur_segment`) into a `Data::Literal` segment and
-/// inserts it into `self.segments`.
-fn flush_segment(segments: &mut Vec<(u64, Data)>, offset: &mut u64, cur_segment: Vec<u8>) {
-    let segment_size = cur_segment.len();
-    segments.push((*offset, Data::Literal(cur_segment.into())));
-    *offset += segment_size as u64;
-}
-
-/// Used during construction.
-/// Recursively walks the node and its children, and fills `segments` with the appropriate
-/// `Data::Literal` and `Data::Blob` elements.
-///
-/// The function is infallible, as:
-///  - we only write to buffers
-///  - all castore `PathComponent` and `SymlinkTarget` can be expressed in NAR
-///  - the passed directory closure is complete
-fn walk_node(
-    segments: &mut Vec<(u64, Data)>,
-    offset: &mut u64,
-    directories: &HashMap<B3Digest, Directory>,
-    node: &Node,
-    // Includes a reference to the current segment's buffer
-    nar_node: nar_writer::Node<'_, Vec<u8>>,
-) {
-    match node {
-        snix_castore::Node::Symlink { target } => {
-            nar_node
-                .symlink(target.as_ref())
-                .expect("Snix bug: failed to write symlink as NAR");
-        }
-        snix_castore::Node::File {
-            digest,
-            size,
-            executable,
-        } => {
-            let (cur_segment, skip) = nar_node
-                .file_manual_write(*executable, *size)
-                .expect("Snix bug: failed to write framing before file node as NAR");
-
-            // Flush the segment up until the beginning of the blob
-            flush_segment(segments, offset, std::mem::take(cur_segment));
-
-            // Insert the blob segment
-            segments.push((
-                *offset,
-                Data::Blob(BlobRef {
-                    digest: *digest,
-                    size: *size,
-                }),
-            ));
-            *offset += size;
-
-            // Close the file node
-            // We **intentionally** do not write the file contents anywhere.
-            // Instead we have stored the blob reference in a Data::Blob segment,
-            // and the poll_read implementation will take care of serving the
-            // appropriate blob at this offset.
-            skip.close(cur_segment)
-                .expect("Snix bug: failed to close NAR file node");
-        }
-        snix_castore::Node::Directory { digest, .. } => {
-            let directory = directories
-                .get(digest)
-                .expect("Snix bug: referenced directory missing from directory closure");
-
-            // start a directory node
-            let mut nar_node_directory = nar_node
-                .directory()
-                .expect("Snix bug: failed to write directory node as NAR");
-
-            // for each node in the directory, create a new entry with its name,
-            // and then recurse on that entry.
-            for (name, node) in directory.nodes() {
-                let child_node = nar_node_directory
-                    .entry(name.as_ref())
-                    .expect("Snix bug: failed to write NAR entry");
-
-                walk_node(segments, offset, directories, node, child_node);
-            }
-
-            // close the directory
-            nar_node_directory
-                .close()
-                .expect("Snix bug: failed to close directory node");
-        }
-    }
 }
 
 impl<B: BlobService + 'static> Reader<B> {
@@ -200,59 +90,18 @@ impl<B: BlobService + 'static> Reader<B> {
             Default::default()
         };
 
-        Ok(Self::new_with_resolved_directories(
-            root_node,
-            blob_service,
-            directories,
-        ))
-    }
-
-    /// Creates a new seekable NAR renderer for the given castore root node.
-    /// This version of the instantiation does not perform any I/O and as such is not async.
-    /// However it requires all directories to be previously fetched and passed in as a HashMap.
-    ///
-    /// Panics if the closure is not complete.
-    fn new_with_resolved_directories(
-        root_node: Node,
-        blob_service: B,
-        directories: HashMap<B3Digest, Directory>,
-    ) -> Self {
-        let segments = {
-            let mut segments = vec![];
-            let mut cur_segment: Vec<u8> = vec![];
-            let mut offset = 0;
-
-            let nar_node =
-                nar_writer::open(&mut cur_segment).expect("Snix bug: failed to open nar_writer");
-
-            walk_node(
-                &mut segments,
-                &mut offset,
-                &directories,
-                &root_node,
-                nar_node,
-            );
-
-            // Flush the final segment
-            flush_segment(&mut segments, &mut offset, std::mem::take(&mut cur_segment));
-            segments
-        };
-
-        Reader {
-            segments,
+        Ok(Self {
+            segments: Segments::from_root_node_and_directories(root_node, &directories),
             position_bytes: 0,
             position_index: 0,
             blob_service: blob_service.into(),
             seeking: false,
             current_blob: TryMaybeDone::Gone,
-        }
+        })
     }
 
     pub fn stream_len(&self) -> u64 {
-        self.segments
-            .last()
-            .map(|&(off, ref data)| off + data.len())
-            .expect("no segment found")
+        self.segments.total_len()
     }
 }
 
@@ -279,17 +128,18 @@ impl<B: BlobService + 'static> tokio::io::AsyncSeek for Reader<B> {
         let prev_position_bytes = this.position_bytes;
         let prev_position_index = this.position_index;
 
+        let segments_with_offsets = this.segments.segments_with_offsets();
+
         this.position_bytes = min(pos, stream_len);
-        this.position_index = match this
-            .segments
+        this.position_index = match segments_with_offsets
             .binary_search_by_key(&this.position_bytes, |&(off, _)| off)
         {
             Ok(idx) => idx,
             Err(idx) => idx - 1,
         };
 
-        let Some((offset, Data::Blob(BlobRef { digest, .. }))) =
-            this.segments.get(this.position_index)
+        let Some((offset, Segment::BlobRef { digest, .. })) =
+            segments_with_offsets.get(this.position_index)
         else {
             // If not seeking into a blob, we clear the active blob reader and then we're done
             this.current_blob = TryMaybeDone::Gone;
@@ -354,21 +204,22 @@ impl<B: BlobService + 'static> tokio::io::AsyncRead for Reader<B> {
         buf: &mut tokio::io::ReadBuf,
     ) -> Poll<io::Result<()>> {
         let this = &mut *self;
+        let segments_with_offsets = this.segments.segments_with_offsets();
 
-        let Some(&(offset, ref segment)) = this.segments.get(this.position_index) else {
+        let Some(&(offset, ref segment)) = segments_with_offsets.get(this.position_index) else {
             return Poll::Ready(Ok(())); // EOF
         };
 
         let prev_read_buf_pos = buf.filled().len();
         match segment {
-            Data::Literal(data) => {
+            Segment::Literal(data) => {
                 let offset_in_segment = this.position_bytes - offset;
                 let offset_in_segment = usize::try_from(offset_in_segment).unwrap();
                 let remaining_data = data.len() - offset_in_segment;
                 let read_size = std::cmp::min(remaining_data, buf.remaining());
                 buf.put(&data[offset_in_segment..offset_in_segment + read_size]);
             }
-            Data::Blob(BlobRef { size, .. }) => {
+            Segment::BlobRef { size, .. } => {
                 futures::ready!(this.current_blob.poll_unpin(cx))?;
                 this.seeking = false;
                 let blob = Pin::new(&mut this.current_blob)
@@ -401,16 +252,16 @@ impl<B: BlobService + 'static> tokio::io::AsyncRead for Reader<B> {
         this.position_bytes += (new_read_buf_pos - prev_read_buf_pos) as u64;
 
         let prev_position_index = this.position_index;
-        while this
-            .segments
+        let segments_with_offsets = this.segments.segments_with_offsets();
+        while segments_with_offsets
             .get(this.position_index)
             .is_some_and(|&(offset, ref segment)| (this.position_bytes - offset) >= segment.len())
         {
             this.position_index += 1;
         }
         if prev_position_index != this.position_index {
-            let Some((_offset, Data::Blob(BlobRef { digest, .. }))) =
-                this.segments.get(this.position_index)
+            let Some((_offset, Segment::BlobRef { digest, .. })) =
+                segments_with_offsets.get(this.position_index)
             else {
                 // If the next segment is not a blob, we clear the active blob reader and then we're done
                 this.current_blob = TryMaybeDone::Gone;
