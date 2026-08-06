@@ -1,0 +1,7 @@
+lang {
+    builtins "split" "hasContext" "head" "elemAt" "derivation"
+}
+
+runtime-opts {
+    eval-strict
+}

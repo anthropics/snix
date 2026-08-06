@@ -111,19 +111,6 @@ let
     "eval-okay-dirof.nix" = [ nix_latest_verified ];
   };
 
-  glueSkippedLangTests = {
-    # TODO: fetchers try to create files in /fake-home, and no network in the sandbox
-    "eval-okay-fetchtarball-context.nix" = true;
-    "eval-okay-fetchtarball.nix" = true;
-    "eval-okay-fetchurl-context.nix" = true;
-    "eval-okay-fetchurl.nix" = true;
-    # builtins.parseFlakeRef was introduced in 2.18
-    "eval-okay-parseFlakeRef.nix" = [ nix_2_3 ];
-    # something changed in storePath behaviour between 2.3 and 2.30,
-    # and it makes the same test failing in 2.3
-    "eval-okay-storePath2.nix" = [ nix_2_3 ];
-  };
-
   runCppNixLangTests =
     testRoot: skippedLangTests: cpp-nix:
     let
@@ -269,9 +256,5 @@ depot.nix.readTree.drvTargets {
   "eval-nix-2_3" = runCppNixLangTests ../eval/src/tests evalSkippedLangTests nix_2_3;
   "eval-nix-latest_verified" =
     runCppNixLangTests ../eval/src/tests evalSkippedLangTests
-      nix_latest_verified;
-  "glue-nix-2_3" = runCppNixLangTests ../glue/src/tests glueSkippedLangTests nix_2_3;
-  "glue-nix-latest_verified" =
-    runCppNixLangTests ../glue/src/tests glueSkippedLangTests
       nix_latest_verified;
 }

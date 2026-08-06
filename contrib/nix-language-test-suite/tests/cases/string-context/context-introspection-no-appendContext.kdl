@@ -1,0 +1,7 @@
+lang {
+  builtins "derivation" "substring" "any" "hasContext" "getContext" "attrNames" "unsafeDiscardStringContext" "toJSON"
+}
+
+runtime-opts {
+  eval-strict
+}

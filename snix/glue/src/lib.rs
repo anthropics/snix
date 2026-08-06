@@ -6,9 +6,6 @@ pub mod snix_store_io;
 
 mod fetchurl;
 
-#[cfg(test)]
-mod tests;
-
 /// Tell the Evaluator to resolve `<nix>` to the path `/__corepkgs__`,
 /// which has special handling in [snix_io::SnixIO].
 /// This is used in nixpkgs to import `fetchurl.nix` from `<nix>`.

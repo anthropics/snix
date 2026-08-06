@@ -16,15 +16,10 @@ let
   # to infect it with the context of `copied`.
   appendContextFrom = copied: target: (builtins.substring 0 0 "${copied}") + "${target}";
 
-  # `split` discards (!!) contexts, we first split by `/` (there's at least one such `/` by
-  # virtue of `target` being a store path, i.e. starting with `$store_root/$derivation_name`)
-  # then, we reassemble the list into a proper string.
-  discardContext = target: builtins.concatStringsSep "" (builtins.split "(.*)" "${target}");
-
   # Note that this should never return true for any attribute set.
   hasContextInAttrKeys = attrs: builtins.any builtins.hasContext (builtins.attrNames attrs);
 
-  path = "${./eval-okay-context-introspection.nix}";
+  path = "${./context-introspection-no-appendContext.nix}";
 
   # This is a context-less attribute set, which should be exactly the same
   # as `builtins.getContext combo-path`.
@@ -55,9 +50,6 @@ let
 
   # Eta rule for strings with context.
   etaRule = str: str == appendContextFrom str (builtins.unsafeDiscardStringContext str);
-
-  etaRule' = str: str == appendContextFrom str (discardContext str);
-
 in
 [
   (!hasContextInAttrKeys desired-context)
