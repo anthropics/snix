@@ -66,7 +66,7 @@ systemd.services.snix-store-daemon = {
 ```
 
 ### nar-bridge
-`nar-bridge` connects to `/run/snix-store-daemon.sock`, and exposes a Nix Binary Cache HTTP endpoint, while talking to `snix-ca[store]` over gRPC.
+`nar-bridge` connects to `/run/snix-store-daemon.sock`, and exposes a Nix Binary Cache HTTP endpoint, while talking to `snix-[ca]store` over gRPC.
 
 The configuration is quite simple:
 
@@ -250,9 +250,9 @@ $ nix copy --to http://localhost:8080?compression=none&secret-key=/run/secrets/n
 ```
 
 #### Using `snix-store copy`
-Above is always sending the entire NAR to nar-bridge, letting deduplication happen on the host running `nar-bridge` and `snix-store daemon`. Data already are present in the stores is not inserted multiple times, but we still send lots of unnecessary data.
+Above is always sending the entire NAR to nar-bridge, letting deduplication happen on the host running `nar-bridge` and `snix-store daemon`. Data already present in the stores is not inserted multiple times, but we still send lots of unnecessary data.
 
-This obviously is suboptimal, so we will instaed switch to the `snix-store copy` command and copy to the `gRPC` endpoint directly, which will avoid uploading data already present.
+This obviously is suboptimal, so we will instead switch to the `snix-store copy` command and copy to the `gRPC` endpoint directly, which will avoid uploading data already present.
 
 To use `snix-store copy`, we first write a composition config that implements signing:
 
@@ -284,7 +284,7 @@ If set to `-`, it's read from stdin, so something like the following would work:
 
 ```console
 $ EXPERIMENTAL_STORE_COMPOSITION=/path/to/snix-copy.toml \
-  nix path-info --recursive --json /nix/store/xxxx-mypath` | \
+  nix path-info --recursive --json /nix/store/xxxx-mypath | \
   snix-store copy -
 ```
 
@@ -294,7 +294,7 @@ Deploying this comes with a few caveats. We plan to improve things here over tim
 ### Slow NAR rendering
 NAR rendering currently takes some time, especially if store paths contain lots of small files.
 
-This is a combination of [#93][cs-bs-split](#93) and very linear NAR rendering.
+This is a combination of [#93][cs-bs-split] and very linear NAR rendering.
 It can be alleviated by adding a caching layer, as done in [the nixos.snix.store deployment](https://git.snix.dev/snix/snix/src/commit/4b0d7f71d531444ac24b5890ab92d5f4f86ebfbb/ops/modules/www/nixos.snix.store.nix#L54).
 
 ### No garbage collection
@@ -308,5 +308,5 @@ Implementing proper GC is on the roadmap, but due to the different backends invo
 
 [cs-bs-split]: https://git.snix.dev/snix/snix/issues/93
 [^nginx-grpc]: Unfortunately exposing gRPC through nginx is a bit ugly, as error codes need to be manually mapped to retain semantics. A [PR](https://github.com/NixOS/nixpkgs/pull/549553) has been sent to upstream this to the nginx NixOS module.
-[^nar-compression]: Note that even though the NARInfo does say `Compression: none`, the actual NAR is sent compressed using zstd over the wire, by making use of HTTPs `Content-Encoding` header. Nix uses libcurl under the hood, which will transparently negotiate zstd compression.
+[^nar-compression]: Note that even though the NARInfo does say `Compression: none`, the actual NAR is sent compressed using zstd over the wire, by making use of HTTP's `Content-Encoding` header. Nix uses libcurl under the hood, which will transparently negotiate zstd compression.
 [^cppnix-pathinfo-breakage]: Note CppNix did change this format to return an attrset with store paths as keys instead of this list of objects with the `path` key, so you might need to reshape your JSON manually or `nix-shell` in Snix until https://git.snix.dev/snix/snix/issues/232 is done.
