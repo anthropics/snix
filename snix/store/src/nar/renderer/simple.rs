@@ -1,74 +1,17 @@
-use crate::pathinfoservice;
-
-use super::{NarCalculationService, RenderError};
-use nix_compat::{nar::writer::r#async as nar_writer, nixhash::Sha256Digester};
+use nix_compat::nar::writer::r#async as nar_writer;
 use snix_castore::{Node, blobservice::BlobService, directoryservice::DirectoryService};
 use tokio::io::{self, AsyncWrite, BufReader};
-use tokio_util::io::InspectWriter;
-use tonic::async_trait;
-use tracing::instrument;
 
-pub struct SimpleRenderer<BS, DS> {
-    blob_service: BS,
-    directory_service: DS,
-}
-
-impl<BS, DS> SimpleRenderer<BS, DS> {
-    pub fn new(blob_service: BS, directory_service: DS) -> Self {
-        Self {
-            blob_service,
-            directory_service,
-        }
-    }
-}
-
-#[async_trait]
-impl<BS, DS> NarCalculationService for SimpleRenderer<BS, DS>
-where
-    BS: BlobService + Clone,
-    DS: DirectoryService + Clone,
-{
-    async fn calculate_nar(
-        &self,
-        root_node: &Node,
-    ) -> Result<(u64, [u8; 32]), pathinfoservice::Error> {
-        Ok(calculate_size_and_sha256(
-            root_node,
-            self.blob_service.clone(),
-            self.directory_service.clone(),
-        )
-        .await?)
-    }
-}
-
-/// Invoke [write_nar], and return the size and sha256 digest of the produced
-/// NAR output.
-#[instrument(skip_all)]
-pub async fn calculate_size_and_sha256<BS, DS>(
-    root_node: &Node,
-    blob_service: BS,
-    directory_service: DS,
-) -> Result<(u64, [u8; 32]), RenderError>
-where
-    BS: BlobService + Send,
-    DS: DirectoryService + Send,
-{
-    let mut digester = Sha256Digester::new();
-    let mut nar_size = 0;
-    let writer = InspectWriter::new(tokio::io::sink(), |data| {
-        nar_size += data.len() as u64;
-        digester.update(data);
-    });
-
-    write_nar(writer, root_node, blob_service, directory_service).await?;
-
-    Ok((nar_size, digester.finalize().into()))
-}
+use crate::nar::RenderError;
 
 /// Accepts a [Node] pointing to the root of a (store) path,
 /// and uses the passed blob_service and directory_service to perform the
 /// necessary lookups as it traverses the structure.
 /// The contents in NAR serialization are writen to the passed [AsyncWrite].
+///
+/// This function is very linear, so roundtrip times add up quickly.
+/// You might want to use [crate::nar::write_nar] instead, which opens more
+/// blobs concurrently.
 pub async fn write_nar<W, BS, DS>(
     mut w: W,
     root_node: &Node,
@@ -77,8 +20,8 @@ pub async fn write_nar<W, BS, DS>(
 ) -> Result<(), RenderError>
 where
     W: AsyncWrite + Unpin + Send,
-    BS: BlobService + Send,
-    DS: DirectoryService + Send,
+    BS: BlobService,
+    DS: DirectoryService,
 {
     // Initialize NAR writer
     let nar_root_node = nar_writer::open(&mut w)

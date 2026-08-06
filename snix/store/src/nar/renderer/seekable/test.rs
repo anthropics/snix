@@ -1,9 +1,9 @@
+use super::Reader;
 use crate::fixtures::{
     CASTORE_NODE_COMPLICATED, CASTORE_NODE_HELLOWORLD, CASTORE_NODE_SYMLINK, CASTORE_NODE_TOO_BIG,
     CASTORE_NODE_TOO_SMALL,
 };
 use crate::fixtures::{NAR_CONTENTS_COMPLICATED, NAR_CONTENTS_HELLOWORLD, NAR_CONTENTS_SYMLINK};
-use crate::nar::seekable::Reader;
 use futures::StreamExt;
 use mockall::predicate;
 use snix_castore::Node;

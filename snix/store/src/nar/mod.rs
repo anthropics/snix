@@ -7,13 +7,12 @@ use tonic::async_trait;
 mod import;
 mod listing;
 mod renderer;
-pub mod seekable;
 
 pub use import::{NarIngestionError, ingest_nar, ingest_nar_and_hash};
 pub use listing::{Error as ListingError, produce_listing};
-pub use renderer::SimpleRenderer;
-pub use renderer::calculate_size_and_sha256;
-pub use renderer::write_nar;
+pub use renderer::{
+    Reader, SimpleRenderer, calculate_size_and_sha256, write_nar, write_nar_simple,
+};
 
 use crate::pathinfoservice;
 

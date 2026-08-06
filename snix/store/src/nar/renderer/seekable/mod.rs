@@ -12,14 +12,37 @@ use segments::Segments;
 use snix_castore::Node;
 use snix_castore::directoryservice::DirectoryService;
 use snix_castore::{blobservice::BlobService, directoryservice::DirectoryGraphBuilder};
-use tokio::io::{AsyncBufRead, AsyncRead, AsyncSeek};
+use tokio::io::{AsyncBufRead, AsyncRead, AsyncSeek, AsyncWrite};
 use tokio_stream::StreamExt;
 use tracing::{instrument, warn};
 
 mod segments;
 
+#[cfg(test)]
+mod test;
+
 /// The number of segments to poll data from concurrently.
 const SEGMENT_CONCURRENCY: usize = 24;
+
+pub async fn write_nar<W, BS, DS>(
+    mut w: W,
+    root_node: &Node,
+    blob_service: &BS,
+    directory_service: &DS,
+) -> Result<(), RenderError>
+where
+    W: AsyncWrite + Unpin + Send,
+    BS: BlobService,
+    DS: DirectoryService,
+{
+    let mut reader = Reader::new(root_node, blob_service, directory_service).await?;
+    tokio::io::copy_buf(&mut reader, &mut w)
+        .await
+        // FUTUREWORK: RenderError makes no sense
+        .map_err(RenderError::BlobService)?;
+
+    Ok(())
+}
 
 #[pin_project]
 pub struct Reader<'bs, BS: BlobService + 'bs> {
@@ -44,6 +67,7 @@ impl<'bs, BS: BlobService + Clone + 'bs> Reader<'bs, BS> {
         root_node: &Node,
         blob_service: BS,
         directory_service: impl DirectoryService,
+        // FUTUREWORK: add concurrency arg
     ) -> Result<Self, RenderError> {
         // If this is a directory, resolve all subdirectories
         let directories = if let Node::Directory { digest, .. } = root_node {

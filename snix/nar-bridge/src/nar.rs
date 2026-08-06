@@ -63,15 +63,13 @@ pub async fn get_head(
                 .header("content-length", user_nar_size)
                 .body(Body::empty())
                 .unwrap()
-        } else if let Some(TypedHeader(ranges)) = ranges {
-            // If this is a range request, construct a seekable NAR reader.
-            let r =
-                snix_store::nar::seekable::Reader::new(&root_node, blob_service, directory_service)
-                    .await
-                    .map_err(|e| {
-                        warn!(err=%e, "failed to construct seekable nar reader");
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })?;
+        } else {
+            let r = snix_store::nar::Reader::new(&root_node, blob_service, directory_service)
+                .await
+                .map_err(|err| {
+                    warn!(%err, "failed to construct seekable nar reader");
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
 
             // ensure the user-supplied nar size was correct, no point returning data otherwise.
             if r.nar_size() != user_nar_size {
@@ -82,27 +80,16 @@ pub async fn get_head(
                 );
                 return Err(StatusCode::BAD_REQUEST);
             }
-            Ranged::new(Some(ranges), KnownSize::sized(r, user_nar_size)).into_response()
-        } else {
-            // use the non-seekable codepath if there's no range(s) requested,
-            // as it uses less memory.
-            let (w, r) = tokio::io::duplex(1024 * 8);
 
-            // spawn a task rendering the NAR to the client.
-            tokio::spawn(async move {
-                if let Err(e) =
-                    snix_store::nar::write_nar(w, &root_node, blob_service, directory_service).await
-                {
-                    warn!(err=%e, "failed to write out NAR");
-                }
-            });
-
-            Response::builder()
-                // If the client lied about it, we will echo back a wrong `Content-Length`,
-                // which is their problem.
-                .header("content-length", user_nar_size)
-                .body(Body::from_stream(ReaderStream::new(r)))
-                .unwrap()
+            if let Some(TypedHeader(ranges)) = ranges {
+                // Reply the requested ranges
+                Ranged::new(Some(ranges), KnownSize::sized(r, user_nar_size)).into_response()
+            } else {
+                Response::builder()
+                    .header("content-length", user_nar_size)
+                    .body(Body::from_stream(ReaderStream::new(r)))
+                    .unwrap()
+            }
         },
     ))
 }
@@ -420,8 +407,8 @@ mod tests {
         snix_store::nar::write_nar(
             &mut buf,
             &CASTORE_NODE_COMPLICATED,
-            blob_service,
-            directory_service,
+            &blob_service,
+            &directory_service,
         )
         .await
         .expect("write nar");
