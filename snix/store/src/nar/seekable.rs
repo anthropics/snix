@@ -69,6 +69,11 @@ fn flush_segment(segments: &mut Vec<(u64, Data)>, offset: &mut u64, cur_segment:
 /// Used during construction.
 /// Recursively walks the node and its children, and fills `segments` with the appropriate
 /// `Data::Literal` and `Data::Blob` elements.
+///
+/// The function is infallible, as:
+///  - we only write to buffers
+///  - all castore `PathComponent` and `SymlinkTarget` can be expressed in NAR
+///  - the passed directory closure is complete
 fn walk_node(
     segments: &mut Vec<(u64, Data)>,
     offset: &mut u64,
@@ -76,17 +81,21 @@ fn walk_node(
     node: &Node,
     // Includes a reference to the current segment's buffer
     nar_node: nar_writer::Node<'_, Vec<u8>>,
-) -> Result<(), std::io::Error> {
+) {
     match node {
         snix_castore::Node::Symlink { target } => {
-            nar_node.symlink(target.as_ref())?;
+            nar_node
+                .symlink(target.as_ref())
+                .expect("Snix bug: failed to write symlink as NAR");
         }
         snix_castore::Node::File {
             digest,
             size,
             executable,
         } => {
-            let (cur_segment, skip) = nar_node.file_manual_write(*executable, *size)?;
+            let (cur_segment, skip) = nar_node
+                .file_manual_write(*executable, *size)
+                .expect("Snix bug: failed to write framing before file node as NAR");
 
             // Flush the segment up until the beginning of the blob
             flush_segment(segments, offset, std::mem::take(cur_segment));
@@ -106,29 +115,35 @@ fn walk_node(
             // Instead we have stored the blob reference in a Data::Blob segment,
             // and the poll_read implementation will take care of serving the
             // appropriate blob at this offset.
-            skip.close(cur_segment)?;
+            skip.close(cur_segment)
+                .expect("Snix bug: failed to close NAR file node");
         }
         snix_castore::Node::Directory { digest, .. } => {
             let directory = directories
                 .get(digest)
-                .expect("Snix bug: directory not found");
+                .expect("Snix bug: referenced directory missing from directory closure");
 
             // start a directory node
-            let mut nar_node_directory = nar_node.directory()?;
+            let mut nar_node_directory = nar_node
+                .directory()
+                .expect("Snix bug: failed to write directory node as NAR");
 
             // for each node in the directory, create a new entry with its name,
             // and then recurse on that entry.
             for (name, node) in directory.nodes() {
-                let child_node = nar_node_directory.entry(name.as_ref())?;
+                let child_node = nar_node_directory
+                    .entry(name.as_ref())
+                    .expect("Snix bug: failed to write NAR entry");
 
-                walk_node(segments, offset, directories, node, child_node)?;
+                walk_node(segments, offset, directories, node, child_node);
             }
 
             // close the directory
-            nar_node_directory.close()?;
+            nar_node_directory
+                .close()
+                .expect("Snix bug: failed to close directory node");
         }
     }
-    Ok(())
 }
 
 impl<B: BlobService + 'static> Reader<B> {
@@ -195,21 +210,26 @@ impl<B: BlobService + 'static> Reader<B> {
             })
             .unwrap_or_default();
 
-        let mut segments = vec![];
-        let mut cur_segment: Vec<u8> = vec![];
-        let mut offset = 0;
+        let segments = {
+            let mut segments = vec![];
+            let mut cur_segment: Vec<u8> = vec![];
+            let mut offset = 0;
 
-        let nar_node = nar_writer::open(&mut cur_segment)?;
+            let nar_node =
+                nar_writer::open(&mut cur_segment).expect("Snix bug: failed to open nar_writer");
 
-        walk_node(
-            &mut segments,
-            &mut offset,
-            &directories,
-            &root_node,
-            nar_node,
-        )?;
-        // Flush the final segment
-        flush_segment(&mut segments, &mut offset, std::mem::take(&mut cur_segment));
+            walk_node(
+                &mut segments,
+                &mut offset,
+                &directories,
+                &root_node,
+                nar_node,
+            );
+
+            // Flush the final segment
+            flush_segment(&mut segments, &mut offset, std::mem::take(&mut cur_segment));
+            segments
+        };
 
         Ok(Reader {
             segments,
