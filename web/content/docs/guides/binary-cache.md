@@ -278,7 +278,7 @@ type = "keyfile-signing"
 This uses mTLS to authenticate when connecting to the gRPC endpoint.
 If your server uses a custom CA, you might want to also set `tls-ca-cert-path`.
 
-You can then run `snix-store copy` pointed to this config. Instead of the store paths to upload, it takes a path to a json file usually produced by the `nix path-info --json` command. [^cppnix-pathinfo-breakage]
+You can then run `snix-store copy` pointed to this config. Instead of the store paths to upload, it takes a path to a json file usually produced by the `nix path-info --json` command. [^cppnix-pathinfo-format]
 
 If set to `-`, it's read from stdin, so something like the following would work:
 
@@ -307,4 +307,4 @@ Implementing proper GC is on the roadmap, but due to the different backends invo
 [cs-bs-split]: https://git.snix.dev/snix/snix/issues/93
 [^nginx-grpc]: Unfortunately exposing gRPC through nginx is a bit ugly, as error codes need to be manually mapped to retain semantics. A [PR](https://github.com/NixOS/nixpkgs/pull/549553) has been sent to upstream this to the nginx NixOS module.
 [^nar-compression]: Note that even though the NARInfo does say `Compression: none`, the actual NAR is sent compressed using zstd over the wire, by making use of HTTP's `Content-Encoding` header. Nix uses libcurl under the hood, which will transparently negotiate zstd compression.
-[^cppnix-pathinfo-breakage]: Note CppNix did change this format to return an attrset with store paths as keys instead of this list of objects with the `path` key, so you might need to reshape your JSON manually or `nix-shell` in Snix until https://git.snix.dev/snix/snix/issues/232 is done.
+[^cppnix-pathinfo-format]: Both shapes of that output are accepted: the list of objects with a `path` key (`exportReferencesGraph`, Nix < 2.19, Lix), as well as the attrset keyed by store path (CppNix >= 2.19).

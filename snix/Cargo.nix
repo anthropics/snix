@@ -23655,6 +23655,7 @@ rec {
           filter = sourceFilter;
           src = ./cli/store;
         };
+        libName = "snix_cli_store";
         dependencies = [
           {
             name = "async-stream";

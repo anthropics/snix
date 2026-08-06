@@ -4,16 +4,13 @@ use clap::Subcommand;
 use futures::StreamExt;
 use futures::TryStreamExt;
 use nix_compat::nixbase32;
+use nix_compat::nixhash::{CAHash, NixHash};
 use nix_compat::store_path;
 use nix_compat::store_path::StorePath;
 use nix_compat::wire::de::Error;
-use nix_compat::{
-    narinfo::Signature,
-    nixhash::{CAHash, NixHash},
-};
-use serde_with::{DefaultOnNull, serde_as};
 use snix_castore::import::fs::ingest_path;
 use snix_cli::shutdown_signal;
+use snix_cli_store::path_metadata::{self, PathMetadata};
 use snix_store::decompression::DecompressedReader;
 use snix_store::nar::NarCalculationService;
 use snix_store::utils::ServiceUrls;
@@ -113,22 +110,24 @@ enum Commands {
         #[clap(flatten)]
         service_addrs: snix_store::utils::ServiceUrlsGrpc,
 
-        /// A path pointing to a JSON file(or '-' for stdin) containing store path metadata.
-        /// Needs to be a list of objects with `narHash`, `narSize`, `path`, `references` fields;
-        /// optionally `deriver`, `signatures`.
+        /// A path pointing to a JSON file (or '-' for stdin) containing store path
+        /// metadata. Needs to provide `narHash`, `narSize`, `references` and optionally
+        /// `deriver`, `signatures` per store path, either as a list of objects with an
+        /// additional `path` field (as provided by the `exportReferencesGraph` feature,
+        /// Nix < 2.19 and Lix), or as an attrset keyed by store path (as provided by
+        /// CppNix >= 2.19).
         ///
-        /// Usually provided by the `exportReferencesGraph` feature.
-        ///
-        /// Can also be provided by the following Nix<2.23/Lix command:
+        /// Both shapes are produced by the following command, depending on the
+        /// implementation and version:
         ///
         /// ```notrust
-        /// nix path-info --json --closure-size --recursive <some-path>
+        /// nix path-info --json --recursive <some-path>
         /// ```
         reference_graph_path: PathBuf,
 
         #[arg(long, env, default_value_t = false)]
-        /// If enabled, accepts newline-delimited JSON instead of a list,
-        /// and reads it in a streaming fashion.
+        /// If enabled, accepts newline-delimited JSON, with the metadata for a single
+        /// store path per line, and reads it in a streaming fashion.
         jsonl: bool,
         // FUTUREWORK: add a flag to check for references to be valid
         // (in the sent set, or in the PathInfoService)
@@ -467,30 +466,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let (blob_service, directory_service, path_info_service, _nar_calculation_service) =
                 snix_store::utils::construct_services(service_addrs).await?;
 
-            /// Ad-hoc definition for the fields expected in the JSON.
-            /// It is less strict than `ExportedPathInfo` (no `closureSize` field).
-            #[serde_as]
-            #[derive(serde::Deserialize)]
-            struct PathMetadata {
-                #[serde(
-                    rename = "narHash",
-                    deserialize_with = "nix_compat::nixhash::serde::from_nix_nixbase32_or_sri"
-                )]
-                nar_sha256: [u8; 32],
-
-                #[serde(rename = "narSize")]
-                nar_size: u64,
-
-                pub path: StorePath,
-
-                pub deriver: Option<StorePath>,
-                #[serde(default)]
-                pub references: Vec<StorePath>,
-                #[serde(default)]
-                #[serde_as(as = "DefaultOnNull")]
-                pub signatures: Vec<Signature<String>>,
-            }
-
             // The span tracking the entire operation
             let copy_paths_span =
                 info_span!("copy_paths", "indicatif.pb_show" = tracing::field::Empty);
@@ -507,51 +482,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
             let mut source = snix_cli::reader_for_path(reference_graph_path).await?;
 
-            // Create a stream producing io::Result<PathMetadata>.
+            // Create a stream producing io::Result<(StorePath, PathMetadata)>.
             let elems = async_stream::try_stream! {
                 if jsonl {
                     // read json lines from source, emit individually
                     let mut lines = source.lines();
                     while let Some(line) = lines.next_line().await? {
-                        let path_metadata : PathMetadata = serde_json::from_str(line.as_str()).map_err(std::io::Error::other)?;
-                        yield path_metadata
+                        yield path_metadata::parse_one(line.as_bytes()).map_err(std::io::Error::other)?
                     }
                 } else {
-                    // Read the entire file as a list of objects.
+                    // Read the entire file.
                     let mut json_bytes: Vec<u8> = vec![];
                     source.read_to_end(&mut json_bytes).await?;
 
-                    let reference_graph: Vec<PathMetadata> =
-                        serde_json::from_slice(json_bytes.as_slice()).map_err(std::io::Error::other)?;
+                    let reference_graph = path_metadata::parse_all(&json_bytes).map_err(std::io::Error::other)?;
 
                     copy_paths_span2.pb_set_length(reference_graph.len() as u64);
 
-                    for path_metadata in reference_graph {
-                        yield path_metadata;
+                    for entry in reference_graph {
+                        yield entry;
                     }
                 }
             };
 
             elems
-                .map(|v: std::io::Result<PathMetadata>| {
+                .map(|v: std::io::Result<(StorePath, PathMetadata)>| {
                     {
                         async {
-                            let PathMetadata {
-                                nar_sha256,
-                                nar_size,
-                                path: store_path,
-                                deriver,
-                                references,
-                                signatures,
-                            } = v.inspect_err(|err| {
-                                warn!(?err, "failed to parse line");
+                            let (
+                                store_path,
+                                PathMetadata {
+                                    nar_sha256,
+                                    nar_size,
+                                    deriver,
+                                    references,
+                                    signatures,
+                                },
+                            ) = v.inspect_err(|err| {
+                                warn!(?err, "failed to read store path metadata");
                             })?;
 
                             let span = Span::current();
                             span.record("path_info.name", store_path.name());
                             span.record("path_info.digest", nixbase32::encode(store_path.digest()));
                             span.pb_set_style(&snix_tracing::PB_SPINNER_STYLE);
-                            span.pb_set_message(&format!("Ingesting {}", &store_path.to_string()));
+                            span.pb_set_message(&format!("Ingesting {store_path}"));
                             span.pb_start();
 
                             // skip if that path already exists
@@ -561,7 +536,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                 .map_err(std::io::Error::other)?
                                 .is_some()
                             {
-                                debug!(path_into.store_path=%store_path, "skipped, already exists");
+                                debug!(path_info.store_path=%store_path, "skipped, already exists");
                                 return Ok(());
                             }
 
