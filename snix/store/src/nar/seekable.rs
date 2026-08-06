@@ -200,8 +200,11 @@ impl<B: BlobService + 'static> Reader<B> {
             Default::default()
         };
 
-        Self::new_with_resolved_directories(root_node, blob_service, directories)
-            .map_err(RenderError::NARWriterError)
+        Ok(Self::new_with_resolved_directories(
+            root_node,
+            blob_service,
+            directories,
+        ))
     }
 
     /// Creates a new seekable NAR renderer for the given castore root node.
@@ -213,7 +216,7 @@ impl<B: BlobService + 'static> Reader<B> {
         root_node: Node,
         blob_service: B,
         directories: HashMap<B3Digest, Directory>,
-    ) -> Result<Self, std::io::Error> {
+    ) -> Self {
         let segments = {
             let mut segments = vec![];
             let mut cur_segment: Vec<u8> = vec![];
@@ -235,14 +238,14 @@ impl<B: BlobService + 'static> Reader<B> {
             segments
         };
 
-        Ok(Reader {
+        Reader {
             segments,
             position_bytes: 0,
             position_index: 0,
             blob_service: blob_service.into(),
             seeking: false,
             current_blob: TryMaybeDone::Gone,
-        })
+        }
     }
 
     pub fn stream_len(&self) -> u64 {
