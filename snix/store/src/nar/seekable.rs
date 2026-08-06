@@ -12,7 +12,7 @@ use super::RenderError;
 use bytes::{BufMut, Bytes};
 
 use nix_compat::nar::writer::sync as nar_writer;
-use snix_castore::directoryservice::{DirectoryGraph, DirectoryService};
+use snix_castore::directoryservice::DirectoryService;
 use snix_castore::{B3Digest, Node};
 use snix_castore::{
     Directory,
@@ -162,7 +162,7 @@ impl<B: BlobService + 'static> Reader<B> {
         directory_service: impl DirectoryService,
     ) -> Result<Self, RenderError> {
         // If this is a directory, resolve all subdirectories
-        let maybe_directory_graph = if let Node::Directory { digest, .. } = root_node {
+        let directories = if let Node::Directory { digest, .. } = root_node {
             let mut builder = DirectoryGraphBuilder::new_root_to_leaves(digest.to_owned());
             let mut directories = directory_service.get_recursive(&digest);
             while let Some(directory) = directories
@@ -175,7 +175,7 @@ impl<B: BlobService + 'static> Reader<B> {
                     .map_err(RenderError::OrderingError)?;
             }
 
-            Some(builder.build().map_err(|err| {
+            let directory_graph = builder.build().map_err(|err| {
                 if err == snix_castore::directoryservice::OrderingError::EmptySet {
                     // The graph should at least contain the root, if there's no child directories.
                     // The only way we could run into this is by the
@@ -187,37 +187,33 @@ impl<B: BlobService + 'static> Reader<B> {
                 } else {
                     RenderError::OrderingError(err)
                 }
-            })?)
+            })?;
+
+            HashMap::from_iter(
+                directory_graph
+                    // drain order doesn't really matter
+                    .drain_leaves_to_root()
+                    .map(|d| (d.digest(), d)),
+            )
         } else {
             // If the top-level node is a file or a symlink, there is no directory graph.
-            None
+            Default::default()
         };
 
-        Self::new_with_directory_graph(root_node, blob_service, maybe_directory_graph)
+        Self::new_with_resolved_directories(root_node, blob_service, directories)
             .map_err(RenderError::NARWriterError)
     }
 
     /// Creates a new seekable NAR renderer for the given castore root node.
     /// This version of the instantiation does not perform any I/O and as such is not async.
-    /// However it requires all directories to be passed as a [DirectoryGraph].
+    /// However it requires all directories to be previously fetched and passed in as a HashMap.
     ///
-    /// panics if the directory closure is not the closure of the root node
-    fn new_with_directory_graph(
+    /// Panics if the closure is not complete.
+    fn new_with_resolved_directories(
         root_node: Node,
         blob_service: B,
-        directory_closure: Option<DirectoryGraph>,
+        directories: HashMap<B3Digest, Directory>,
     ) -> Result<Self, std::io::Error> {
-        let directories: HashMap<B3Digest, Directory> = directory_closure
-            .map(|directory_graph| {
-                // We don't really care about the drain order
-                HashMap::from_iter(
-                    directory_graph
-                        .drain_leaves_to_root()
-                        .map(|d| (d.digest(), d)),
-                )
-            })
-            .unwrap_or_default();
-
         let segments = {
             let mut segments = vec![];
             let mut cur_segment: Vec<u8> = vec![];
