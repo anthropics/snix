@@ -1,42 +1,36 @@
 use std::{
-    cmp::min,
     collections::HashMap,
-    io,
+    io::{self, SeekFrom},
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
 };
 
 use super::RenderError;
-
-use bytes::BufMut;
+use futures::ready;
+use pin_project::pin_project;
+use segments::Segments;
 use snix_castore::Node;
 use snix_castore::directoryservice::DirectoryService;
-use snix_castore::{
-    blobservice::{BlobReader, BlobService},
-    directoryservice::DirectoryGraphBuilder,
-};
-
-use futures::FutureExt;
-use futures::TryStreamExt;
-use futures::future::{BoxFuture, FusedFuture, TryMaybeDone};
-
-use tokio::io::AsyncSeekExt;
+use snix_castore::{blobservice::BlobService, directoryservice::DirectoryGraphBuilder};
+use tokio::io::{AsyncBufRead, AsyncRead, AsyncSeek};
+use tokio_stream::StreamExt;
 use tracing::{instrument, warn};
 
 mod segments;
-use segments::{Segment, Segments};
 
-pub struct Reader<B: BlobService> {
+/// The number of segments to poll data from concurrently.
+const SEGMENT_CONCURRENCY: usize = 24;
+
+#[pin_project]
+pub struct Reader<'bs, BS: BlobService + 'bs> {
     segments: Segments,
-    position_bytes: u64,
-    position_index: usize,
-    blob_service: Arc<B>,
-    seeking: bool,
-    current_blob: TryMaybeDone<BoxFuture<'static, io::Result<Box<dyn BlobReader>>>>,
+    pos: u64,
+    blob_service: BS,
+    #[pin]
+    rd: Box<dyn AsyncBufRead + Send + Unpin + 'bs>,
 }
 
-impl<B: BlobService + 'static> Reader<B> {
+impl<'bs, BS: BlobService + Clone + 'bs> Reader<'bs, BS> {
     /// Creates a new seekable NAR renderer for the given castore root node.
     ///
     /// This function pre-fetches the directory closure using `get_recursive()` and assembles the
@@ -48,7 +42,7 @@ impl<B: BlobService + 'static> Reader<B> {
     #[instrument(skip(blob_service, directory_service), err)]
     pub async fn new(
         root_node: &Node,
-        blob_service: B,
+        blob_service: BS,
         directory_service: impl DirectoryService,
     ) -> Result<Self, RenderError> {
         // If this is a directory, resolve all subdirectories
@@ -90,13 +84,14 @@ impl<B: BlobService + 'static> Reader<B> {
             Default::default()
         };
 
+        let segments = Segments::from_root_node_and_directories(root_node, &directories);
+        let rd = segments.reader_for_offset(0, SEGMENT_CONCURRENCY, blob_service.clone());
+
         Ok(Self {
-            segments: Segments::from_root_node_and_directories(root_node, &directories),
-            position_bytes: 0,
-            position_index: 0,
-            blob_service: blob_service.into(),
-            seeking: false,
-            current_blob: TryMaybeDone::Gone,
+            segments,
+            pos: 0,
+            blob_service,
+            rd,
         })
     }
 
@@ -105,187 +100,92 @@ impl<B: BlobService + 'static> Reader<B> {
     }
 }
 
-impl<B: BlobService + 'static> tokio::io::AsyncSeek for Reader<B> {
-    fn start_seek(mut self: Pin<&mut Self>, pos: io::SeekFrom) -> io::Result<()> {
-        let stream_len = Reader::nar_size(&self);
-
-        let this = &mut *self;
-        if this.seeking {
-            return Err(io::Error::other("Already seeking"));
-        }
-        this.seeking = true;
-
-        let pos = {
-            let (base, offset) = match pos {
-                io::SeekFrom::Start(n) => (n, 0),
-                io::SeekFrom::End(n) => (stream_len, n),
-                io::SeekFrom::Current(n) => (this.position_bytes, n),
-            };
-
-            base.saturating_add_signed(offset)
-        };
-
-        let prev_position_bytes = this.position_bytes;
-        let prev_position_index = this.position_index;
-
-        let segments_with_offsets = this.segments.segments_with_offsets();
-
-        this.position_bytes = min(pos, stream_len);
-        this.position_index = match segments_with_offsets
-            .binary_search_by_key(&this.position_bytes, |&(off, _)| off)
-        {
-            Ok(idx) => idx,
-            Err(idx) => idx - 1,
-        };
-
-        let Some((offset, Segment::BlobRef { digest, .. })) =
-            segments_with_offsets.get(this.position_index)
-        else {
-            // If not seeking into a blob, we clear the active blob reader and then we're done
-            this.current_blob = TryMaybeDone::Gone;
-            return Ok(());
-        };
-        let offset_in_segment = this.position_bytes - offset;
-
-        if prev_position_bytes == this.position_bytes {
-            // position has not changed. do nothing
-        } else if prev_position_index == this.position_index {
-            // seeking within the same segment, re-use the blob reader
-            let mut prev = std::mem::replace(&mut this.current_blob, TryMaybeDone::Gone);
-            this.current_blob = futures::future::try_maybe_done(
-                (async move {
-                    let mut reader = Pin::new(&mut prev).take_output().unwrap();
-                    reader.seek(io::SeekFrom::Start(offset_in_segment)).await?;
-                    Ok(reader)
-                })
-                .boxed(),
-            );
-        } else {
-            // seek to a different segment
-            let blob_service = this.blob_service.clone();
-            let digest = *digest;
-            this.current_blob = futures::future::try_maybe_done(
-                (async move {
-                    let mut reader =
-                        blob_service
-                            .open_read(&digest)
-                            .await?
-                            .ok_or(io::Error::new(
-                                io::ErrorKind::NotFound,
-                                RenderError::BlobNotFound(digest, Default::default()),
-                            ))?;
-                    if offset_in_segment != 0 {
-                        reader.seek(io::SeekFrom::Start(offset_in_segment)).await?;
-                    }
-                    Ok(reader)
-                })
-                .boxed(),
-            );
-        };
-
-        Ok(())
-    }
-    fn poll_complete(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<u64>> {
-        let this = &mut *self;
-
-        if !this.current_blob.is_terminated() {
-            futures::ready!(this.current_blob.poll_unpin(cx))?;
-        }
-        this.seeking = false;
-
-        Poll::Ready(Ok(this.position_bytes))
-    }
-}
-
-impl<B: BlobService + 'static> tokio::io::AsyncRead for Reader<B> {
+impl<'bs, BS: BlobService> AsyncRead for Reader<'bs, BS> {
     fn poll_read(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context,
         buf: &mut tokio::io::ReadBuf,
     ) -> Poll<io::Result<()>> {
-        let this = &mut *self;
-        let segments_with_offsets = this.segments.segments_with_offsets();
+        let this = self.project();
 
-        let Some(&(offset, ref segment)) = segments_with_offsets.get(this.position_index) else {
-            return Poll::Ready(Ok(())); // EOF
+        let bytes_read = {
+            let filled = buf.filled().len();
+            ready!(this.rd.poll_read(cx, buf))?;
+            buf.filled().len() - filled
         };
-
-        let prev_read_buf_pos = buf.filled().len();
-        match segment {
-            Segment::Literal(data) => {
-                let offset_in_segment = this.position_bytes - offset;
-                let offset_in_segment = usize::try_from(offset_in_segment).unwrap();
-                let remaining_data = data.len() - offset_in_segment;
-                let read_size = std::cmp::min(remaining_data, buf.remaining());
-                buf.put(&data[offset_in_segment..offset_in_segment + read_size]);
-            }
-            Segment::BlobRef { size, .. } => {
-                futures::ready!(this.current_blob.poll_unpin(cx))?;
-                this.seeking = false;
-                let blob = Pin::new(&mut this.current_blob)
-                    .output_mut()
-                    .expect("missing blob");
-                futures::ready!(Pin::new(blob).poll_read(cx, buf))?;
-                let read_length = buf.filled().len() - prev_read_buf_pos;
-                let maximum_expected_read_length = (offset + size) - this.position_bytes;
-                let is_eof = read_length == 0;
-                let too_much_returned = read_length as u64 > maximum_expected_read_length;
-                match (is_eof, too_much_returned) {
-                    (true, false) => {
-                        return Poll::Ready(Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "blob short read",
-                        )));
-                    }
-                    (false, true) => {
-                        buf.set_filled(prev_read_buf_pos);
-                        return Poll::Ready(Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "blob continued to yield data beyond end",
-                        )));
-                    }
-                    _ => {}
-                }
-            }
-        };
-        let new_read_buf_pos = buf.filled().len();
-        this.position_bytes += (new_read_buf_pos - prev_read_buf_pos) as u64;
-
-        let prev_position_index = this.position_index;
-        let segments_with_offsets = this.segments.segments_with_offsets();
-        while segments_with_offsets
-            .get(this.position_index)
-            .is_some_and(|&(offset, ref segment)| (this.position_bytes - offset) >= segment.len())
-        {
-            this.position_index += 1;
-        }
-        if prev_position_index != this.position_index {
-            let Some((_offset, Segment::BlobRef { digest, .. })) =
-                segments_with_offsets.get(this.position_index)
-            else {
-                // If the next segment is not a blob, we clear the active blob reader and then we're done
-                this.current_blob = TryMaybeDone::Gone;
-                return Poll::Ready(Ok(()));
-            };
-
-            // The next segment is a blob, open the BlobReader
-            let blob_service = this.blob_service.clone();
-            let digest = *digest;
-            this.current_blob = futures::future::try_maybe_done(
-                (async move {
-                    let reader = blob_service
-                        .open_read(&digest)
-                        .await?
-                        .ok_or(io::Error::new(
-                            io::ErrorKind::NotFound,
-                            RenderError::BlobNotFound(digest, Default::default()),
-                        ))?;
-                    Ok(reader)
-                })
-                .boxed(),
-            );
-        }
+        *this.pos = this
+            .pos
+            .checked_add(bytes_read as u64)
+            .ok_or(std::io::Error::new(
+                std::io::ErrorKind::OutOfMemory,
+                "position > u64::MAX bytes",
+            ))?;
 
         Poll::Ready(Ok(()))
+    }
+}
+
+impl<'bs, BS: BlobService> AsyncBufRead for Reader<'bs, BS> {
+    fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<&[u8]>> {
+        let this = self.project();
+        this.rd.poll_fill_buf(cx)
+    }
+
+    fn consume(self: Pin<&mut Self>, amt: usize) {
+        let this = self.project();
+
+        this.rd.consume(amt);
+        *this.pos = this
+            .pos
+            .checked_add(amt as u64)
+            .expect("consume would increase pos > u64::MAX bytes");
+    }
+}
+
+impl<'bs, BS: BlobService + Clone + 'bs> AsyncSeek for Reader<'bs, BS> {
+    fn start_seek(self: Pin<&mut Self>, pos: io::SeekFrom) -> io::Result<()> {
+        let nar_size = self.nar_size();
+        let new_pos = calc_pos(self.pos, nar_size, pos)?;
+
+        if new_pos != self.pos {
+            // FUTUREWORK: seek forward small amounts by skipping?
+            let mut this = self.project();
+
+            *this.rd = this.segments.reader_for_offset(
+                new_pos,
+                SEGMENT_CONCURRENCY,
+                this.blob_service.clone(),
+            );
+            *this.pos = new_pos;
+        }
+
+        Ok(())
+    }
+    fn poll_complete(self: Pin<&mut Self>, _cx: &mut Context) -> Poll<io::Result<u64>> {
+        Poll::Ready(Ok(self.pos))
+    }
+}
+
+/// For a given nar_size and current position, returns the position that seek_from would seek to.
+fn calc_pos(cur_pos: u64, nar_size: u64, seek_from: SeekFrom) -> std::io::Result<u64> {
+    let new_pos = match seek_from {
+        SeekFrom::Start(p) => p,
+        SeekFrom::End(p) => nar_size.checked_sub_signed(p).ok_or(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "tried to seek before beginning of NAR",
+        ))?,
+        SeekFrom::Current(p) => cur_pos.checked_add_signed(p).ok_or(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "tried to seek way past end of NAR",
+        ))?,
+    };
+
+    if new_pos > nar_size {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "tried to seek past end of NAR",
+        ))
+    } else {
+        Ok(new_pos)
     }
 }

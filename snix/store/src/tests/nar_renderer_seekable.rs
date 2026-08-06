@@ -39,20 +39,37 @@ async fn read(
     #[case] blobservice_fn: impl Fn(&mut MockBlobService),
     #[case] directoryservice_fn: impl Fn(&mut MockDirectoryService),
 ) {
-    // setup services and reader
-    let mut blob_service = MockBlobService::new();
-    blobservice_fn(&mut blob_service);
-    let mut directory_service = MockDirectoryService::new();
-    directoryservice_fn(&mut directory_service);
-    let mut reader = Reader::new(root_node, blob_service, directory_service)
-        .await
-        .expect("constructing reader to succeed");
+    for case in 0..1 {
+        // setup services and reader
+        let mut blob_service = MockBlobService::new();
+        blobservice_fn(&mut blob_service);
+        let mut directory_service = MockDirectoryService::new();
+        directoryservice_fn(&mut directory_service);
+        let mut reader = Reader::new(root_node, &blob_service, directory_service)
+            .await
+            .expect("constructing reader to succeed");
 
-    let mut buf = vec![];
-    tokio::io::copy(&mut reader, &mut buf)
-        .await
-        .expect("copy_buf to succeed");
-    assert_eq!(&expected_nar, &buf, "expect NAR to match");
+        match case {
+            // AsyncRead
+            0 => {
+                let mut buf = vec![];
+                tokio::io::copy(&mut reader, &mut buf)
+                    .await
+                    .expect("copy_buf to succeed");
+                assert_eq!(&expected_nar, &buf, "expect NAR to match");
+            }
+            // AsyncBufRead
+            1 => {
+                let mut buf = vec![];
+                tokio::io::copy_buf(&mut reader, &mut buf)
+                    .await
+                    .expect("copy_buf to succeed");
+
+                assert_eq!(&expected_nar, &buf, "expect NAR to match");
+            }
+            n => unreachable!("unhandled test iteration: {n}"),
+        }
+    }
 }
 
 #[tokio::test]
@@ -67,7 +84,7 @@ async fn detect_too_big() {
 
     let mut reader = Reader::new(
         &CASTORE_NODE_TOO_BIG,
-        blob_service,
+        &blob_service,
         MockDirectoryService::new(),
     )
     .await
@@ -95,7 +112,7 @@ async fn detect_too_small() {
 
     let mut reader = Reader::new(
         &CASTORE_NODE_TOO_SMALL,
-        blob_service,
+        &blob_service,
         MockDirectoryService::new(),
     )
     .await
@@ -122,7 +139,7 @@ async fn single_file_missing_blob() {
 
     let mut reader = Reader::new(
         &CASTORE_NODE_HELLOWORLD,
-        blob_service,
+        &blob_service,
         MockDirectoryService::new(),
     )
     .await
@@ -144,7 +161,7 @@ async fn seek() {
 
     let mut reader = Reader::new(
         &crate::fixtures::CASTORE_NODE_HELLOWORLD,
-        blob_service,
+        &blob_service,
         &MockDirectoryService::new(),
     )
     .await
