@@ -25,7 +25,7 @@ use futures::TryStreamExt;
 use futures::future::{BoxFuture, FusedFuture, TryMaybeDone};
 
 use tokio::io::AsyncSeekExt;
-use tracing::instrument;
+use tracing::{instrument, warn};
 
 #[derive(Debug)]
 struct BlobRef {
@@ -151,8 +151,9 @@ impl<B: BlobService + 'static> Reader<B> {
     ///
     /// This function pre-fetches the directory closure using `get_recursive()` and assembles the
     /// NAR structure, except the file contents which are stored as 'holes' with references to a blob
-    /// of a specific BLAKE3 digest and known size. The AsyncRead implementation will then switch
-    /// between serving the precomputed literal segments, and the appropriate blob for the file
+    /// of a specific BLAKE3 digest and known size.
+    /// The AsyncRead implementation will then switch between serving the
+    /// precomputed literal segments, and the appropriate blob for the file
     /// contents.
     #[instrument(skip(blob_service, directory_service), err)]
     pub async fn new(
@@ -161,10 +162,9 @@ impl<B: BlobService + 'static> Reader<B> {
         directory_service: impl DirectoryService,
     ) -> Result<Self, RenderError> {
         // If this is a directory, resolve all subdirectories
-        let maybe_directory_graph = if let Node::Directory { digest, .. } = &root_node {
-            let mut directories = directory_service.get_recursive(digest);
+        let maybe_directory_graph = if let Node::Directory { digest, .. } = root_node {
             let mut builder = DirectoryGraphBuilder::new_root_to_leaves(digest.to_owned());
-
+            let mut directories = directory_service.get_recursive(&digest);
             while let Some(directory) = directories
                 .try_next()
                 .await
@@ -175,13 +175,21 @@ impl<B: BlobService + 'static> Reader<B> {
                     .map_err(RenderError::OrderingError)?;
             }
 
-            match builder.build() {
-                Ok(directory_graph) => Some(directory_graph),
-                Err(snix_castore::directoryservice::OrderingError::EmptySet) => None,
-                Err(e) => Err(RenderError::OrderingError(e))?,
-            }
+            Some(builder.build().map_err(|err| {
+                if err == snix_castore::directoryservice::OrderingError::EmptySet {
+                    // The graph should at least contain the root, if there's no child directories.
+                    // The only way we could run into this is by the
+                    // DirectoryService not having the root directory we asked
+                    // for, which hints to misconfiguration, so explicitly warn!.
+                    let err = RenderError::DirectoryNotFound(digest,                    "root".into());
+                    warn!(%err, "tried to render NAR, but DirectoryService didn't contain the root directory");
+                    err
+                } else {
+                    RenderError::OrderingError(err)
+                }
+            })?)
         } else {
-            // If the top-level node is a file or a symlink, just pass it on
+            // If the top-level node is a file or a symlink, there is no directory graph.
             None
         };
 
