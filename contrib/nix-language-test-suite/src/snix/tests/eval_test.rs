@@ -68,7 +68,7 @@ fn build_eval(
         blob_service,
         directory_service,
         path_info_service,
-        nar_calculation_service.into(),
+        nar_calculation_service,
         Arc::new(DummyBuildService::default()),
         tokio_runtime.handle().clone(),
         Vec::new(),
