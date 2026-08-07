@@ -46,7 +46,7 @@ impl std::fmt::Display for Error {
 /// The base trait all Directory services need to implement.
 /// This is a simple get and put of [Directory], returning their
 /// digest.
-#[cfg_attr(test, mockall::automock)]
+#[cfg_attr(any(test, feature = "mocks"), mockall::automock)]
 #[async_trait]
 #[auto_impl(&, &mut, Arc, Box)]
 pub trait DirectoryService: Send + Sync {

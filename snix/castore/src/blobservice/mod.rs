@@ -29,7 +29,7 @@ pub use self::object_store::{ObjectStoreBlobService, ObjectStoreBlobServiceConfi
 /// a way to read (and seek) a blob, and a method to create a blobwriter handle,
 /// which will implement a writer interface, and also provides a close function,
 /// to finalize a blob and get its digest.
-#[cfg_attr(test, mockall::automock)]
+#[cfg_attr(any(test, feature = "mocks"), mockall::automock)]
 #[async_trait]
 #[auto_impl(&, &mut, Arc, Box)]
 pub trait BlobService: Send + Sync {

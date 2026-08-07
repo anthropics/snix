@@ -22557,6 +22557,11 @@ rec {
             optional = true;
           }
           {
+            name = "mockall";
+            packageId = "mockall";
+            optional = true;
+          }
+          {
             name = "object_store";
             packageId = "object_store";
             features = [ "http" ];
@@ -22796,6 +22801,7 @@ rec {
             "dep:libc"
           ];
           "fuse" = [ "fs" ];
+          "mocks" = [ "dep:mockall" ];
           "toml" = [ "dep:toml" ];
           "virtiofs" = [
             "fs"
@@ -22819,6 +22825,7 @@ rec {
           "fs"
           "fuse"
           "integration"
+          "mocks"
           "serde"
           "toml"
           "virtiofs"
@@ -24284,6 +24291,11 @@ rec {
             packageId = "lru";
           }
           {
+            name = "mockall";
+            packageId = "mockall";
+            optional = true;
+          }
+          {
             name = "nix-compat";
             packageId = "nix-compat";
             features = [
@@ -24456,6 +24468,7 @@ rec {
             features = [
               "fs"
               "fuse"
+              "mocks"
             ];
           }
           {
@@ -24478,6 +24491,10 @@ rec {
             "fs"
           ];
           "fs" = [ "snix-castore/fs" ];
+          "mocks" = [
+            "dep:mockall"
+            "snix-castore/mocks"
+          ];
           "toml" = [ "dep:toml" ];
           "xp-composition-cli" = [
             "toml"
@@ -24490,6 +24507,7 @@ rec {
           "default"
           "fs"
           "integration"
+          "mocks"
           "toml"
           "xp-composition-cli"
         ];

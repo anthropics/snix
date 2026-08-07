@@ -20,6 +20,7 @@ clap = { workspace = true, features = ["derive", "env"] }
 data-encoding.workspace = true
 ed25519.workspace = true
 futures.workspace = true
+mockall = { workspace = true, optional = true }
 nix-compat = { path = "../nix-compat", features = ["async", "serde"] }
 pin-project.workspace = true
 pin-project-lite.workspace = true
@@ -67,8 +68,13 @@ tempfile.workspace = true
 tokio-retry.workspace = true
 tokio-tar.workspace = true
 hex-literal.workspace = true
-# We have an integration test that mounting a fuse filesystem.
-snix-castore = { path = "../castore", features = ["fs", "fuse"] }
+snix-castore = { path = "../castore", features = [
+  # We have an integration test that is mounting a fuse filesystem.
+  "fs",
+  "fuse",
+  # We want to use the castore mocks in our tests too.
+  "mocks",
+] }
 
 [features]
 default = ["cloud", "fs"]
@@ -78,6 +84,8 @@ cloud = [
   "snix-castore/cloud",
 ]
 fs = ["snix-castore/fs"]
+# exposes Mock*Service structs.
+mocks = ["dep:mockall", "snix-castore/mocks"]
 xp-composition-cli = [
   "toml",
   "snix-castore/xp-composition-url-refs",
@@ -89,7 +97,7 @@ xp-composition-cli = [
 integration = []
 
 [package.metadata.docs.rs]
-features = ["cloud", "fs", "xp-composition-cli"]
+features = ["cloud", "fs", "mocks", "xp-composition-cli"]
 
 [package.metadata.cargo-machete]
 ignored = ["md-5", "tonic-prost"]

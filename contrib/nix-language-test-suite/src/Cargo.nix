@@ -17960,6 +17960,7 @@ rec {
             "dep:libc"
           ];
           "fuse" = [ "fs" ];
+          "mocks" = [ "dep:mockall" ];
           "toml" = [ "dep:toml" ];
           "virtiofs" = [
             "fs"
@@ -18538,6 +18539,7 @@ rec {
             features = [
               "fs"
               "fuse"
+              "mocks"
             ];
           }
         ];
@@ -18552,6 +18554,10 @@ rec {
             "fs"
           ];
           "fs" = [ "snix-castore/fs" ];
+          "mocks" = [
+            "dep:mockall"
+            "snix-castore/mocks"
+          ];
           "toml" = [ "dep:toml" ];
           "xp-composition-cli" = [
             "toml"

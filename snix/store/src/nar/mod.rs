@@ -17,7 +17,7 @@ pub use renderer::write_nar;
 
 use crate::pathinfoservice;
 
-#[cfg_attr(test, mockall::automock)]
+#[cfg_attr(any(test, feature = "mocks"), mockall::automock)]
 #[async_trait]
 #[auto_impl(&, &mut, Arc, Box)]
 pub trait NarCalculationService: Send + Sync {

@@ -40,7 +40,7 @@ pub use self::fs::RootNodesWrapper;
 pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// The base trait all PathInfo services need to implement.
-#[cfg_attr(test, mockall::automock)]
+#[cfg_attr(any(test, feature = "mocks"), mockall::automock)]
 #[async_trait]
 #[auto_impl(&, &mut, Arc, Box)]
 pub trait PathInfoService: Send + Sync {
