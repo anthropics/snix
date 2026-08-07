@@ -117,5 +117,6 @@ runtime-opts {
 //
 // Possible values:
 errors \
+  "Abort" \
   "IO" \
   "NotCoercibleToString"

@@ -255,6 +255,7 @@ fn eval_test(
 // having smarter regexp is preferred
 fn matches_expected_error(version: NixVersion, error_string: &str, expected: &ErrorKind) -> bool {
     let must_contain = match expected {
+        ErrorKind::Abort => &["evaluation aborted"][..],
         ErrorKind::NotCoercibleToString => &["cannot coerce"][..],
         ErrorKind::IO => match version {
             NixVersion::CppNixLatest => &["does not exist", "has an unsupported type"][..],
