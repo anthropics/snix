@@ -26,7 +26,9 @@ pub async fn get_head(
     method: axum::http::Method,
     ranges: Option<TypedHeader<Range>>,
     axum::extract::Path(root_node_enc): axum::extract::Path<String>,
-    axum::extract::Query(GetNARParams { nar_size }): Query<GetNARParams>,
+    axum::extract::Query(GetNARParams {
+        nar_size: user_nar_size,
+    }): Query<GetNARParams>,
     axum::extract::State(AppState {
         blob_service,
         directory_service,
@@ -35,7 +37,7 @@ pub async fn get_head(
 ) -> Result<impl axum::response::IntoResponse, StatusCode> {
     // We insist on the nar_size field being set. If the client dropped it from
     // the NARInfo we sent, it's misbehaving and we reject it.
-    let nar_size = nar_size.ok_or_else(|| {
+    let user_nar_size = user_nar_size.ok_or_else(|| {
         warn!("no nar_size parameter set");
         StatusCode::BAD_REQUEST
     })?;
@@ -58,7 +60,7 @@ pub async fn get_head(
             // If the client lied about it, we will echo back a wrong `Content-Length`,
             // which is their problem.
             Response::builder()
-                .header("content-length", nar_size)
+                .header("content-length", user_nar_size)
                 .body(Body::empty())
                 .unwrap()
         } else if let Some(TypedHeader(ranges)) = ranges {
@@ -72,15 +74,15 @@ pub async fn get_head(
                     })?;
 
             // ensure the user-supplied nar size was correct, no point returning data otherwise.
-            if r.stream_len() != nar_size {
+            if r.stream_len() != user_nar_size {
                 warn!(
                     actual_nar_size = r.stream_len(),
-                    supplied_nar_size = nar_size,
+                    supplied_nar_size = user_nar_size,
                     "wrong nar size supplied"
                 );
                 return Err(StatusCode::BAD_REQUEST);
             }
-            Ranged::new(Some(ranges), KnownSize::sized(r, nar_size)).into_response()
+            Ranged::new(Some(ranges), KnownSize::sized(r, user_nar_size)).into_response()
         } else {
             // use the non-seekable codepath if there's no range(s) requested,
             // as it uses less memory.
@@ -98,7 +100,7 @@ pub async fn get_head(
             Response::builder()
                 // If the client lied about it, we will echo back a wrong `Content-Length`,
                 // which is their problem.
-                .header("content-length", nar_size)
+                .header("content-length", user_nar_size)
                 .body(Body::from_stream(ReaderStream::new(r)))
                 .unwrap()
         },
