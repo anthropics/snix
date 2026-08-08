@@ -100,14 +100,14 @@ impl<B: BlobService + 'static> Reader<B> {
         })
     }
 
-    pub fn stream_len(&self) -> u64 {
+    pub fn nar_size(&self) -> u64 {
         self.segments.total_len()
     }
 }
 
 impl<B: BlobService + 'static> tokio::io::AsyncSeek for Reader<B> {
     fn start_seek(mut self: Pin<&mut Self>, pos: io::SeekFrom) -> io::Result<()> {
-        let stream_len = Reader::stream_len(&self);
+        let stream_len = Reader::nar_size(&self);
 
         let this = &mut *self;
         if this.seeking {

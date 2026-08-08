@@ -74,9 +74,9 @@ pub async fn get_head(
                     })?;
 
             // ensure the user-supplied nar size was correct, no point returning data otherwise.
-            if r.stream_len() != user_nar_size {
+            if r.nar_size() != user_nar_size {
                 warn!(
-                    actual_nar_size = r.stream_len(),
+                    actual_nar_size = r.nar_size(),
                     supplied_nar_size = user_nar_size,
                     "wrong nar size supplied"
                 );
