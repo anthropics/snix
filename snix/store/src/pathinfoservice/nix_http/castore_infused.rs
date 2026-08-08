@@ -31,8 +31,7 @@ where
     }
 
     // Construct a NAR Reader for the given root node
-    let mut r =
-        crate::nar::seekable::Reader::new(node.clone(), blob_service, directory_service).await?;
+    let mut r = crate::nar::seekable::Reader::new(&node, blob_service, directory_service).await?;
 
     // Render the NAR out into a sink, while hashing and calculating nar_size at the same time.
     let (actual_nar_size, actual_nar_hash) = copy_sha256(&mut r, &mut tokio::io::sink()).await?;

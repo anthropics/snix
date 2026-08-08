@@ -14,7 +14,7 @@ impl Segments {
     /// using the given root_node and directories.
     /// Panics if the directory closure is not complete.
     pub fn from_root_node_and_directories(
-        root_node: Node,
+        root_node: &Node,
         directories: &HashMap<B3Digest, Directory>,
     ) -> Self {
         let mut segments = Self {
@@ -25,7 +25,7 @@ impl Segments {
         let mut buf: Vec<u8> = vec![];
         let nar_node = nar_writer::open(&mut buf).expect("Snix bug: failed to open nar_writer");
 
-        walk_node(&mut segments, directories, &root_node, nar_node);
+        walk_node(&mut segments, directories, root_node, nar_node);
 
         // Flush the final segment
         segments.push(Segment::Literal(std::mem::take(&mut buf)));

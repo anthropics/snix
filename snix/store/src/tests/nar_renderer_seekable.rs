@@ -21,7 +21,7 @@ async fn read_to_end(
     #[case] test_output: Result<Result<&[u8], io::ErrorKind>, crate::nar::RenderError>,
 ) {
     let reader_result = Reader::new(
-        test_input.clone(),
+        test_input,
         // don't put anything in the stores, as we don't actually do any requests.
         blob_service.await,
         directory_service.await,
@@ -63,7 +63,7 @@ async fn seek_twice(
     #[future] directory_service: Arc<dyn DirectoryService>,
 ) {
     let mut reader = Reader::new(
-        crate::fixtures::CASTORE_NODE_COMPLICATED.clone(),
+        &crate::fixtures::CASTORE_NODE_COMPLICATED,
         // don't put anything in the stores, as we don't actually do any requests.
         blob_service.await,
         directory_service.await,
@@ -89,7 +89,7 @@ async fn seek(
     #[future] directory_service: Arc<dyn DirectoryService>,
 ) {
     let mut reader = Reader::new(
-        crate::fixtures::CASTORE_NODE_HELLOWORLD.clone(),
+        &crate::fixtures::CASTORE_NODE_HELLOWORLD,
         // don't put anything in the stores, as we don't actually do any requests.
         blob_service.await,
         directory_service.await,

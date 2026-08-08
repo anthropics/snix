@@ -66,7 +66,7 @@ pub async fn get_head(
         } else if let Some(TypedHeader(ranges)) = ranges {
             // If this is a range request, construct a seekable NAR reader.
             let r =
-                snix_store::nar::seekable::Reader::new(root_node, blob_service, directory_service)
+                snix_store::nar::seekable::Reader::new(&root_node, blob_service, directory_service)
                     .await
                     .map_err(|e| {
                         warn!(err=%e, "failed to construct seekable nar reader");

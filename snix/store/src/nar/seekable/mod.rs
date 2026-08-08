@@ -47,14 +47,14 @@ impl<B: BlobService + 'static> Reader<B> {
     /// contents.
     #[instrument(skip(blob_service, directory_service), err)]
     pub async fn new(
-        root_node: Node,
+        root_node: &Node,
         blob_service: B,
         directory_service: impl DirectoryService,
     ) -> Result<Self, RenderError> {
         // If this is a directory, resolve all subdirectories
         let directories = if let Node::Directory { digest, .. } = root_node {
             let mut builder = DirectoryGraphBuilder::new_root_to_leaves(digest.to_owned());
-            let mut directories = directory_service.get_recursive(&digest);
+            let mut directories = directory_service.get_recursive(digest);
             while let Some(directory) = directories
                 .try_next()
                 .await
@@ -71,7 +71,7 @@ impl<B: BlobService + 'static> Reader<B> {
                     // The only way we could run into this is by the
                     // DirectoryService not having the root directory we asked
                     // for, which hints to misconfiguration, so explicitly warn!.
-                    let err = RenderError::DirectoryNotFound(digest,                    "root".into());
+                    let err = RenderError::DirectoryNotFound(*digest, "root".into());
                     warn!(%err, "tried to render NAR, but DirectoryService didn't contain the root directory");
                     err
                 } else {
