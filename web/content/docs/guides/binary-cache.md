@@ -245,7 +245,7 @@ You can use `nix copy` or similar tools to copy to the nar-bridge HTTP endpoint.
 In this example, we will use ssh port forwarding:
 
 ```console
-$ ssh -L 8080:/run/sockets/snix-store.sock root@cache.example.com
+$ ssh -L 8080:/run/nar-bridge.sock root@cache.example.com
 $ nix copy --to http://localhost:8080?compression=none&secret-key=/run/secrets/nix-signing.key /nix/store/xxxx-some-store-path
 ```
 
