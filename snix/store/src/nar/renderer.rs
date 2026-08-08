@@ -137,6 +137,16 @@ where
             nar_node
                 .file(*executable, *size, &mut blob_reader)
                 .await
+                .map_err(|err| match err.kind() {
+                    io::ErrorKind::UnexpectedEof => {
+                        io::Error::new(io::ErrorKind::InvalidData, "blob short read")
+                    }
+                    io::ErrorKind::InvalidInput => io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "blob continued to yield data beyond end",
+                    ),
+                    _ => err,
+                })
                 .map_err(RenderError::NARWriterError)?;
         }
         Node::Directory { digest, .. } => {

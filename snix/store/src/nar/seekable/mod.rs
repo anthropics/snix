@@ -233,14 +233,14 @@ impl<B: BlobService + 'static> tokio::io::AsyncRead for Reader<B> {
                 match (is_eof, too_much_returned) {
                     (true, false) => {
                         return Poll::Ready(Err(io::Error::new(
-                            io::ErrorKind::UnexpectedEof,
+                            io::ErrorKind::InvalidData,
                             "blob short read",
                         )));
                     }
                     (false, true) => {
                         buf.set_filled(prev_read_buf_pos);
                         return Poll::Ready(Err(io::Error::new(
-                            io::ErrorKind::InvalidInput,
+                            io::ErrorKind::InvalidData,
                             "blob continued to yield data beyond end",
                         )));
                     }

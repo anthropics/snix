@@ -60,11 +60,11 @@ pub(crate) async fn directory_service_with_contents() -> Arc<dyn DirectoryServic
 )]
 #[case::too_big(
     &crate::fixtures::CASTORE_NODE_TOO_BIG,
-    Ok(Err(io::ErrorKind::UnexpectedEof))
+    Ok(Err(io::ErrorKind::InvalidData))
 )]
 #[case::too_small(
     &crate::fixtures::CASTORE_NODE_TOO_SMALL,
-    Ok(Err(io::ErrorKind::InvalidInput))
+    Ok(Err(io::ErrorKind::InvalidData))
 )]
 #[case::complicated(
     &crate::fixtures::CASTORE_NODE_COMPLICATED,
