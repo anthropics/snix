@@ -1,4 +1,5 @@
 use pretty_assertions::{assert_eq, assert_ne};
+use snix_eval::builtins::impure_builtins;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -89,6 +90,7 @@ fn build_eval(
     eval_builder = add_derivation_builtins(eval_builder, Rc::clone(&snix_store_io));
     eval_builder = add_fetcher_builtins(eval_builder, Rc::clone(&snix_store_io));
     eval_builder = add_import_builtins(eval_builder, snix_store_io);
+    eval_builder = eval_builder.add_builtins(impure_builtins());
     eval_builder = configure_nix_path(eval_builder, &None);
 
     (eval_builder.build(), tokio_runtime)

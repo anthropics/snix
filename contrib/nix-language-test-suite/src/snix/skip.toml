@@ -17,6 +17,6 @@ paths = [
   "scope/dup-inherit",
 ]
 
-builtins = ["readFileType", "readFile", "__nixPath", "unsafeGetAttrPos"]
+builtins = ["readFile", "__nixPath", "unsafeGetAttrPos"]
 
 features = ["pipe-operators"]
