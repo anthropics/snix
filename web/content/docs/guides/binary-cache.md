@@ -292,9 +292,7 @@ $ EXPERIMENTAL_STORE_COMPOSITION=/path/to/snix-copy.toml \
 Deploying this comes with a few caveats. We plan to improve things here over time, and will also update that list. Also, if you want to work on any of these, reach out!
 
 ### Slow NAR rendering
-NAR rendering currently takes some time, especially if store paths contain lots of small files.
-
-This is a combination of [#93][cs-bs-split] and very linear NAR rendering.
+For bigger blobs, NAR rendering currently is a bit slower than it could be, due to [#93][cs-bs-split].
 It can be alleviated by adding a caching layer, as done in [the nixos.snix.store deployment](https://git.snix.dev/snix/snix/src/commit/4b0d7f71d531444ac24b5890ab92d5f4f86ebfbb/ops/modules/www/nixos.snix.store.nix#L54).
 
 ### No garbage collection
