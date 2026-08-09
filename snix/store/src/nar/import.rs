@@ -240,28 +240,23 @@ mod test {
     use std::sync::Arc;
 
     use hex_literal::hex;
+    use mockall::predicate;
     use nix_compat::nixhash::{CAHash, NixHash};
     use rstest::*;
-    use snix_castore::blobservice::BlobService;
-    use snix_castore::directoryservice::DirectoryService;
+    use snix_castore::Node;
+    use snix_castore::blobservice::{MockBlobService, TestBlobWriter};
+    use snix_castore::directoryservice::{MockDirectoryPutter, MockDirectoryService};
     use snix_castore::fixtures::{
         DIRECTORY_COMPLICATED, DIRECTORY_WITH_KEEP, EMPTY_BLOB_DIGEST, HELLOWORLD_BLOB_CONTENTS,
         HELLOWORLD_BLOB_DIGEST,
     };
-    use snix_castore::{Directory, Node};
-    use tokio_stream::StreamExt;
+    use snix_castore::utils::gen_test_blob_service;
 
-    use crate::tests::fixtures::{blob_service, directory_service};
-
-    #[rstest]
     #[tokio::test]
-    async fn single_symlink(
-        blob_service: Arc<dyn BlobService>,
-        directory_service: Arc<dyn DirectoryService>,
-    ) {
+    async fn single_symlink() {
         let root_node = ingest_nar(
-            blob_service,
-            directory_service,
+            Arc::new(MockBlobService::new()),
+            MockDirectoryService::new(),
             &mut Cursor::new(&NAR_CONTENTS_SYMLINK),
         )
         .await
@@ -275,15 +270,26 @@ mod test {
         );
     }
 
-    #[rstest]
     #[tokio::test]
-    async fn single_file(
-        blob_service: Arc<dyn BlobService>,
-        directory_service: Arc<dyn DirectoryService>,
-    ) {
+    async fn single_file() {
+        let mut blob_service = MockBlobService::new();
+        let mut seq = mockall::Sequence::new();
+        blob_service
+            .expect_has()
+            .once()
+            .with(predicate::eq(&*HELLOWORLD_BLOB_DIGEST))
+            .return_once(|_| Ok(false))
+            .in_sequence(&mut seq);
+
+        blob_service
+            .expect_open_write()
+            .once()
+            .return_once(|| Box::new(TestBlobWriter::new()))
+            .in_sequence(&mut seq);
+
         let root_node = ingest_nar(
-            blob_service.clone(),
-            directory_service,
+            Arc::new(blob_service),
+            MockDirectoryService::new(),
             &mut Cursor::new(&NAR_CONTENTS_HELLOWORLD),
         )
         .await
@@ -297,20 +303,59 @@ mod test {
             },
             root_node
         );
-
-        // blobservice must contain the blob
-        assert!(blob_service.has(&HELLOWORLD_BLOB_DIGEST).await.unwrap());
     }
 
-    #[rstest]
     #[tokio::test]
-    async fn complicated(
-        blob_service: Arc<dyn BlobService>,
-        directory_service: Arc<dyn DirectoryService>,
-    ) {
+    async fn complicated() {
+        let mut blob_service = MockBlobService::new();
+        let mut seq = mockall::Sequence::new();
+        blob_service
+            .expect_has()
+            .once()
+            .with(predicate::eq(&*EMPTY_BLOB_DIGEST))
+            .return_once(|_| Ok(false))
+            .in_sequence(&mut seq);
+        blob_service
+            .expect_open_write()
+            .once()
+            .return_once(|| Box::new(TestBlobWriter::new()))
+            .in_sequence(&mut seq);
+        blob_service
+            .expect_has()
+            .once()
+            .with(predicate::eq(&*EMPTY_BLOB_DIGEST))
+            .return_once(|_| Ok(true))
+            .in_sequence(&mut seq);
+        let mut directory_service = MockDirectoryService::new();
+        directory_service
+            .expect_put_multiple_start()
+            .once()
+            .return_once(|| {
+                let mut directory_putter = MockDirectoryPutter::new();
+                let mut seq = mockall::Sequence::new();
+                directory_putter
+                    .expect_put()
+                    .once()
+                    .with(predicate::eq(&*DIRECTORY_WITH_KEEP))
+                    .returning(|_| Ok(()))
+                    .in_sequence(&mut seq);
+                directory_putter
+                    .expect_put()
+                    .once()
+                    .with(predicate::eq(&*DIRECTORY_COMPLICATED))
+                    .returning(|_| Ok(()))
+                    .in_sequence(&mut seq);
+                directory_putter
+                    .expect_close()
+                    .once()
+                    .returning(|| Ok(DIRECTORY_COMPLICATED.digest()))
+                    .in_sequence(&mut seq);
+                Box::new(directory_putter)
+            });
+
         let root_node = ingest_nar(
-            blob_service.clone(),
-            directory_service.clone(),
+            Arc::new(blob_service),
+            directory_service,
             &mut Cursor::new(&NAR_CONTENTS_COMPLICATED),
         )
         .await
@@ -323,21 +368,6 @@ mod test {
             },
             root_node,
         );
-
-        // blobservice must contain the blob
-        assert!(blob_service.has(&EMPTY_BLOB_DIGEST).await.unwrap());
-
-        // directoryservice must contain the directories, at least with get_recursive.
-        let resp: Result<Vec<Directory>, _> = directory_service
-            .get_recursive(&DIRECTORY_COMPLICATED.digest())
-            .collect()
-            .await;
-
-        let directories = resp.unwrap();
-
-        assert_eq!(2, directories.len());
-        assert_eq!(DIRECTORY_COMPLICATED.clone(), directories[0]);
-        assert_eq!(DIRECTORY_WITH_KEEP.clone(), directories[1]);
     }
 
     #[rstest]
@@ -347,14 +377,14 @@ mod test {
     #[case::nar_symlink_sha1(Some(CAHash::Nar(NixHash::Sha1(hex!("f24eeaaa9cc016bab030bf007cb1be6483e7ba9e")))), NAR_CONTENTS_SYMLINK.as_slice())]
     #[tokio::test]
     async fn ingest_with_cahash_mismatch(
-        blob_service: Arc<dyn BlobService>,
-        directory_service: Arc<dyn DirectoryService>,
         #[case] ca_hash: Option<CAHash>,
         #[case] nar_content: &[u8],
     ) {
+        use snix_castore::utils::gen_test_directory_service;
+
         let err = ingest_nar_and_hash(
-            blob_service.clone(),
-            directory_service.clone(),
+            gen_test_blob_service(),
+            gen_test_directory_service(),
             &mut Cursor::new(nar_content),
             &ca_hash,
         )
@@ -373,14 +403,12 @@ mod test {
     #[case::nar_symlink_sha1(Some(CAHash::Nar(NixHash::Sha1(hex!("424eeaaa9cc016bab030bf007cb1be6483e7ba9e")))), &NAR_CONTENTS_SYMLINK.clone())]
     #[tokio::test]
     async fn ingest_with_cahash_correct(
-        blob_service: Arc<dyn BlobService>,
-        directory_service: Arc<dyn DirectoryService>,
         #[case] ca_hash: Option<CAHash>,
         #[case] nar_content: &[u8],
     ) {
-        let _ = ingest_nar_and_hash(
-            blob_service.clone(),
-            directory_service,
+        ingest_nar_and_hash(
+            snix_castore::utils::gen_test_blob_service(),
+            snix_castore::utils::gen_test_directory_service(),
             &mut Cursor::new(nar_content),
             &ca_hash,
         )
@@ -393,14 +421,12 @@ mod test {
     #[case::nar_symlink_sha1(Some(CAHash::Flat(NixHash::Sha1(hex!("424eeaaa9cc016bab030bf007cb1be6483e7ba9e")))), &NAR_CONTENTS_SYMLINK.clone())]
     #[tokio::test]
     async fn ingest_with_flat_non_file(
-        blob_service: Arc<dyn BlobService>,
-        directory_service: Arc<dyn DirectoryService>,
         #[case] ca_hash: Option<CAHash>,
         #[case] nar_content: &[u8],
     ) {
         let err = ingest_nar_and_hash(
-            blob_service,
-            directory_service,
+            snix_castore::utils::gen_test_blob_service(),
+            snix_castore::utils::gen_test_directory_service(),
             &mut Cursor::new(nar_content),
             &ca_hash,
         )

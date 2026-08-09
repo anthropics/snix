@@ -1,5 +1,9 @@
 use hyper_util::rt::TokioIo;
-use snix_castore::{blobservice::BlobService, directoryservice::DirectoryService};
+use snix_castore::{
+    blobservice::BlobService,
+    directoryservice::DirectoryService,
+    utils::{gen_test_blob_service, gen_test_directory_service},
+};
 use tonic::transport::{Endpoint, Server, Uri};
 
 use crate::{
@@ -9,7 +13,6 @@ use crate::{
         GRPCPathInfoServiceWrapper, path_info_service_client::PathInfoServiceClient,
         path_info_service_server::PathInfoServiceServer,
     },
-    tests::fixtures::{blob_service, directory_service},
     utils::gen_test_pathinfo_service,
 };
 
@@ -23,8 +26,8 @@ pub async fn make_grpc_path_info_service_client() -> (
 ) {
     let (left, right) = tokio::io::duplex(64);
 
-    let blob_service = blob_service();
-    let directory_service = directory_service();
+    let blob_service = gen_test_blob_service();
+    let directory_service = gen_test_directory_service();
 
     // spin up a server, which will only connect once, to the left side.
     tokio::spawn({

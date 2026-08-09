@@ -172,3 +172,9 @@ pub async fn construct_services_from_configs(
 pub fn gen_test_directory_service() -> impl DirectoryService + Clone {
     crate::directoryservice::RedbDirectoryService::new_temporary("test".to_string())
 }
+
+/// Returns a new [DirectoryService]. Should only be used for tests.
+#[cfg(any(test, feature = "mocks"))]
+pub fn gen_test_blob_service() -> impl BlobService + Clone {
+    crate::blobservice::MemoryBlobService::default()
+}
