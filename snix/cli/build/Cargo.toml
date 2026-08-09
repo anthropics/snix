@@ -13,6 +13,7 @@ clap = { workspace = true, features = ["derive", "env"] }
 mimalloc.workspace = true
 snix-build.path = "../../build"
 snix-castore.path = "../../castore"
+snix-cli.path = "../base"
 snix-tracing = { path = "../../tracing", features = ["clap"] }
 tokio = { workspace = true, features = ["process"] }
 tokio-listener = { workspace = true, features = ["tonic014"] }

@@ -86,12 +86,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .expect("invalid fallback listen address")
     });
 
-    let listener = tokio_listener::Listener::bind(
-        listen_address,
-        &Default::default(),
-        &args.listen_args.listener_options,
-    )
-    .await?;
+    let listener =
+        snix_cli::make_listener(listen_address, &args.listen_args.listener_options).await?;
 
     info!(listen_address=%listen_address, "starting daemon");
 

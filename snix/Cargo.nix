@@ -22983,6 +22983,10 @@ rec {
             ];
           }
           {
+            name = "tokio-listener";
+            packageId = "tokio-listener";
+          }
+          {
             name = "tracing";
             packageId = "tracing";
           }
@@ -23028,6 +23032,10 @@ rec {
           {
             name = "snix-castore";
             packageId = "snix-castore";
+          }
+          {
+            name = "snix-cli";
+            packageId = "snix-cli";
           }
           {
             name = "snix-tracing";

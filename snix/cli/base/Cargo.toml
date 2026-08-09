@@ -18,6 +18,7 @@ tokio = { workspace = true, features = [
   "rt-multi-thread",
   "process",
 ] }
+tokio-listener.workspace = true
 tracing.workspace = true
 which.workspace = true
 snix-tracing = { path = "../../tracing", features = ["clap"] }

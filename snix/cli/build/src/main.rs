@@ -4,9 +4,7 @@ use snix_build::{
     buildservice,
     proto::{GRPCBuildServiceWrapper, build_service_server::BuildServiceServer},
 };
-use tokio_listener::Listener;
-use tokio_listener::SystemOptions;
-use tokio_listener::UserOptions;
+use snix_cli::make_listener;
 use tonic::{self, transport::Server};
 use tracing::info;
 
@@ -112,14 +110,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 );
             }
 
+            let listener =
+                make_listener(&listen_address, &tokio_listener::UserOptions::default()).await?;
             info!(listen_address=%listen_address, "listening");
-
-            let listener = Listener::bind(
-                &listen_address,
-                &SystemOptions::default(),
-                &UserOptions::default(),
-            )
-            .await?;
 
             router.serve_with_incoming(listener).await?;
         }

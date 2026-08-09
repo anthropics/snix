@@ -10,6 +10,26 @@ pub type SnixCliResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 pub const DEFAULT_LIBEXEC_PATH_VAR: &str = "SNIX_LIBEXEC_PATH";
 
+/// Builds a listener. We want to always set sleep_on_errors = true
+/// to avoid server errors when running low on file handles.
+/// sleep_on_errors became the default in hyper, but is not yet flipped in
+/// tokio-listener.
+pub async fn make_listener(
+    address: &tokio_listener::ListenerAddress,
+    user_options: &tokio_listener::UserOptions,
+) -> std::io::Result<tokio_listener::Listener> {
+    tokio_listener::Listener::bind(
+        address,
+        &{
+            let mut system_options = tokio_listener::SystemOptions::default();
+            system_options.sleep_on_errors = true;
+            system_options
+        },
+        user_options,
+    )
+    .await
+}
+
 /// Make an os-specific search path.
 ///
 /// This concatenates `SNIX_LIBEXEC_PATH` environment variable, `default_libexec_path`

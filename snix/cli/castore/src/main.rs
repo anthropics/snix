@@ -4,7 +4,7 @@ use snix_castore::proto::blob_service_server::BlobServiceServer;
 use snix_castore::proto::directory_service_server::DirectoryServiceServer;
 use snix_castore::proto::{GRPCBlobServiceWrapper, GRPCDirectoryServiceWrapper};
 use snix_castore::{Node, utils::ServiceUrls};
-use snix_cli::shutdown_signal;
+use snix_cli::{make_listener, shutdown_signal};
 use std::error::Error;
 use std::io::Write;
 use std::path::PathBuf;
@@ -157,13 +157,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     .expect("invalid fallback listen address")
             });
 
-            let listener = tokio_listener::Listener::bind(
-                listen_address,
-                &Default::default(),
-                &listen_args.listener_options,
-            )
-            .await?;
-
+            let listener = make_listener(listen_address, &listen_args.listener_options).await?;
             tracing::info!(listen_address=%listen_address, "starting daemon");
 
             router

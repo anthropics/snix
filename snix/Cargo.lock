@@ -5197,6 +5197,7 @@ dependencies = [
  "clap-verbosity-flag",
  "snix-tracing",
  "tokio",
+ "tokio-listener",
  "tracing",
  "which",
 ]
@@ -5209,6 +5210,7 @@ dependencies = [
  "mimalloc",
  "snix-build",
  "snix-castore",
+ "snix-cli",
  "snix-tracing",
  "tokio",
  "tokio-listener",

@@ -2,9 +2,9 @@ use clap::Parser;
 use mimalloc::MiMalloc;
 use nix_compat::nix_daemon::handler::NixDaemon;
 use nix_daemon::SnixDaemon;
+use snix_cli::make_listener;
 use snix_store::utils::{ServiceUrlsGrpc, construct_services};
 use std::{error::Error, sync::Arc};
-use tokio_listener::SystemOptions;
 use tracing::error;
 
 #[global_allocator]
@@ -52,24 +52,19 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (blob_service, directory_service, path_info_service, _nar_calculation_service) =
         construct_services(cli.service_addrs).await?;
 
+    let io = Arc::new(SnixDaemon::new(
+        blob_service,
+        directory_service,
+        path_info_service,
+    ));
+
     let listen_address = cli.listen_args.listen_address.unwrap_or_else(|| {
         "/tmp/snix-daemon.sock"
             .parse()
             .expect("invalid fallback listen address")
     });
 
-    let mut listener = tokio_listener::Listener::bind(
-        &listen_address,
-        &SystemOptions::default(),
-        &cli.listen_args.listener_options,
-    )
-    .await?;
-
-    let io = Arc::new(SnixDaemon::new(
-        blob_service,
-        directory_service,
-        path_info_service,
-    ));
+    let mut listener = make_listener(&listen_address, &cli.listen_args.listener_options).await?;
 
     while let Ok((connection, _)) = listener.accept().await {
         let io = io.clone();
