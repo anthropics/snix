@@ -1,7 +1,10 @@
 use clap::Parser;
 use snix_castore::Node;
-
 use snix_castore::{B3Digest, utils::ServiceUrlsGrpc};
+use snix_castore_http::app_state::AppConfig;
+use snix_cli::shutdown_signal;
+use std::sync::Arc;
+use tracing::info;
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -29,20 +32,45 @@ struct Args {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    let _tracing_handle = snix_tracing::TracingBuilder::default()
+    let mut tracing_handle = snix_tracing::TracingBuilder::default()
         .handle_tracing_args(&args.tracing_args)
         .build()?;
 
-    snix_castore_http::router::gen_router(
-        args.listen_args,
-        args.service_addrs,
-        Node::Directory {
+    let (blob_service, directory_service) =
+        snix_castore::utils::construct_services(args.service_addrs)
+            .await
+            .expect("failed to construct services");
+
+    let state = Arc::new(AppConfig {
+        blob_service,
+        directory_service,
+        root_node: Node::Directory {
             digest: args.root_directory,
             // size doesn't really matter here, we're not doing inode allocation.
             size: 0,
         },
-        &args.index_names,
-        args.auto_index,
-    )
-    .await
+        index_names: args.index_names.to_vec(),
+        auto_index: args.auto_index,
+    });
+
+    let app = snix_castore_http::router::gen_router(state);
+
+    let listen_address = &args.listen_args.listen_address.unwrap_or_else(|| {
+        "[::]:9000"
+            .parse()
+            .expect("invalid fallback listen address")
+    });
+
+    let listener =
+        snix_cli::make_listener(listen_address, &args.listen_args.listener_options).await?;
+
+    info!(listen_address=%listen_address, "starting daemon");
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
+
+    Ok(tracing_handle.shutdown().await.inspect_err(|err| {
+        eprintln!("failed to shutdown tracing: {err}");
+    })?)
 }

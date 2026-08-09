@@ -45,7 +45,7 @@ pub async fn root_node_contents(
 
 #[cfg(test)]
 mod tests {
-    use crate::{app_state::AppConfig, router::app};
+    use crate::{app_state::AppConfig, router::gen_router};
 
     use snix_castore::{
         B3Digest, Directory, Node,
@@ -73,7 +73,7 @@ mod tests {
         let blob_service = Arc::new(gen_test_blob_service());
         let directory_service = Arc::new(gen_test_directory_service());
 
-        let app = app(Arc::new(AppConfig {
+        let app = gen_router(Arc::new(AppConfig {
             blob_service: blob_service.clone(),
             directory_service: directory_service.clone(),
             root_node,

@@ -10,9 +10,11 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+axum.workspace = true
 clap = { workspace = true, features = ["derive"] }
 snix-castore.path = "../../castore"
 snix-castore-http.path = "../../castore-http"
+snix-cli.path = "../base"
 snix-tracing = { path = "../../tracing", features = [
   "clap",
   "reqwest",
@@ -25,6 +27,7 @@ tokio-listener = { workspace = true, features = [
   "multi-listener",
   "sd_listen",
 ] }
+tracing.workspace = true
 
 [features]
 xp-store-composition-cli = ["snix-castore/xp-composition-cli"]

@@ -23223,6 +23223,10 @@ rec {
             packageId = "anyhow";
           }
           {
+            name = "axum";
+            packageId = "axum";
+          }
+          {
             name = "clap";
             packageId = "clap";
             features = [ "derive" ];
@@ -23234,6 +23238,10 @@ rec {
           {
             name = "snix-castore-http";
             packageId = "snix-castore-http";
+          }
+          {
+            name = "snix-cli";
+            packageId = "snix-cli";
           }
           {
             name = "snix-tracing";
@@ -23258,6 +23266,10 @@ rec {
               "multi-listener"
               "sd_listen"
             ];
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
           }
         ];
         features = {

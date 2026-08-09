@@ -5243,12 +5243,15 @@ name = "snix-cli-castore-http"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
  "clap",
  "snix-castore",
  "snix-castore-http",
+ "snix-cli",
  "snix-tracing",
  "tokio",
  "tokio-listener",
+ "tracing",
 ]
 
 [[package]]
