@@ -1,9 +1,8 @@
 //! Contains a testcase for castore/fs, using a PathInfoService as RootNodesProvider.
 
 use snix_castore::{
-    blobservice::MemoryBlobService,
-    directoryservice::RedbDirectoryService,
     fs::{FSSettings, SnixStoreFs, fuse::FuseDaemon},
+    utils::{gen_test_blob_service, gen_test_directory_service},
 };
 use tempfile::TempDir;
 
@@ -21,9 +20,8 @@ fn list_async_pathinfoservice() {
     }
 
     // Construct blob and directory services
-    let blob_service = MemoryBlobService::default();
-
-    let directory_service = RedbDirectoryService::new_temporary("root".to_owned());
+    let blob_service = gen_test_blob_service();
+    let directory_service = gen_test_directory_service();
 
     // Manually start a tokio runtime, we want most of this test to not be in
     // the context of the tokio runtime.

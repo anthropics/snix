@@ -13,9 +13,10 @@ use tokio_stream::{StreamExt, wrappers::ReadDirStream};
 use super::FuseDaemon;
 use crate::{
     Node,
-    blobservice::{BlobService, MemoryBlobService},
+    blobservice::BlobService,
     directoryservice::DirectoryService,
     fixtures,
+    utils::{gen_test_blob_service, gen_test_directory_service},
 };
 use crate::{
     PathComponent,
@@ -32,8 +33,8 @@ const DIRECTORY_COMPLICATED_NAME: &str = "33333333333333333333333333333333-test"
 
 fn gen_svcs() -> (Arc<dyn BlobService>, Arc<dyn DirectoryService>) {
     (
-        Arc::new(MemoryBlobService::default()) as Arc<dyn BlobService>,
-        Arc::new(crate::utils::gen_test_directory_service()) as Arc<dyn DirectoryService>,
+        Arc::new(gen_test_blob_service()),
+        Arc::new(gen_test_directory_service()),
     )
 }
 

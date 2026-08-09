@@ -252,14 +252,12 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::{
-        io::SeekFrom,
-        sync::{Arc, LazyLock},
-    };
+    use std::{io::SeekFrom, sync::LazyLock};
 
     use crate::{
         B3Digest,
-        blobservice::{BlobService, MemoryBlobService, chunked_reader::ChunkedReader},
+        blobservice::{BlobService, chunked_reader::ChunkedReader},
+        utils::gen_test_blob_service,
     };
     use hex_literal::hex;
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
@@ -296,10 +294,7 @@ mod test {
     /// ensure the start offsets are properly calculated.
     #[test]
     fn from_iter() {
-        let cb = ChunkedBlob::from_iter(
-            (*BLOB_1_LIST).into_iter(),
-            Arc::new(MemoryBlobService::default()) as Arc<dyn BlobService>,
-        );
+        let cb = ChunkedBlob::from_iter((*BLOB_1_LIST).into_iter(), gen_test_blob_service());
 
         assert_eq!(
             cb.chunks,
@@ -317,19 +312,13 @@ mod test {
     #[test]
     #[should_panic]
     fn from_iter_empty() {
-        ChunkedBlob::from_iter(
-            [].into_iter(),
-            Arc::new(MemoryBlobService::default()) as Arc<dyn BlobService>,
-        );
+        ChunkedBlob::from_iter([].into_iter(), gen_test_blob_service());
     }
 
     /// ensure the right chunk is selected
     #[test]
     fn chunk_idx_for_position() {
-        let cb = ChunkedBlob::from_iter(
-            (*BLOB_1_LIST).into_iter(),
-            Arc::new(MemoryBlobService::default()) as Arc<dyn BlobService>,
-        );
+        let cb = ChunkedBlob::from_iter((*BLOB_1_LIST).into_iter(), gen_test_blob_service());
 
         assert_eq!(Some(0), cb.get_chunk_idx_for_position(0), "start of blob");
 
@@ -362,8 +351,8 @@ mod test {
     }
 
     /// returns a blobservice with all chunks in BLOB_1 present.
-    async fn gen_blobservice_blob1() -> Arc<dyn BlobService> {
-        let blob_service = Arc::new(MemoryBlobService::default()) as Arc<dyn BlobService>;
+    async fn gen_blobservice_blob1() -> impl BlobService + Clone {
+        let blob_service = gen_test_blob_service();
 
         // seed blob service with all chunks
         for blob_contents in [
@@ -461,7 +450,7 @@ mod test {
     // should fail).
     #[tokio::test]
     async fn test_read_missing_chunks() {
-        let blob_service = Arc::new(MemoryBlobService::default()) as Arc<dyn BlobService>;
+        let blob_service = gen_test_blob_service();
 
         for blob_contents in [CHUNK_1.to_vec(), CHUNK_2.to_vec()] {
             let mut bw = blob_service.open_write().await;

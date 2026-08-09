@@ -1,6 +1,9 @@
-use crate::blobservice::{BlobService, MemoryBlobService};
+use std::sync::Arc;
+
+use crate::blobservice::BlobService;
 use crate::proto::GRPCBlobServiceWrapper;
 use crate::proto::blob_service_client::BlobServiceClient;
+use crate::utils::gen_test_blob_service;
 use crate::{blobservice::GRPCBlobService, proto::blob_service_server::BlobServiceServer};
 use hyper_util::rt::TokioIo;
 use tonic::transport::{Endpoint, Server, Uri};
@@ -13,12 +16,9 @@ pub async fn make_grpc_blob_service_client() -> Box<dyn BlobService> {
 
     // spin up a server, which will only connect once, to the left side.
     tokio::spawn(async {
-        let blob_service = Box::<MemoryBlobService>::default() as Box<dyn BlobService>;
-
-        // spin up a new DirectoryService
         let mut server = Server::builder();
         let router = server.add_service(BlobServiceServer::new(GRPCBlobServiceWrapper::new(
-            blob_service,
+            Arc::new(gen_test_blob_service()) as Arc<dyn BlobService>,
         )));
 
         router

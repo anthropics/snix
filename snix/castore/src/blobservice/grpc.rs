@@ -332,6 +332,7 @@ impl<W: tokio::io::AsyncWrite + Unpin> tokio::io::AsyncWrite for GRPCBlobWriter<
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use std::time::Duration;
 
     use tempfile::TempDir;
@@ -340,10 +341,10 @@ mod tests {
     use tokio_retry::strategy::ExponentialBackoff;
     use tokio_stream::wrappers::UnixListenerStream;
 
-    use crate::blobservice::MemoryBlobService;
     use crate::fixtures;
     use crate::proto::GRPCBlobServiceWrapper;
     use crate::proto::blob_service_client::BlobServiceClient;
+    use crate::utils::gen_test_blob_service;
 
     use super::BlobService;
     use super::GRPCBlobService;
@@ -366,7 +367,7 @@ mod tests {
             let router =
                 server.add_service(crate::proto::blob_service_server::BlobServiceServer::new(
                     GRPCBlobServiceWrapper::new(
-                        Box::<MemoryBlobService>::default() as Box<dyn BlobService>
+                        Arc::new(gen_test_blob_service()) as Arc<dyn BlobService>
                     ),
                 ));
             router.serve_with_incoming(uds_stream).await

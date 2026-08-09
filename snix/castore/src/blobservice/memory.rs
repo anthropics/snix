@@ -9,10 +9,21 @@ use super::{BlobReader, BlobService, BlobWriter};
 use crate::B3Digest;
 use crate::composition::{CompositionContext, ServiceBuilder};
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct MemoryBlobService {
     instance_name: String,
     db: Arc<RwLock<HashMap<B3Digest, Vec<u8>>>>,
+}
+
+#[cfg(any(test, feature = "mocks"))]
+impl MemoryBlobService {
+    /// Only used by `gen_test_blob_service`.
+    pub(crate) fn new_mock() -> Self {
+        Self {
+            instance_name: "mock".to_string(),
+            db: Default::default(),
+        }
+    }
 }
 
 #[async_trait]

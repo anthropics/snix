@@ -49,10 +49,10 @@ mod tests {
 
     use snix_castore::{
         B3Digest, Directory, Node,
-        blobservice::{BlobService, MemoryBlobService},
+        blobservice::BlobService,
         directoryservice::DirectoryService,
         fixtures::{DIRECTORY_COMPLICATED, HELLOWORLD_BLOB_CONTENTS, HELLOWORLD_BLOB_DIGEST},
-        utils::gen_test_directory_service,
+        utils::{gen_test_blob_service, gen_test_directory_service},
     };
 
     use axum::http::StatusCode;
@@ -60,7 +60,7 @@ mod tests {
     use std::sync::{Arc, LazyLock};
     use tracing_test::traced_test;
 
-    /// Accepts a root node to be served, and returns a [axum_test::TestServer].
+    /// Accepts a root node to be served, and returns a [axum_test::TestServer], as well as the {Blob,Directory}Service.
     fn gen_server<S: AsRef<str>>(
         root_node: Node,
         index_names: &[S],
@@ -70,7 +70,7 @@ mod tests {
         impl BlobService + use<S>,
         impl DirectoryService + use<S>,
     ) {
-        let blob_service = Arc::new(MemoryBlobService::default());
+        let blob_service = Arc::new(gen_test_blob_service());
         let directory_service = Arc::new(gen_test_directory_service());
 
         let app = app(Arc::new(AppConfig {
