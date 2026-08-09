@@ -176,10 +176,10 @@ mod tests {
     }
 
     #[rstest]
-    #[case::gzip(include_bytes!("tests/blob.tar.gz"))]
-    #[case::bzip2(include_bytes!("tests/blob.tar.bz2"))]
-    #[case::xz(include_bytes!("tests/blob.tar.xz"))]
-    #[case::zstd(include_bytes!("tests/blob.tar.zst"))]
+    #[case::gzip(include_bytes!("testdata/blob.tar.gz"))]
+    #[case::bzip2(include_bytes!("testdata/blob.tar.bz2"))]
+    #[case::xz(include_bytes!("testdata/blob.tar.xz"))]
+    #[case::zstd(include_bytes!("testdata/blob.tar.zst"))]
     #[tokio::test]
     async fn compressed_tar(#[case] data: &[u8]) {
         let reader = DecompressedReader::new(BufReader::new(data))
