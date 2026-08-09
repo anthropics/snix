@@ -135,18 +135,16 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
             #[cfg(feature = "tonic-reflection")]
             {
+                use snix_castore::proto::FILE_DESCRIPTOR_SET;
+
                 router = router.add_service(
                     tonic_reflection::server::Builder::configure()
-                        .register_encoded_file_descriptor_set(
-                            snix_castore::proto::FILE_DESCRIPTOR_SET,
-                        )
+                        .register_encoded_file_descriptor_set(FILE_DESCRIPTOR_SET)
                         .build_v1alpha()?,
                 );
                 router = router.add_service(
                     tonic_reflection::server::Builder::configure()
-                        .register_encoded_file_descriptor_set(
-                            snix_castore::proto::FILE_DESCRIPTOR_SET,
-                        )
+                        .register_encoded_file_descriptor_set(FILE_DESCRIPTOR_SET)
                         .build_v1()?,
                 );
             }

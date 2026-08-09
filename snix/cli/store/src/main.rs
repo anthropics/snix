@@ -31,15 +31,8 @@ use snix_store::pathinfoservice::{self, PathInfo, PathInfoService};
 use snix_store::proto::GRPCPathInfoServiceWrapper;
 use snix_store::proto::path_info_service_server::PathInfoServiceServer;
 
-#[cfg(feature = "tonic-reflection")]
-use snix_castore::proto::FILE_DESCRIPTOR_SET as CASTORE_FILE_DESCRIPTOR_SET;
-#[cfg(feature = "tonic-reflection")]
-use snix_store::proto::FILE_DESCRIPTOR_SET;
-
-use mimalloc::MiMalloc;
-
 #[global_allocator]
-static GLOBAL: MiMalloc = MiMalloc;
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -259,6 +252,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
             #[cfg(feature = "tonic-reflection")]
             {
+                use snix_castore::proto::FILE_DESCRIPTOR_SET as CASTORE_FILE_DESCRIPTOR_SET;
+                use snix_store::proto::FILE_DESCRIPTOR_SET;
+
                 router = router.add_service(
                     tonic_reflection::server::Builder::configure()
                         .register_encoded_file_descriptor_set(CASTORE_FILE_DESCRIPTOR_SET)
