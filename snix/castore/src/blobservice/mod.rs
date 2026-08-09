@@ -17,6 +17,11 @@ mod object_store;
 #[cfg(test)]
 pub mod tests;
 
+#[cfg(any(test, feature = "mocks"))]
+mod mocks;
+#[cfg(any(test, feature = "mocks"))]
+pub use mocks::TestBlobWriter;
+
 pub use self::chunked_reader::ChunkedReader;
 pub use self::combinator::{Cache, CacheBlobServiceConfig};
 pub use self::from_addr::from_addr;
