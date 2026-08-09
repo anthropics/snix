@@ -83,8 +83,8 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         }
                     }
                 }
-                Err(error) => {
-                    error!(error=?error, "nix-daemon handshake failed");
+                Err(err) => {
+                    error!(%err, "nix-daemon handshake failed");
                 }
             }
         });
