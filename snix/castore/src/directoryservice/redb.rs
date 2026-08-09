@@ -51,77 +51,84 @@ impl RedbDirectoryService {
         instance_name: String,
         config: RedbDirectoryServiceConfig,
     ) -> Result<Self, Error> {
-        if let Some(path) = config.path.clone() {
-            if &path == "" {
+        if let Some(path) = config.path.as_ref() {
+            if path == "" {
                 return Err(Error::WrongConfig("empty path is disallowed"));
             }
-            if &path == "/" {
+            if path == "/" {
                 return Err(Error::WrongConfig("cowardly refusing to open / with redb"));
             }
 
-            if config.read_only {
-                let db = tokio::task::spawn_blocking(move || {
-                    let mut builder = redb::Database::builder();
-                    configure_builder(&mut builder, &config);
-                    builder.open_read_only(path)
-                })
-                .await??;
-
-                return Ok(Self {
-                    instance_name,
-                    db: Arc::new(Db::ReadOnly(db)),
-                });
-            }
-
-            if let Some(parent) = path.parent() {
+            if !config.read_only
+                && let Some(parent) = path.parent()
+            {
                 tokio::fs::create_dir_all(parent).await?;
             }
+        }
 
-            let db = tokio::task::spawn_blocking(move || {
+        let db = if config.path.is_some() {
+            tokio::task::spawn_blocking(move || {
                 let mut builder = redb::Database::builder();
                 configure_builder(&mut builder, &config);
 
-                let db = builder.create(path)?;
-                create_schema(&db)?;
-                Ok::<_, Error>(db)
-            })
-            .await??;
+                let path = config.path.expect("Snix bug: path is Some");
 
-            Ok(Self {
-                instance_name,
-                db: Arc::new(Db::ReadWrite(db)),
+                if config.read_only {
+                    Ok::<_, Error>(Db::ReadOnly(builder.open_read_only(&path)?))
+                } else {
+                    let db = builder.create(&path)?;
+                    create_schema(&db)?;
+                    Ok(Db::ReadWrite(db))
+                }
             })
+            .await??
         } else {
-            Self::new_temporary(instance_name, config)
-        }
-    }
+            if config.read_only {
+                return Err(Error::WrongConfig("in-memory database cannot be read-only"));
+            }
+            let mut builder = redb::Database::builder();
+            configure_builder(&mut builder, &config);
 
-    /// Constructs a new instance using the in-memory backend.
-    /// Sync, as there's no real IO happening.
-    pub fn new_temporary(
-        instance_name: String,
-        config: RedbDirectoryServiceConfig,
-    ) -> Result<Self, Error> {
-        debug_assert!(
-            config.path.is_none(),
-            "Snix bug: config.path is not None, but new_temporary requested"
-        );
+            let db = builder
+                .create_with_backend(redb::backends::InMemoryBackend::new())
+                .expect("Snix bug: unable to create in-memory redb");
 
-        if config.read_only {
-            return Err(Error::WrongConfig("in-memory database cannot be read-only"));
-        }
-
-        let mut builder = redb::Database::builder();
-        configure_builder(&mut builder, &config);
-
-        let db = builder.create_with_backend(redb::backends::InMemoryBackend::new())?;
-
-        create_schema(&db)?;
+            create_schema(&db)?;
+            Db::ReadWrite(db)
+        };
 
         Ok(Self {
             instance_name,
-            db: Arc::new(Db::ReadWrite(db)),
+            db: Arc::new(db),
         })
+    }
+
+    /// Constructs a new instance using the in-memory backend.
+    /// Only used for testing purposes and mocks, use [Self::new] with a None
+    /// path in config for other usecases.
+    /// Sync, as there's no real IO happening.
+    #[cfg(any(test, feature = "mocks"))]
+    pub fn new_temporary(instance_name: String) -> Self {
+        let mut builder = redb::Database::builder();
+        configure_builder(
+            &mut builder,
+            &RedbDirectoryServiceConfig {
+                path: None,
+                cache_size: None,
+                read_only: false,
+            },
+        );
+
+        let db = builder
+            .create_with_backend(redb::backends::InMemoryBackend::new())
+            .expect("Snix bug: unable to create in-memory redb");
+
+        create_schema(&db).expect("Snix bug: unable to create schema for in-memory redb");
+
+        Self {
+            instance_name,
+            db: Arc::new(Db::ReadWrite(db)),
+        }
     }
 }
 

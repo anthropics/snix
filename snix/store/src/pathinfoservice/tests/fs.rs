@@ -23,14 +23,7 @@ fn list_async_pathinfoservice() {
     // Construct blob and directory services
     let blob_service = MemoryBlobService::default();
 
-    let directory_service = {
-        let url: url::Url = "redb+memory:".parse().expect("URL to parse");
-        RedbDirectoryService::new_temporary(
-            "root".to_owned(),
-            url.try_into().expect("url to parse to config"),
-        )
-        .expect("DirectoryService to be created")
-    };
+    let directory_service = RedbDirectoryService::new_temporary("root".to_owned());
 
     // Manually start a tokio runtime, we want most of this test to not be in
     // the context of the tokio runtime.

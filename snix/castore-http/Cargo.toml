@@ -26,5 +26,7 @@ tracing.workspace = true
 [dev-dependencies]
 axum-test = "19.0.0"
 blake3.workspace = true
+# We want to use the castore test helpers in our tests too.
+snix-castore = { path = "../castore", features = ["mocks"] }
 tokio.workspace = true
 tracing-test.workspace = true

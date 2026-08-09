@@ -39,6 +39,8 @@ default = []
 [dev-dependencies]
 rstest.workspace = true
 tempfile = "3.3.0"
+# We want to use the castore test helpers in our tests too.
+snix-castore = { path = "../castore", features = ["mocks"] }
 
 [package.metadata.docs.rs]
 all-features = true

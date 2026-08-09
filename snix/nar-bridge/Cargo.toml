@@ -35,6 +35,8 @@ otlp = ["dep:opentelemetry-instrumentation-tower"]
 axum-test = "19.0.0"
 data-encoding.workspace = true
 prost.workspace = true
+# We want to use the castore test helpers in our tests too.
+snix-castore = { path = "../castore", features = ["mocks"] }
 tracing-test.workspace = true
 
 [package.metadata.docs.rs]

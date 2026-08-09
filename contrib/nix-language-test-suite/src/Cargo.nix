@@ -17586,6 +17586,13 @@ rec {
             packageId = "tonic-prost-build";
           }
         ];
+        devDependencies = [
+          {
+            name = "snix-castore";
+            packageId = "snix-castore";
+            features = [ "mocks" ];
+          }
+        ];
         features = {
         };
         resolvedDefaultFeatures = [ "default" ];

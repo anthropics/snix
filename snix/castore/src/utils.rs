@@ -6,7 +6,7 @@ use crate::blobservice::BlobService;
 use crate::composition::{
     Composition, DeserializeWithRegistry, REG, ServiceBuilder, with_registry,
 };
-use crate::directoryservice::{DirectoryService, RedbDirectoryServiceConfig};
+use crate::directoryservice::DirectoryService;
 
 #[derive(serde::Deserialize, Default)]
 pub struct CompositionConfigs {
@@ -168,10 +168,7 @@ pub async fn construct_services_from_configs(
 }
 
 /// Returns a new [DirectoryService]. Should only be used for tests.
+#[cfg(any(test, feature = "mocks"))]
 pub fn gen_test_directory_service() -> impl DirectoryService + Clone {
-    crate::directoryservice::RedbDirectoryService::new_temporary(
-        "test".to_string(),
-        RedbDirectoryServiceConfig::default(),
-    )
-    .expect("creating directoryservice to succeed")
+    crate::directoryservice::RedbDirectoryService::new_temporary("test".to_string())
 }

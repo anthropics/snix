@@ -13363,6 +13363,11 @@ rec {
             packageId = "prost";
           }
           {
+            name = "snix-castore";
+            packageId = "snix-castore";
+            features = [ "mocks" ];
+          }
+          {
             name = "tracing-test";
             packageId = "tracing-test";
           }
@@ -22320,6 +22325,11 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "snix-castore";
+            packageId = "snix-castore";
+            features = [ "mocks" ];
+          }
+          {
             name = "tempfile";
             packageId = "tempfile";
           }
@@ -22909,6 +22919,11 @@ rec {
           {
             name = "blake3";
             packageId = "blake3";
+          }
+          {
+            name = "snix-castore";
+            packageId = "snix-castore";
+            features = [ "mocks" ];
           }
           {
             name = "tokio";
