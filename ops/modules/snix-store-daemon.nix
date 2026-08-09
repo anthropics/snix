@@ -47,7 +47,6 @@ in
       wantedBy = [ "sockets.target" ];
 
       socketConfig = {
-        LimitNOFILE = 65535;
         ListenStream = "/run/snix-store-daemon.sock";
         SocketMode = "0666";
         SocketUser = "root";
@@ -62,6 +61,7 @@ in
       environment.OTEL_SERVICE_NAME = "snix.snix-store";
       serviceConfig = {
         ExecStart = "${cfg.package}/bin/snix-store daemon ${utils.escapeSystemdExecArgs (args)}";
+        LimitNOFILE = lib.mkDefault 65535;
 
         Restart = "always";
         RestartSec = "10";

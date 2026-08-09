@@ -42,7 +42,6 @@ in
       wantedBy = [ "sockets.target" ];
 
       socketConfig = {
-        LimitNOFILE = 65535;
         ListenStream = "/run/nar-bridge.sock";
         SocketMode = "0666";
         SocketUser = "root";
@@ -57,6 +56,7 @@ in
       environment.OTEL_SERVICE_NAME = "snix.nar-bridge";
       serviceConfig = {
         ExecStart = "${cfg.package}/bin/snix-nar-bridge ${utils.escapeSystemdExecArgs args}";
+        LimitNOFILE = lib.mkDefault 65535;
 
         Restart = "always";
         RestartSec = "10";
