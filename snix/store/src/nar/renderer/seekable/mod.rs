@@ -5,7 +5,6 @@ use std::{
     task::{Context, Poll},
 };
 
-use super::RenderError;
 use futures::ready;
 use pin_project::pin_project;
 use segments::Segments;
@@ -15,6 +14,8 @@ use snix_castore::{blobservice::BlobService, directoryservice::DirectoryGraphBui
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncSeek, AsyncWrite};
 use tokio_stream::StreamExt;
 use tracing::{instrument, warn};
+
+use crate::nar::RenderError;
 
 mod segments;
 

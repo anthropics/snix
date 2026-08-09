@@ -1,32 +1,14 @@
-use auto_impl::auto_impl;
-use snix_castore::B3Digest;
-use snix_castore::Node;
-use snix_castore::directoryservice::OrderingError;
-use tonic::async_trait;
+use snix_castore::{B3Digest, directoryservice::OrderingError};
 
 mod import;
 mod listing;
+mod narcalculationservice;
 mod renderer;
 
 pub use import::{NarIngestionError, ingest_nar, ingest_nar_and_hash};
 pub use listing::{Error as ListingError, produce_listing};
-pub use renderer::{
-    Reader, SimpleRenderer, calculate_size_and_sha256, write_nar, write_nar_simple,
-};
-
-use crate::pathinfoservice;
-
-#[cfg_attr(any(test, feature = "mocks"), mockall::automock)]
-#[async_trait]
-#[auto_impl(&, &mut, Arc, Box)]
-pub trait NarCalculationService: Send + Sync {
-    /// Return the nar size and nar sha256 digest for a given root node.
-    /// This can be used to calculate NAR-based output paths.
-    async fn calculate_nar(
-        &self,
-        root_node: &Node,
-    ) -> Result<(u64, [u8; 32]), pathinfoservice::Error>;
-}
+pub use narcalculationservice::{NarCalculationService, Renderer};
+pub use renderer::{Reader, write_nar, write_nar_simple};
 
 /// Errors that can encounter while rendering NARs.
 #[derive(Debug, thiserror::Error)]

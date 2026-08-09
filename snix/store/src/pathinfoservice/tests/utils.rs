@@ -7,7 +7,7 @@ use snix_castore::{
 use tonic::transport::{Endpoint, Server, Uri};
 
 use crate::{
-    nar::{NarCalculationService, SimpleRenderer},
+    nar::{self, NarCalculationService},
     pathinfoservice::{GRPCPathInfoService, PathInfoService},
     proto::{
         GRPCPathInfoServiceWrapper, path_info_service_client::PathInfoServiceClient,
@@ -37,7 +37,7 @@ pub async fn make_grpc_path_info_service_client() -> (
             let path_info_service =
                 Box::new(gen_test_pathinfo_service()) as Box<dyn PathInfoService>;
             let nar_calculation_service =
-                Box::new(SimpleRenderer::new(blob_service, directory_service))
+                Box::new(nar::Renderer::new(blob_service, directory_service))
                     as Box<dyn NarCalculationService>;
 
             // spin up a new PathInfoService

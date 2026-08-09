@@ -5,7 +5,7 @@ use snix_castore::{blobservice::BlobService, directoryservice::DirectoryService}
 use url::Url;
 
 use crate::composition::REG;
-use crate::nar::{NarCalculationService, SimpleRenderer};
+use crate::nar::NarCalculationService;
 use crate::pathinfoservice::PathInfoService;
 use snix_castore::composition::{
     Composition, DeserializeWithRegistry, ServiceBuilder, with_registry,
@@ -169,7 +169,7 @@ pub async fn construct_services_from_configs(
     let nar_calculation_service: Arc<dyn NarCalculationService> = path_info_service
         .nar_calculation_service()
         .unwrap_or_else(|| {
-            Arc::new(SimpleRenderer::new(
+            Arc::new(crate::nar::Renderer::new(
                 blob_service.clone(),
                 directory_service.clone(),
             ))
