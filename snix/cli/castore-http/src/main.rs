@@ -64,7 +64,7 @@ async fn main() -> anyhow::Result<()> {
     let listener =
         snix_cli::make_listener(listen_address, &args.listen_args.listener_options).await?;
 
-    info!(listen_address=%listen_address, "starting daemon");
+    info!(%listen_address, "starting daemon");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
