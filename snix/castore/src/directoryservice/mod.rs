@@ -99,6 +99,7 @@ pub trait DirectoryService: Send + Sync {
 /// and then dropped without calling [DirectoryPutter::close],
 /// for example when ingesting a path that ends up not pointing to a directory,
 /// but a single file or symlink.
+#[cfg_attr(any(test, feature = "mocks"), mockall::automock)]
 #[async_trait]
 pub trait DirectoryPutter: Send {
     /// Put a individual [Directory] into the store.
