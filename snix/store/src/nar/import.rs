@@ -1,6 +1,6 @@
 use nix_compat::{
     nar::reader::r#async as nar_reader,
-    nixhash::{CAHash, NixHash, NixHashDigester, Sha256Digester, copy_hashed},
+    nixhash::{CAHash, HashAlgo, NixHash, NixHashDigester, Sha256Digester, copy_hashed},
 };
 use snix_castore::{
     Node, PathBuf,
@@ -61,14 +61,22 @@ where
 
     match expected_cahash {
         Some(CAHash::Nar(expected_hash)) => {
-            // We technically don't need the NixHashDigester if the algo is Sha256 as
-            // we are already computing the nar hash with the reader above,
-            // but it makes the control flow more uniform and easier to understand.
-            let mut digester = NixHashDigester::new(expected_hash.algo());
-            let mut ca_reader = InspectReader::new(r, |data| digester.update(data));
-            let mut r = tokio::io::BufReader::new(&mut ca_reader);
-            let root_node = ingest_nar(blob_service, directory_service, &mut r).await?;
-            let actual_hash = digester.finalize();
+            let (root_node, actual_hash, nar_hash) = if expected_hash.algo() == HashAlgo::Sha256 {
+                // If this is the required CAHash, we're already computing excatly this in `nar_hash` above.
+                let mut r = tokio::io::BufReader::new(&mut r);
+
+                let root_node = ingest_nar(blob_service, directory_service, &mut r).await?;
+                let nar_hash = nar_hash.finalize();
+                (root_node, NixHash::from(nar_hash), nar_hash)
+            } else {
+                // For the other algos, wrap the reader with another digester.
+                let mut digester = NixHashDigester::new(expected_hash.algo());
+                let mut r =
+                    tokio::io::BufReader::new(InspectReader::new(r, |data| digester.update(data)));
+
+                let root_node = ingest_nar(blob_service, directory_service, &mut r).await?;
+                (root_node, digester.finalize(), nar_hash.finalize())
+            };
 
             if actual_hash != *expected_hash {
                 return Err(NarIngestionError::HashMismatch {
@@ -76,34 +84,37 @@ where
                     actual: actual_hash,
                 });
             }
-            Ok((root_node, nar_hash.finalize().into(), nar_size))
+            Ok((root_node, nar_hash.into(), nar_size))
         }
         Some(CAHash::Flat(expected_hash)) => {
+            // ingest as NAR
             let mut r = tokio::io::BufReader::new(&mut r);
             let root_node = ingest_nar(blob_service.clone(), directory_service, &mut r).await?;
-            match &root_node {
-                Node::File { digest, .. } => match blob_service.open_read(digest).await? {
-                    Some(mut blob_reader) => {
-                        let (_, actual_hash) = copy_hashed(
-                            &mut blob_reader,
-                            &mut tokio::io::sink(),
-                            expected_hash.algo(),
-                        )
-                        .await?;
 
-                        if actual_hash != *expected_hash {
-                            return Err(NarIngestionError::HashMismatch {
-                                expected: expected_hash.clone(),
-                                actual: actual_hash,
-                            });
-                        }
-                        Ok((root_node, nar_hash.finalize().into(), nar_size))
+            // The resulting root node must be Node::File, else CAHash::Flat is not applicable
+            if let Node::File { digest, .. } = &root_node {
+                if let Some(mut blob_reader) = blob_service.open_read(digest).await? {
+                    let (_, actual_hash) = copy_hashed(
+                        &mut blob_reader,
+                        &mut tokio::io::sink(),
+                        expected_hash.algo(),
+                    )
+                    .await?;
+
+                    if actual_hash != *expected_hash {
+                        return Err(NarIngestionError::HashMismatch {
+                            expected: expected_hash.clone(),
+                            actual: actual_hash,
+                        });
                     }
-                    None => Err(NarIngestionError::Io(std::io::Error::other(
+                    Ok((root_node, nar_hash.finalize().into(), nar_size))
+                } else {
+                    Err(NarIngestionError::Io(std::io::Error::other(
                         "Ingested data not found",
-                    ))),
-                },
-                _ => Err(NarIngestionError::TypeMismatch),
+                    )))
+                }
+            } else {
+                Err(NarIngestionError::TypeMismatch)
             }
         }
         // We either got CAHash::Text, or no CAHash at all, so we just don't do any additional
