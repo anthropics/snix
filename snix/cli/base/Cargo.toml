@@ -18,13 +18,17 @@ tokio = { workspace = true, features = [
   "rt-multi-thread",
   "process",
 ] }
-tokio-listener.workspace = true
+tokio-listener = { workspace = true, optional = true }
 tracing.workspace = true
 which.workspace = true
 snix-tracing = { path = "../../tracing", features = ["clap"] }
 clap-verbosity-flag = { version = "3.0.4", default-features = false, features = [
   "tracing",
 ] }
+
+[features]
+default = []
+listener = ["dep:tokio-listener"]
 
 [package.metadata.docs.rs]
 all-features = true

@@ -22985,6 +22985,7 @@ rec {
           {
             name = "tokio-listener";
             packageId = "tokio-listener";
+            optional = true;
           }
           {
             name = "tracing";
@@ -22995,7 +22996,13 @@ rec {
             packageId = "which";
           }
         ];
-
+        features = {
+          "listener" = [ "dep:tokio-listener" ];
+        };
+        resolvedDefaultFeatures = [
+          "default"
+          "listener"
+        ];
       };
       "snix-cli-build" = rec {
         crateName = "snix-cli-build";
@@ -23036,6 +23043,7 @@ rec {
           {
             name = "snix-cli";
             packageId = "snix-cli";
+            features = [ "listener" ];
           }
           {
             name = "snix-tracing";
@@ -23130,6 +23138,7 @@ rec {
           {
             name = "snix-cli";
             packageId = "snix-cli";
+            features = [ "listener" ];
           }
           {
             name = "snix-tracing";
@@ -23242,6 +23251,7 @@ rec {
           {
             name = "snix-cli";
             packageId = "snix-cli";
+            features = [ "listener" ];
           }
           {
             name = "snix-tracing";
@@ -23485,6 +23495,7 @@ rec {
           {
             name = "snix-cli";
             packageId = "snix-cli";
+            features = [ "listener" ];
           }
           {
             name = "snix-store";
@@ -23575,6 +23586,7 @@ rec {
           {
             name = "snix-cli";
             packageId = "snix-cli";
+            features = [ "listener" ];
           }
           {
             name = "snix-store";
@@ -23706,6 +23718,7 @@ rec {
           {
             name = "snix-cli";
             packageId = "snix-cli";
+            features = [ "listener" ];
           }
           {
             name = "snix-store";

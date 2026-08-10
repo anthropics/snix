@@ -20,7 +20,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 serde_with.workspace = true
 snix-castore = { path = "../../castore", features = ["serde"] }
-snix-cli.path = "../base"
+snix-cli = { path = "../base", features = ["listener"] }
 snix-store.path = "../../store"
 snix-tracing = { path = "../../tracing", features = [
   "clap",

@@ -12,7 +12,7 @@ path = "src/main.rs"
 clap = { workspace = true, features = ["derive", "env"] }
 mimalloc.workspace = true
 nar-bridge.path = "../../nar-bridge"
-snix-cli.path = "../base"
+snix-cli = { path = "../base", features = ["listener"] }
 snix-store.path = "../../store"
 snix-tracing = { path = "../../tracing", features = ["tonic", "axum"] }
 tokio.workspace = true

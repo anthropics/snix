@@ -14,6 +14,7 @@ pub const DEFAULT_LIBEXEC_PATH_VAR: &str = "SNIX_LIBEXEC_PATH";
 /// to avoid server errors when running low on file handles.
 /// sleep_on_errors became the default in hyper, but is not yet flipped in
 /// tokio-listener.
+#[cfg(feature = "listener")]
 pub async fn make_listener(
     address: &tokio_listener::ListenerAddress,
     user_options: &tokio_listener::UserOptions,

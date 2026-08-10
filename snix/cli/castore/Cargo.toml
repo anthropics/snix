@@ -11,7 +11,7 @@ path = "src/main.rs"
 [dependencies]
 clap = { workspace = true, features = ["derive", "env"] }
 snix-castore.path = "../../castore"
-snix-cli.path = "../base"
+snix-cli = { path = "../base", features = ["listener"] }
 snix-tracing = { path = "../../tracing", features = ["clap", "tonic"] }
 tokio.workspace = true
 tokio-listener = { workspace = true, features = [

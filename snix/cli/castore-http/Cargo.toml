@@ -14,7 +14,7 @@ axum.workspace = true
 clap = { workspace = true, features = ["derive"] }
 snix-castore.path = "../../castore"
 snix-castore-http.path = "../../castore-http"
-snix-cli.path = "../base"
+snix-cli = { path = "../base", features = ["listener"] }
 snix-tracing = { path = "../../tracing", features = [
   "clap",
   "reqwest",
