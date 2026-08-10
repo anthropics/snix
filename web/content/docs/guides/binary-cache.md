@@ -100,52 +100,37 @@ To expose them, you can use nginx. [^nginx-grpc].
 The example below exposes the `snix-[ca]store` gRPC endpoints, as well as all read paths for nar-bridge (rendering NARInfos, NARs and nar-listings).
 We don't expose the write path for nar-bridge, as we use snix gRPC for cache uploads. All write paths and otherwise costly requests require mTLS.
 
+Note the example below also uses [nginx' support for `useGrpcErrorPages`][nginx-use-grpc-error-pages] merged into nixpkgs, so make sure your pin is past that commit.
+
 Depending on your setup, you might also want to require mTLS for the read path, and/or different `$ssl_client_s_dn` matching logic.
 
 ```nix
 let
-  passToSnixStoreDaemonAll = ''
-    grpc_pass unix:/run/snix-store-daemon.sock;
-    grpc_buffer_size 1m;
+  passToSnixStoreDaemonAll = {
+    useGrpcErrorPages = true;
+    extraConfig = ''
+      grpc_pass unix:/run/snix-store-daemon.sock;
+      grpc_buffer_size 1m;
 
-    client_max_body_size 0;
+      client_max_body_size 0;
+    '';
+  };
+  passToSnixStoreDaemonTrusted = {
+    useGrpcErrorPages = true;
+    extraConfig = ''
+      # Trusted endpoints need mTLS
+      if ($ssl_client_verify != SUCCESS) {
+        return 401;
+      }
 
-    error_page 400 = @grpc_internal;
-    error_page 401 = @grpc_unauthenticated;
-    error_page 403 = @grpc_permission_denied;
-    error_page 404 = @grpc_unimplemented;
-    error_page 429 = @grpc_unavailable;
-    error_page 502 = @grpc_unavailable;
-    error_page 503 = @grpc_unavailable;
-    error_page 504 = @grpc_unavailable;
-    # NGINX-to-gRPC status code mappings
-    # Ref: https://github.com/grpc/grpc/blob/master/doc/statuscodes.md
-    #
-    error_page 405 = @grpc_internal; # Method not allowed
-    error_page 408 = @grpc_deadline_exceeded; # Request timeout
-    error_page 413 = @grpc_resource_exhausted; # Payload too large
-    error_page 414 = @grpc_resource_exhausted; # Request URI too large
-    error_page 415 = @grpc_internal; # Unsupported media type;
-    error_page 426 = @grpc_internal; # HTTP request was sent to HTTPS port
-    error_page 495 = @grpc_unauthenticated; # Client certificate authentication error
-    error_page 496 = @grpc_unauthenticated; # Client certificate not presented
-    error_page 497 = @grpc_internal; # HTTP request was sent to mutual TLS port
-    error_page 500 = @grpc_internal; # Server error
-    error_page 501 = @grpc_internal; # Not implemented
-  '';
-  passToSnixStoreDaemonTrusted = ''
-    # Trusted endpoints need mTLS
-    if ($ssl_client_verify != SUCCESS) {
-      return 401;
-    }
+      # We only allow certain DNs to talk to it
+      if ($ssl_client_s_dn != "CN=my-custom-cn") {
+        return 401;
+      }
 
-    # We only allow certain DNs to talk to it
-    if ($ssl_client_s_dn != "CN=my-custom-cn") {
-      return 401;
-    }
-
-    ${passToSnixStoreDaemonAll}
-  '';
+      ${passToSnixStoreDaemonAll.extraConfig}
+    '';
+  };
 
 in
 {
@@ -155,83 +140,40 @@ in
     extraConfig = ''
       ssl_client_certificate /run/secrets/key.pem;
       ssl_verify_client optional;
-
-      # gRPC error responses
-      # Ref: https://github.com/grpc/grpc-go/blob/master/codes/codes.go
-      #
-      location @grpc_deadline_exceeded {
-          add_header grpc-status 4;
-          add_header grpc-message 'deadline exceeded';
-          default_type application/grpc;
-          return 204;
-      }
-      location @grpc_permission_denied {
-          add_header grpc-status 7;
-          add_header grpc-message 'permission denied';
-          default_type application/grpc;
-          return 204;
-      }
-      location @grpc_resource_exhausted {
-          add_header grpc-status 8;
-          add_header grpc-message 'resource exhausted';
-          default_type application/grpc;
-          return 204;
-      }
-      location @grpc_unimplemented {
-          add_header grpc-status 12;
-          add_header grpc-message unimplemented;
-          default_type application/grpc;
-          return 204;
-      }
-      location @grpc_internal {
-          add_header grpc-status 13;
-          add_header grpc-message 'internal error';
-          default_type application/grpc;
-          return 204;
-      }
-      location @grpc_unavailable {
-          add_header grpc-status 14;
-          add_header grpc-message unavailable;
-          default_type application/grpc;
-          return 204;
-      }
-      location @grpc_unauthenticated {
-          add_header grpc-status 16;
-          add_header grpc-message unauthenticated;
-          default_type application/grpc;
-          return 200;
-      }
     '';
 
-    locations."/" = {
-      proxyPass = "http://unix:/run/nar-bridge.sock:/";
-      extraConfig = ''
-        # Restrict allowed HTTP methods
-        limit_except GET HEAD {
-          # nar bridge allows to upload nars via PUT
-          deny all;
-        }
+    locations = {
+      "/" = {
+        proxyPass = "http://unix:/run/nar-bridge.sock:/";
+        extraConfig = ''
+          # Restrict allowed HTTP methods
+          limit_except GET HEAD {
+            # nar bridge allows to upload nars via PUT
+            deny all;
+          }
 
-        # Propagate content-encoding to the backend
-        proxy_set_header Accept-Encoding $http_accept_encoding;
+          # Propagate content-encoding to the backend
+          proxy_set_header Accept-Encoding $http_accept_encoding;
 
-        # Enable CORS from everywhere, same as c.n.o
-        add_header Access-Control-Allow-Origin *;
-      '';
+          # Enable CORS from everywhere, same as c.n.o
+          add_header Access-Control-Allow-Origin *;
+        '';
+      };
+
+      "/grpc.reflection.v1alpha.ServerReflection" = passToSnixStoreDaemonAll;
+      "/grpc.reflection.v1.ServerReflection" = passToSnixStoreDaemonAll;
+
+      "/snix.castore.v1.BlobService/Put" = passToSnixStoreDaemonTrusted;
+      "/snix.castore.v1.BlobService/Read" = passToSnixStoreDaemonAll;
+      "/snix.castore.v1.BlobService/Stat" = passToSnixStoreDaemonAll;
+      "/snix.castore.v1.DirectoryService/Get" = passToSnixStoreDaemonAll;
+      "/snix.castore.v1.DirectoryService/Put" = passToSnixStoreDaemonTrusted;
+
+      "/snix.store.v1.PathInfoService/CalculateNAR" = passToSnixStoreDaemonTrusted;
+      "/snix.store.v1.PathInfoService/Get" = passToSnixStoreDaemonAll;
+      "/snix.store.v1.PathInfoService/List" = passToSnixStoreDaemonTrusted;
+      "/snix.store.v1.PathInfoService/Put" = passToSnixStoreDaemonTrusted;
     };
-
-    locations."/grpc.reflection.v1alpha.ServerReflection".extraConfig = passToSnixStoreDaemonAll;
-    locations."/grpc.reflection.v1.ServerReflection".extraConfig = passToSnixStoreDaemonAll;
-    locations."/snix.castore.v1.BlobService/Stat".extraConfig = passToSnixStoreDaemonAll;
-    locations."/snix.castore.v1.BlobService/Read".extraConfig = passToSnixStoreDaemonAll;
-    locations."/snix.castore.v1.BlobService/Put".extraConfig = passToSnixStoreDaemonTrusted;
-    locations."/snix.castore.v1.DirectoryService/Get".extraConfig = passToSnixStoreDaemonAll;
-    locations."/snix.castore.v1.DirectoryService/Put".extraConfig = passToSnixStoreDaemonTrusted;
-
-    locations."/snix.store.v1.PathInfoService/Get".extraConfig = passToSnixStoreDaemonAll;
-    locations."/snix.store.v1.PathInfoService/Put".extraConfig = passToSnixStoreDaemonTrusted;
-    locations."/snix.store.v1.PathInfoService/CalculateNAR".extraConfig = passToSnixStoreDaemonTrusted;
-    locations."/snix.store.v1.PathInfoService/List".extraConfig = passToSnixStoreDaemonTrusted;
   };
 }
 ```
@@ -305,6 +247,6 @@ In case you need to retain certain store paths and their dependencies, consider 
 Implementing proper GC is on the roadmap, but due to the different backends involved and transitive dependencies slightly more involved, requiring some planning. Reach out if you want to help designing this!
 
 [cs-bs-split]: https://git.snix.dev/snix/snix/issues/93
-[^nginx-grpc]: Unfortunately exposing gRPC through nginx is a bit ugly, as error codes need to be manually mapped to retain semantics. A [PR](https://github.com/NixOS/nixpkgs/pull/549553) has been sent to upstream this to the nginx NixOS module.
+[nginx-use-grpc-error-pages]: https://github.com/NixOS/nixpkgs/pull/549553
 [^nar-compression]: Note that even though the NARInfo does say `Compression: none`, the actual NAR is sent compressed using zstd over the wire, by making use of HTTP's `Content-Encoding` header. Nix uses libcurl under the hood, which will transparently negotiate zstd compression.
 [^cppnix-pathinfo-format]: Both shapes of that output are accepted: the list of objects with a `path` key (`exportReferencesGraph`, Nix < 2.19, Lix), as well as the attrset keyed by store path (CppNix >= 2.19).
