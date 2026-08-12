@@ -6,59 +6,6 @@ use hex_literal::hex;
 const DUMMY_DIGEST: [u8; 32] = [0; 32];
 
 #[test]
-fn size() {
-    // nodes are counted twice for historical reasons.
-    {
-        let d = Directory::default();
-        assert_eq!(d.size(), 0);
-    }
-    {
-        let d = Directory {
-            directories: vec![DirectoryEntry {
-                name: "foo".into(),
-                digest: DUMMY_DIGEST.to_vec().into(),
-                size: 0,
-            }],
-            ..Default::default()
-        };
-        assert_eq!(d.size(), 2);
-    }
-    {
-        let d = Directory {
-            directories: vec![DirectoryEntry {
-                name: "foo".into(),
-                digest: DUMMY_DIGEST.to_vec().into(),
-                size: 3,
-            }],
-            ..Default::default()
-        };
-        assert_eq!(d.size(), 2 + 3);
-    }
-    {
-        let d = Directory {
-            files: vec![FileEntry {
-                name: "foo".into(),
-                digest: DUMMY_DIGEST.to_vec().into(),
-                size: 42,
-                executable: false,
-            }],
-            ..Default::default()
-        };
-        assert_eq!(d.size(), 2);
-    }
-    {
-        let d = Directory {
-            symlinks: vec![SymlinkEntry {
-                name: "foo".into(),
-                target: "bar".into(),
-            }],
-            ..Default::default()
-        };
-        assert_eq!(d.size(), 2);
-    }
-}
-
-#[test]
 #[cfg_attr(not(debug_assertions), ignore)]
 #[should_panic = "Directory::size exceeds u64::MAX"]
 fn size_unchecked_panic() {

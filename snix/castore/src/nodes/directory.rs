@@ -240,43 +240,42 @@ mod test {
             .expect("directory should be valid");
     }
 
-    #[test]
-    fn size() {
-        let d = Directory::try_from_iter([
+    #[rstest::rstest]
+    #[case::empty(vec![], 0)]
+    #[case::dir(vec![
+        ("foo", Node::Directory{digest: *DUMMY_DIGEST, size: 0}),
+    ], 2)]
+    #[case::dir_with_size(vec![
+        ("foo", Node::Directory{digest: *DUMMY_DIGEST, size: 3}),
+    ], 2 + 3)]
+    #[case::file(vec![
+        ("foo", Node::File{digest: *DUMMY_DIGEST, size: 42, executable: false}),
+    ], 2)]
+    #[case::symlink(vec![
+        ("foo", Node::Symlink{target: "bar".try_into().unwrap()}),
+    ], 2)]
+    #[case::dir_file_symlink(vec![
+        ("a", Node::Directory{digest: *DUMMY_DIGEST, size: 4}),
+        ("b", Node::File{digest: *DUMMY_DIGEST, size: 42, executable: false}),
+        ("c", Node::Symlink{target: "a".try_into().unwrap()}),
+    ], (3*2)+4)]
+    /// nodes are counted twice for historical reasons.
+    fn sizes(#[case] names_and_nodes: Vec<(&'static str, Node)>, #[case] exp_size: u64) {
+        let d = Directory::try_from_iter(names_and_nodes.into_iter().map(|(name, node)| {
             (
-                "a".try_into().unwrap(),
-                Node::Directory {
-                    digest: *DUMMY_DIGEST,
-                    size: 4,
-                },
-            ),
-            (
-                "b".try_into().unwrap(),
-                Node::File {
-                    digest: *DUMMY_DIGEST,
-                    size: 42,
-                    executable: false,
-                },
-            ),
-            (
-                "c".try_into().unwrap(),
-                Node::Symlink {
-                    target: "a".try_into().unwrap(),
-                },
-            ),
-        ])
-        .unwrap();
-        // One file, one symlink, one directory node (counted twice for historical reasons),
-        // plus the size field of the single child directory.
-        assert_eq!(d.size(), 3 * 2 + 4, "Directory::size must be correct");
-        // Must agree with the proto implementation.
+                PathComponent::try_from(name).expect("PathComponent to parse"),
+                node,
+            )
+        }))
+        .expect("Directory::try_from_iter to succeed");
+
+        assert_eq!(exp_size, d.size());
         assert_eq!(
             d.size(),
             crate::proto::Directory::from(d).size(),
             "Must agree with the proto implementation"
         );
     }
-
     #[test]
     fn validate_overflow() {
         let mut d = Directory::new();
