@@ -59,8 +59,7 @@ in
     };
   };
   systemd.services.snix-store-daemon = {
-    # #229
-    # environment.TRACER = "otlp";
+    environment.TRACER = "otlp";
     # Ensure /tank is mounted, which is where we the blobservice reads from.
     unitConfig.RequiresMountsFor = "/tank";
 
@@ -89,9 +88,7 @@ in
       };
     };
   };
-
-  # #229
-  # systemd.services.nar-bridge.environment.TRACER = "otlp";
+  systemd.services.nar-bridge.environment.TRACER = "otlp";
 
   systemd.tmpfiles.rules = [
     # Cache responses on NVME
