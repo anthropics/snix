@@ -7,6 +7,7 @@ const DUMMY_DIGEST: [u8; 32] = [0; 32];
 
 #[test]
 fn size() {
+    // nodes are counted twice for historical reasons.
     {
         let d = Directory::default();
         assert_eq!(d.size(), 0);
@@ -20,7 +21,6 @@ fn size() {
             }],
             ..Default::default()
         };
-        // directories are counted twice for historical reasons.
         assert_eq!(d.size(), 2);
     }
     {
@@ -28,12 +28,11 @@ fn size() {
             directories: vec![DirectoryEntry {
                 name: "foo".into(),
                 digest: DUMMY_DIGEST.to_vec().into(),
-                size: 4,
+                size: 3,
             }],
             ..Default::default()
         };
-        // directories are counted twice for historical reasons.
-        assert_eq!(d.size(), 6);
+        assert_eq!(d.size(), 2 + 3);
     }
     {
         let d = Directory {
@@ -45,7 +44,7 @@ fn size() {
             }],
             ..Default::default()
         };
-        assert_eq!(d.size(), 1);
+        assert_eq!(d.size(), 2);
     }
     {
         let d = Directory {
@@ -55,7 +54,7 @@ fn size() {
             }],
             ..Default::default()
         };
-        assert_eq!(d.size(), 1);
+        assert_eq!(d.size(), 2);
     }
 }
 

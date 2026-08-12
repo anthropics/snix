@@ -37,16 +37,17 @@ impl Directory {
         Ok(Self { nodes })
     }
 
-    /// The size of a directory is the number of all regular and symlink elements,
-    /// the number of directory elements (counted twice for historical reasons),
-    /// and their size fields.
+    /// Calculates the size of a directory
+    ///
+    /// This is the number of all elements (counted twice for historical reasons),
+    /// and for each directory node, its size fields added as well.
     pub fn size(&self) -> u64 {
         // It's impossible to create a Directory where the size overflows, because we
         // check before every add() that the size won't overflow.
         self.nodes()
             .map(|(_name, n)| match n {
                 Node::Directory { size, .. } => 2 + size,
-                Node::File { .. } | Node::Symlink { .. } => 1,
+                Node::File { .. } | Node::Symlink { .. } => 2,
             })
             .sum::<u64>()
     }
@@ -267,9 +268,13 @@ mod test {
         .unwrap();
         // One file, one symlink, one directory node (counted twice for historical reasons),
         // plus the size field of the single child directory.
-        assert_eq!(d.size(), 1 + 1 + 2 + 4);
+        assert_eq!(d.size(), 3 * 2 + 4, "Directory::size must be correct");
         // Must agree with the proto implementation.
-        assert_eq!(d.size(), crate::proto::Directory::from(d).size());
+        assert_eq!(
+            d.size(),
+            crate::proto::Directory::from(d).size(),
+            "Must agree with the proto implementation"
+        );
     }
 
     #[test]
