@@ -3,7 +3,7 @@ use petgraph::{
     visit::{Bfs, DfsPostOrder, Walker},
 };
 use std::collections::{HashMap, HashSet, hash_map};
-use tracing::{instrument, warn};
+use tracing::{Span, instrument, warn};
 
 use crate::directoryservice::order_validator::OrderingError;
 use crate::{B3Digest, Directory, Node};
@@ -138,21 +138,23 @@ impl DirectoryGraphBuilder {
         }
     }
 
-    #[instrument(level = "trace", skip_all, fields(directory.digest=%directory.digest()))]
+    #[instrument(level = "trace", skip_all, fields(directory.digest = tracing::field::Empty, directory.size = tracing::field::Empty), err)]
     pub fn try_insert(&mut self, directory: Directory) -> Result<(), OrderingError> {
-        let directory_digest = directory.digest();
-        let directory_size = directory.size();
+        let digest = directory.digest();
+        let size = directory.size();
 
-        let hash_map::Entry::Vacant(entry) = self
-            .digest_to_node_idx_size
-            .entry(directory_digest.to_owned())
+        Span::current()
+            .record("directory.digest", format_args!("{}", &digest))
+            .record("directory.size", size);
+
+        let hash_map::Entry::Vacant(entry) = self.digest_to_node_idx_size.entry(digest.to_owned())
         else {
             warn!("directory received multiple times");
             return Ok(());
         };
 
         let node_idx = self.graph.add_node(directory);
-        entry.insert((node_idx, directory_size));
+        entry.insert((node_idx, size));
 
         if self.insertion_order == DirectoryOrder::RootToLeaves {
             // If this was the first inserted node, set first_idx.
@@ -164,7 +166,7 @@ impl DirectoryGraphBuilder {
                     .node_weight(node_idx)
                     .expect("Snix bug: node not found")
                     .to_owned();
-                if directory_digest
+                if digest
                     != self
                         .exp_root_digest
                         .take()
@@ -172,12 +174,16 @@ impl DirectoryGraphBuilder {
                 {
                     Err(OrderingError::Unexpected { directory })?
                 }
-            } else if let Some((digest, (size, src_idxs))) =
+            } else if let Some((digest, (referenced_size, src_idxs))) =
                 // Check for our own digest in [self.rtl_edges_todo], pop and add edges to graph
-                self.rtl_edges_todo.remove_entry(&directory_digest)
+                self.rtl_edges_todo.remove_entry(&digest)
             {
-                if size != directory_size {
-                    Err(OrderingError::WrongSize { digest, size })?
+                if referenced_size != size {
+                    Err(OrderingError::WrongSize {
+                        digest,
+                        referenced: referenced_size,
+                        actual: size,
+                    })?
                 }
 
                 for src_idx in src_idxs {
@@ -222,7 +228,8 @@ impl DirectoryGraphBuilder {
                         if seen_dir_size != out_size {
                             Err(OrderingError::WrongSize {
                                 digest: out_digest,
-                                size: out_size,
+                                referenced: out_size,
+                                actual: seen_dir_size,
                             })?
                         }
 
@@ -236,7 +243,8 @@ impl DirectoryGraphBuilder {
                                 if size != out_size {
                                     Err(OrderingError::WrongSize {
                                         digest: occupied_entry.key().to_owned(),
-                                        size,
+                                        referenced: out_size,
+                                        actual: size,
                                     })?
                                 }
                                 occupied_entry.get_mut().1.push(node_idx);
@@ -257,7 +265,8 @@ impl DirectoryGraphBuilder {
                         if seen_dir_size != out_size {
                             Err(OrderingError::WrongSize {
                                 digest: out_digest,
-                                size: out_size,
+                                referenced: out_size,
+                                actual: seen_dir_size,
                             })?
                         }
 
@@ -271,7 +280,7 @@ impl DirectoryGraphBuilder {
 
                         Err(OrderingError::UnknownLTR {
                             digest: out_digest,
-                            parent_digest: directory_digest.to_owned(),
+                            parent_digest: digest.to_owned(),
                             path_component: directory
                                 .nodes()
                                 .find_map(|(path_component, node)| {

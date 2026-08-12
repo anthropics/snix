@@ -2,7 +2,7 @@ use async_stream::try_stream;
 use futures::StreamExt;
 use futures::{Stream, stream::BoxStream};
 use std::collections::{HashMap, HashSet, hash_map};
-use tracing::warn;
+use tracing::{Span, trace, warn};
 
 use super::Directory;
 use crate::{B3Digest, Node};
@@ -10,8 +10,12 @@ use crate::{B3Digest, Node};
 /// Emitted when directories are sent in the wrong order
 #[derive(thiserror::Error, Debug, Eq, PartialEq)]
 pub enum OrderingError {
-    #[error("wrong size {size} for digest {digest}")]
-    WrongSize { digest: B3Digest, size: u64 },
+    #[error("wrong size for digest {digest}, referenced with {referenced}, but got {actual}")]
+    WrongSize {
+        digest: B3Digest,
+        referenced: u64,
+        actual: u64,
+    },
 
     #[error("unknown digest {digest} referenced for {path_component} in parent {parent_digest}")]
     UnknownLTR {
@@ -88,11 +92,16 @@ impl RootToLeavesValidator {
     }
 
     /// Accepts a directory if previously introduced, or returns an error if it's unknown.
+    #[tracing::instrument(level = "trace", skip_all, fields(directory.digest = tracing::field::Empty, directory.size = tracing::field::Empty), err)]
     pub fn try_accept(&mut self, directory: &Directory) -> Result<(), OrderingError> {
         assert!(!self.poison, "Snix bug: RootToLeavesValidator poisoned");
 
         let size = directory.size();
         let digest = directory.digest();
+
+        Span::current()
+            .record("directory.digest", format_args!("{}", &digest))
+            .record("directory.size", size);
 
         // Every incoming directory must already have been introduced.
         match self.referenced_directories.get(&digest) {
@@ -105,9 +114,13 @@ impl RootToLeavesValidator {
                 self.introduce_children_of(directory);
                 Ok(())
             }
-            Some(_) => {
+            Some(expected) => {
                 self.poison = true;
-                Err(OrderingError::WrongSize { digest, size })
+                Err(OrderingError::WrongSize {
+                    digest,
+                    referenced: *expected,
+                    actual: size,
+                })
             }
             // The root may be inserted even if's not in self.referenced_directories.
             None if digest == self.root_digest => {
@@ -127,6 +140,7 @@ impl RootToLeavesValidator {
 
     /// Should be called after accepting the last Directory
     /// Ensures there's no more pending directories.
+    #[tracing::instrument(level = "trace", skip_all, err)]
     pub fn finalize(mut self) -> Result<(), OrderingError> {
         // At the end of the stream, pending must be empty.
         if !self.pending_directories.is_empty() {
@@ -217,12 +231,18 @@ impl LeavesToRootValidator {
     }
 
     /// Accepts a directory if previously introduced, or returns an error if it's unknown.
+    #[tracing::instrument(level = "trace", skip_all, fields(directory.digest = tracing::field::Empty, directory.size = tracing::field::Empty), err)]
     pub fn try_accept(&mut self, directory: &Directory) -> Result<(), OrderingError> {
         assert!(!self.poison, "Snix bug: LeavesToRootValidator poisoned");
+
+        Span::current()
+            .record("directory.digest", format_args!("{}", &directory.digest()))
+            .record("directory.size", directory.size());
 
         // every directory referenced must already have been seen.
         // Remove them from pending if still in there.
         for (name, node) in directory.nodes() {
+            trace!(%name, ?node, "at node");
             if let Node::Directory { digest, size } = node {
                 match self.accepted_directories.get(digest) {
                     Some(s) if s == size => {
@@ -232,7 +252,8 @@ impl LeavesToRootValidator {
                         self.poison = true;
                         Err(OrderingError::WrongSize {
                             digest: digest.to_owned(),
-                            size: *s,
+                            referenced: *size,
+                            actual: *s,
                         })?
                     }
                     None => {
@@ -269,6 +290,7 @@ impl LeavesToRootValidator {
 
     /// Should be called before Drop, to ensure there's no introduced but unsent
     /// directories.
+    #[tracing::instrument(level = "trace", skip_all, err)]
     #[allow(unused_mut)]
     pub fn finalize(mut self) -> Result<(), OrderingError> {
         assert!(!self.poison, "Snix bug: LeavesToRootValidator poisoned");
