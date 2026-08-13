@@ -22,6 +22,7 @@
         features = (
           [
             "cloud"
+            "compat-migrate-directory-sizes"
             "fuse"
             "xp-composition-url-refs"
           ]

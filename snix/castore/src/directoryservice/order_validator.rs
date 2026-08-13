@@ -155,7 +155,22 @@ impl OrderValidator for RootToLeaves {
 
         // Every incoming directory must already have been introduced.
         match self.referenced_directories.get(&digest) {
-            Some(s) if *s == size => {
+            #[cfg(feature = "compat-accept-bigger-sizes")]
+            Some(size_referenced) if (size..=directory.size_max()).contains(size_referenced) => {
+                if !self.pending_directories.remove(&digest) {
+                    debug!("directory received multiple times");
+                };
+
+                if *size_referenced != size {
+                    debug!(directory.size_referenced=%size_referenced, "directory was referenced with a larger size (legacy size calculation)");
+                }
+
+                // Introduce children
+                self.introduce_children_of(directory);
+                Ok(())
+            }
+            #[cfg(not(feature = "compat-accept-bigger-sizes"))]
+            Some(size_referenced) if size == *size_referenced => {
                 if !self.pending_directories.remove(&digest) {
                     debug!("directory received multiple times");
                 };
@@ -164,11 +179,11 @@ impl OrderValidator for RootToLeaves {
                 self.introduce_children_of(directory);
                 Ok(())
             }
-            Some(expected) => {
+            Some(size_referenced) => {
                 self.poison = true;
                 Err(OrderingError::WrongSize {
                     digest,
-                    referenced: *expected,
+                    referenced: *size_referenced,
                     actual: size,
                 })
             }
@@ -211,6 +226,12 @@ impl OrderValidator for RootToLeaves {
 /// pointers match the actual sizes.
 /// Commonly used when _uploading_ a directory closure _to_ a store.
 pub struct LeavesToRoot {
+    #[cfg(feature = "compat-accept-bigger-sizes")]
+    /// tracks inserted directories, and their sizes observed.
+    /// size is tracked as a range, as this could be a closure with legacy sizes.
+    accepted_directories: HashMap<B3Digest, std::ops::RangeInclusive<u64>>,
+
+    #[cfg(not(feature = "compat-accept-bigger-sizes"))]
     /// tracks inserted directories, and their sizes observed.
     accepted_directories: HashMap<B3Digest, u64>,
 
@@ -269,16 +290,36 @@ impl OrderValidator for LeavesToRoot {
         // Remove them from pending if still in there.
         for (name, node) in directory.nodes() {
             trace!(%name, ?node, "at node");
-            if let Node::Directory { digest, size } = node {
+            if let Node::Directory {
+                digest,
+                size: referenced_size,
+            } = node
+            {
                 match self.accepted_directories.get(digest) {
-                    Some(s) if s == size => {
+                    #[cfg(feature = "compat-accept-bigger-sizes")]
+                    Some(size_range) if size_range.contains(referenced_size) => {
+                        let minimal_size = size_range.start();
+                        if referenced_size != minimal_size {
+                            debug!(
+                                directory.size_referenced=%referenced_size,
+                                directory.size_referenced_minimal=%minimal_size,
+                                "directory was referenced with a larger size (legacy size calculation)"
+                            );
+                        }
+                        self.pending_directories.remove(digest);
+                    }
+                    #[cfg(not(feature = "compat-accept-bigger-sizes"))]
+                    Some(size) if size == referenced_size => {
                         self.pending_directories.remove(digest);
                     }
                     Some(s) => {
                         self.poison = true;
                         Err(OrderingError::WrongSize {
                             digest: digest.to_owned(),
-                            referenced: *size,
+                            referenced: *referenced_size,
+                            #[cfg(feature = "compat-accept-bigger-sizes")]
+                            actual: *s.start(),
+                            #[cfg(not(feature = "compat-accept-bigger-sizes"))]
                             actual: *s,
                         })?
                     }
@@ -302,7 +343,11 @@ impl OrderValidator for LeavesToRoot {
                 debug!("directory received multiple times");
             }
             hash_map::Entry::Vacant(entry) => {
+                #[cfg(feature = "compat-accept-bigger-sizes")]
+                entry.insert(directory.size()..=directory.size_max());
+                #[cfg(not(feature = "compat-accept-bigger-sizes"))]
                 entry.insert(directory.size());
+
                 #[cfg(debug_assertions)]
                 {
                     self.last_inserted_digest = Some(directory_digest)
@@ -350,10 +395,14 @@ impl OrderValidator for LeavesToRoot {
 #[cfg(test)]
 mod tests {
     use super::{LeavesToRoot, OrderValidator, RootToLeaves};
+    use crate::Node;
     use crate::directoryservice::Directory;
-    use crate::fixtures::{DIRECTORY_A, DIRECTORY_B, DIRECTORY_C, DIRECTORY_D, DIRECTORY_E};
+    use crate::fixtures::{
+        DIRECTORY_A, DIRECTORY_B, DIRECTORY_C, DIRECTORY_D, DIRECTORY_E, DIRECTORY_WITH_KEEP,
+    };
     use futures::TryStreamExt;
     use rstest::rstest;
+    use tracing_test::traced_test;
 
     #[rstest]
     /// Uploading an empty directory should succeed.
@@ -444,6 +493,164 @@ mod tests {
         if !exp_fail_upload_last {
             validator.finalize().expect("finalize to succeed");
         }
+    }
+
+    // Producing a list of Directory using legacy sizes.
+    // Starts with the root.
+    fn legacy_size_dirs() -> Vec<Directory> {
+        let a = DIRECTORY_WITH_KEEP.to_owned();
+        assert_eq!(a.size(), 1);
+        #[cfg(feature = "compat-accept-bigger-sizes")]
+        assert_eq!(a.size_max(), 2);
+
+        // For b, we use the size calculation used between cl/31479 and cl/31564.
+        let b = crate::Directory::try_from_iter([
+            (
+                "symlink".try_into().unwrap(),
+                Node::Symlink {
+                    target: "somewhereelse".try_into().unwrap(),
+                },
+            ),
+            (
+                "dir".try_into().unwrap(),
+                Node::Directory {
+                    digest: DIRECTORY_WITH_KEEP.digest(),
+                    size: 1,
+                },
+            ),
+        ])
+        .unwrap();
+
+        assert_eq!(3, b.size());
+        #[cfg(feature = "compat-accept-bigger-sizes")]
+        assert_eq!(5, b.size_max());
+        let b_size = 1 + 2 + 1; // 4
+
+        let root = crate::Directory::try_from_iter([
+            (
+                "a".try_into().unwrap(),
+                Node::Directory {
+                    digest: a.digest(),
+                    // This is a.size_max().
+                    size: 2,
+                },
+            ),
+            (
+                "b".try_into().unwrap(),
+                Node::Directory {
+                    digest: b.digest(),
+                    size: b_size,
+                },
+            ),
+        ])
+        .unwrap();
+
+        vec![root, b, a]
+    }
+
+    #[test]
+    #[traced_test]
+    /// Ensure directories with legacy sizes are still accepted by the RootToLeavesValidator.
+    fn root_to_leaves_legacy_size() {
+        let dirs = legacy_size_dirs();
+
+        let mut validator = RootToLeaves::new_with_root_digest(dirs[0].digest());
+        validator.try_accept(&dirs[0]).expect("to accept root");
+
+        if cfg!(feature = "compat-accept-bigger-sizes") {
+            validator.try_accept(&dirs[1]).expect("to accept b");
+            validator.try_accept(&dirs[2]).expect("to accept leaf a");
+            validator.finalize().expect("to finalize");
+
+            assert!(logs_contain("legacy size calculation"));
+        } else {
+            validator
+                .try_accept(&dirs[1])
+                .expect_err("to reject b due to wrong size used in root");
+        }
+    }
+
+    #[test]
+    #[traced_test]
+    /// Ensure directories with legacy sizes are still accepted by the LeavesToRootValidator.
+    fn leaves_to_root_legacy_size() {
+        let dirs = legacy_size_dirs();
+
+        let mut validator = LeavesToRoot::new();
+        validator.try_accept(&dirs[2]).expect("to accept leaf a");
+        validator.try_accept(&dirs[1]).expect("to accept b");
+
+        if cfg!(feature = "compat-accept-bigger-sizes") {
+            validator.try_accept(&dirs[0]).expect("to accept root");
+            validator.finalize().expect("to finalize");
+
+            assert!(logs_contain("legacy size calculation"));
+        } else {
+            validator
+                .try_accept(&dirs[0])
+                .expect_err("to reject root due to referring to a with wrong size");
+        }
+    }
+
+    #[test]
+    /// Ensures directories referring to sizes < .size are rejected.
+    /// This is independent of the `compat-accept-bigger-sizes` feature.
+    fn reject_too_small_size() {
+        assert_eq!(1, DIRECTORY_B.size());
+
+        // create a root which refers to b with a size < b.size()
+        let root = Directory::try_from_iter([(
+            "b".try_into().unwrap(),
+            Node::Directory {
+                digest: DIRECTORY_B.digest(),
+                size: 0,
+            },
+        )])
+        .unwrap();
+
+        let mut validator = RootToLeaves::new_with_root_digest(root.digest());
+        validator.try_accept(&root).expect("should accept root");
+        validator
+            .try_accept(&DIRECTORY_B)
+            .expect_err("should reject B due to wrong size");
+
+        let mut validator = LeavesToRoot::new();
+        validator.try_accept(&DIRECTORY_A).expect("should accept A");
+        validator.try_accept(&DIRECTORY_B).expect("should accept B");
+        validator
+            .try_accept(&root)
+            .expect_err("should reject root due to referring by wrong size");
+    }
+
+    #[test]
+    /// Ensures directories referring to sizes > .size_max are rejected.
+    /// This is independent of the `compat-accept-bigger-sizes` feature.
+    fn reject_too_big_size() {
+        #[cfg(feature = "compat-accept-bigger-sizes")]
+        assert_eq!(2, DIRECTORY_B.size_max());
+
+        // create a root which refers to b with a size > b.size_max()
+        let root = Directory::try_from_iter([(
+            "b".try_into().unwrap(),
+            Node::Directory {
+                digest: DIRECTORY_B.digest(),
+                size: 3,
+            },
+        )])
+        .unwrap();
+
+        let mut validator = RootToLeaves::new_with_root_digest(root.digest());
+        validator.try_accept(&root).expect("should accept root");
+        validator
+            .try_accept(&DIRECTORY_B)
+            .expect_err("should reject B due to wrong size");
+
+        let mut validator = LeavesToRoot::new();
+        validator.try_accept(&DIRECTORY_A).expect("should accept A");
+        validator.try_accept(&DIRECTORY_B).expect("should accept B");
+        validator
+            .try_accept(&root)
+            .expect_err("should reject root due to referring by wrong size");
     }
 
     #[test]

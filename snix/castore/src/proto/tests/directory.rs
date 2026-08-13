@@ -45,7 +45,7 @@ fn size_checked() {
             directories: vec![DirectoryEntry {
                 name: "foo".into(),
                 digest: DUMMY_DIGEST.to_vec().into(),
-                size: u64::MAX - 2,
+                size: u64::MAX - 1,
             }],
             ..Default::default()
         };
@@ -56,7 +56,7 @@ fn size_checked() {
             directories: vec![DirectoryEntry {
                 name: "foo".into(),
                 digest: DUMMY_DIGEST.to_vec().into(),
-                size: u64::MAX - 1,
+                size: u64::MAX,
             }],
             ..Default::default()
         };
@@ -73,7 +73,7 @@ fn size_checked() {
                 DirectoryEntry {
                     name: "foo".into(),
                     digest: DUMMY_DIGEST.to_vec().into(),
-                    size: u64::MAX / 2 - 1,
+                    size: u64::MAX / 2,
                 },
             ],
             ..Default::default()

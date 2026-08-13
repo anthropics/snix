@@ -22743,6 +22743,10 @@ rec {
             packageId = "tokio-test";
           }
           {
+            name = "tracing-test";
+            packageId = "tracing-test";
+          }
+          {
             name = "xattr";
             packageId = "xattr";
           }
@@ -22755,7 +22759,10 @@ rec {
             "object_store/azure"
             "object_store/gcp"
           ];
-          "default" = [ "cloud" ];
+          "default" = [
+            "cloud"
+            "compat-accept-bigger-sizes"
+          ];
           "fs" = [
             "dep:fuse-backend-rs"
             "dep:threadpool"
@@ -22782,6 +22789,7 @@ rec {
         };
         resolvedDefaultFeatures = [
           "cloud"
+          "compat-accept-bigger-sizes"
           "default"
           "fs"
           "fuse"

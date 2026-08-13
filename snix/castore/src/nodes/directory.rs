@@ -39,11 +39,25 @@ impl Directory {
 
     /// Calculates the size of a directory
     ///
-    /// This is the number of all elements (counted twice for historical reasons),
-    /// and for each directory node, its size fields added as well.
+    /// This is the number of all elements and for each directory node, its size fields added.
     pub fn size(&self) -> u64 {
         // It's impossible to create a Directory where the size overflows, because we
         // check before every add() that the size won't overflow.
+        self.nodes()
+            .map(|(_name, n)| match n {
+                Node::Directory { size, .. } => 1 + size,
+                Node::File { .. } | Node::Symlink { .. } => 1,
+            })
+            .sum::<u64>()
+    }
+
+    /// Calculates the maximum size older implementations did calculate for a Directory.
+    ///
+    /// This is the size calculated between cl/12216 and and cl/31479.
+    ///
+    /// This is the 2*(number of all elements) and for each directory node, its size fields added.
+    #[cfg(feature = "compat-accept-bigger-sizes")]
+    pub(crate) fn size_max(&self) -> u64 {
         self.nodes()
             .map(|(_name, n)| match n {
                 Node::Directory { size, .. } => 2 + size,
@@ -102,7 +116,12 @@ fn check_insert_node(
     // overflow
     let new_size = checked_sum([
         current_size,
-        2,
+        // Err on the upper side, to make sure size_max also won't overflow.
+        if cfg!(feature = "compat-accept-bigger-sizes") {
+            2
+        } else {
+            1
+        },
         match node {
             Node::Directory { size, .. } => size,
             _ => 0,
@@ -244,22 +263,21 @@ mod test {
     #[case::empty(vec![], 0)]
     #[case::dir(vec![
         ("foo", Node::Directory{digest: *DUMMY_DIGEST, size: 0}),
-    ], 2)]
+    ], 1)]
     #[case::dir_with_size(vec![
         ("foo", Node::Directory{digest: *DUMMY_DIGEST, size: 3}),
-    ], 2 + 3)]
+    ], 1 + 3)]
     #[case::file(vec![
         ("foo", Node::File{digest: *DUMMY_DIGEST, size: 42, executable: false}),
-    ], 2)]
+    ], 1)]
     #[case::symlink(vec![
         ("foo", Node::Symlink{target: "bar".try_into().unwrap()}),
-    ], 2)]
+    ], 1)]
     #[case::dir_file_symlink(vec![
         ("a", Node::Directory{digest: *DUMMY_DIGEST, size: 4}),
         ("b", Node::File{digest: *DUMMY_DIGEST, size: 42, executable: false}),
         ("c", Node::Symlink{target: "a".try_into().unwrap()}),
-    ], (3*2)+4)]
-    /// nodes are counted twice for historical reasons.
+    ], 3+4)]
     fn sizes(#[case] names_and_nodes: Vec<(&'static str, Node)>, #[case] exp_size: u64) {
         let d = Directory::try_from_iter(names_and_nodes.into_iter().map(|(name, node)| {
             (
@@ -285,7 +303,11 @@ mod test {
                 "foo".try_into().unwrap(),
                 Node::Directory {
                     digest: *DUMMY_DIGEST,
-                    size: u64::MAX
+                    size: if cfg!(feature = "compat-accept-bigger-sizes") {
+                        u64::MAX - 1
+                    } else {
+                        u64::MAX
+                    },
                 }
             ),
             Err(DirectoryError::SizeOverflow)

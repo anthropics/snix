@@ -229,6 +229,80 @@ where
     }
 }
 
+#[cfg(feature = "compat-accept-bigger-sizes")]
+impl DirectoryGraph {
+    /// Returns a new [DirectoryGraph] for which all sizes have been recomputed.
+    /// If there's any change, it'll cause referencing Directories to also have
+    /// different digests.
+    /// Data migration code to remove size calculation introduced in cl/12216 and cl/31479.
+    pub fn with_recalculated_sizes(self) -> Self {
+        /// Traverses the [Directory], assembling a new [Directory]
+        /// while recursing for each [Node::Directory].
+        /// Inserts it to `new_closure`, then returns a [crate::Node] which
+        /// contains the (possibly updated) digest and size.
+        fn fix_sizes_recursive(
+            directory: &Directory,
+            source: &HashMap<B3Digest, crate::Directory>,
+            new_closure: &mut DirectoryGraphBuilder<LeavesToRoot>,
+        ) -> crate::Node {
+            let new_dir = Directory::try_from_iter(directory.nodes().map(|(path, node)| {
+                (
+                    path.to_owned(),
+                    if let Node::Directory {
+                        digest,
+                        size: _size,
+                    } = node
+                    {
+                        fix_sizes_recursive(
+                            source
+                                .get(digest)
+                                .expect("Snix bug: digest not found in source"),
+                            source,
+                            new_closure,
+                        )
+                    } else {
+                        node.to_owned()
+                    },
+                )
+            }))
+            .expect("Snix bug: constructed invalid directory");
+
+            let new_digest = new_dir.digest();
+            let new_size = new_dir.size();
+
+            new_closure
+                .try_insert(new_dir)
+                .expect("Snix bug: rewriting produced invalid closure");
+
+            crate::Node::Directory {
+                digest: new_digest,
+                size: new_size,
+            }
+        }
+
+        let root_digest = self.root().digest();
+
+        let directories = HashMap::from_iter(
+            self.drain_leaves_to_root()
+                .map(|directory| (directory.digest(), directory)),
+        );
+
+        let mut new_graph = DirectoryGraphBuilder::<LeavesToRoot>::new();
+
+        fix_sizes_recursive(
+            directories
+                .get(&root_digest)
+                .expect("Snix bug: root digest not found"),
+            &directories,
+            &mut new_graph,
+        );
+
+        new_graph
+            .build()
+            .expect("Snix bug: rewriting produced invalid closure")
+    }
+}
+
 /// Extension trait to get a [DirectoryGraph] from a [DirectoryService], and insert into it.
 #[tonic::async_trait]
 pub trait DirectoryServiceGraphExt {

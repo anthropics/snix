@@ -49,14 +49,8 @@ impl Directory {
 
     fn size_checked(&self) -> Option<u64> {
         checked_sum([
-            // counted twice.
             self.files.len().try_into().ok()?,
-            self.files.len().try_into().ok()?,
-            // counted twice.
             self.symlinks.len().try_into().ok()?,
-            self.symlinks.len().try_into().ok()?,
-            // counted twice.
-            self.directories.len().try_into().ok()?,
             self.directories.len().try_into().ok()?,
             checked_sum(self.directories.iter().map(|e| e.size))?,
         ])

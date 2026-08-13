@@ -103,16 +103,19 @@ type DirectoryEntry struct {
 	// The blake3 digest of a Directory message.
 	Digest []byte `protobuf:"bytes,2,opt,name=digest,proto3" json:"digest,omitempty"`
 	// Number of child elements in the Directory referred to by `digest`.
-	// Child directory elements are counted twice for historical reasons.
-	// Calculated by summing up the numbers of `directories`, `files` and
-	// `symlinks`, and for each directory, its size field. Used for inode number
-	// calculation.
+	// Child directory elements are calculated by summing up the numbers of
+	// `directories`, `files` and `symlinks`, and for each directory, its size field.
+	// Can be used for inode number calculation.
 	// This field is precisely as verifiable as any other Merkle tree edge.
 	// Resolve `digest`, and you can compute it incrementally. Resolve the entire
 	// tree, and you can fully compute it from scratch.
 	// A credulous implementation won't reject an excessive size, but this is
 	// harmless: you'll have some ordinals without nodes. Undersizing is obvious
 	// and easy to reject: you won't have an ordinal for some nodes.
+	// Historically there were implementations which calculated up to
+	// `(2*number of elements) + (sizes of each directory element)`,
+	// so implementations verifying this field should accept up to this
+	// if they still expect data produced by this code.
 	Size          uint64 `protobuf:"varint,3,opt,name=size,proto3" json:"size,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

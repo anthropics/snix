@@ -81,10 +81,14 @@ serde_json.workspace = true
 tempfile.workspace = true
 tokio-retry.workspace = true
 tokio-test.workspace = true
+tracing-test.workspace = true
 xattr.workspace = true
 
 [features]
-default = ["cloud"]
+default = ["cloud", "compat-accept-bigger-sizes"]
+# Whether to be tolerant to bigger sizes, as calculated between cl/12216 and and cl/31479.
+# Should only be enabled while migrating existing datasets to the smaller sizes, will disappear in the future.
+compat-accept-bigger-sizes = []
 cloud = [
   "dep:bigtable_rs",
   "dep:googleapis-tonic-google-bigtable-v2",
