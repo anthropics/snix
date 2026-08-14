@@ -461,7 +461,7 @@ mod tests {
     }
 
     #[test]
-    /// Inserting a firt directory into [DirectoryGraphBuilder] that has a
+    /// Inserting a first directory into [DirectoryGraphBuilder] that has a
     /// different digest than what was specified in `new_root_to_leaves` should fail.
     fn rtl_wrong_digest() {
         let mut builder = DirectoryGraphBuilder::new_root_to_leaves(DIRECTORY_B.digest());
