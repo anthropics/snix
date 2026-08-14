@@ -45,24 +45,11 @@ fn derive_dirs_path(base_path: &Path, digest: &B3Digest) -> Path {
         .join(HEXLOWER.encode(digest.as_slice()))
 }
 
-/// Helper function, parsing protobuf-encoded Directories into [crate::Directory],
-/// if the digest is allowed.
-fn parse_proto_directory<F>(
-    encoded_directory: &[u8],
-    digest_allowed: F,
-) -> Result<crate::Directory, Error>
-where
-    F: Fn(&B3Digest) -> bool,
-{
-    let actual_digest = B3Digest::from(blake3::hash(encoded_directory).as_bytes());
-    if !digest_allowed(&actual_digest) {
-        return Err(Error::UnexpectedDigest(actual_digest));
-    }
+/// Helper function, parsing protobuf-encoded Directories into [crate::Directory].
+fn parse_proto_directory(encoded_directory: &[u8]) -> Result<crate::Directory, Error> {
+    let directory_proto = proto::Directory::decode(encoded_directory)?;
 
-    let directory_proto =
-        proto::Directory::decode(encoded_directory).map_err(Error::ProtobufDecode)?;
-
-    Directory::try_from(directory_proto).map_err(Error::DirectoryValidation)
+    Ok(Directory::try_from(directory_proto)?)
 }
 
 #[allow(clippy::identity_op)]
@@ -160,10 +147,16 @@ impl DirectoryService for ObjectStoreDirectoryService {
 
                 let mut order_validator = RootToLeavesValidator::new_with_root_digest(root_directory_digest);
                 while let Some(encoded_directory) = encoded_directories.try_next().await? {
-                    let directory = parse_proto_directory(&encoded_directory, |digest| {
-                        order_validator.would_accept(digest)
-                    })?;
+                    // hash the encoded proto message, only proceed if we would accept a directory with this digest.
+                    let digest = B3Digest::from(blake3::hash(&encoded_directory));
+                    if !order_validator.would_accept(&digest) {
+                        Err(Error::UnexpectedDigest(digest))?;
+                    }
 
+                    // only then proceed with parsing
+                    let directory = parse_proto_directory(&encoded_directory)?;
+
+                    // The directory can still be rejected for other reasons.
                     order_validator.try_accept(&directory).map_err(Error::DirectoryOrdering)?;
 
                     yield directory;
@@ -194,7 +187,7 @@ enum Error {
 
     #[error("Directory Graph ordering error")]
     DirectoryOrdering(#[from] crate::directoryservice::OrderingError),
-    #[error("requested directory has unexpected digest {0}")]
+    #[error("next directory in batch has unexpected digest {0}")]
     UnexpectedDigest(B3Digest),
     #[error("failed to decode protobuf: {0}")]
     ProtobufDecode(#[from] prost::DecodeError),
