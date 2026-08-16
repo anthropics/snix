@@ -62,8 +62,7 @@ pub struct RootToLeavesValidator {
     /// These consist of the root digest and any subset of `referenced_directories`.
     pending_directories: HashSet<B3Digest>,
 
-    /// tracks whether [Self::finalize] has been called,
-    /// or an error has occurred while trying to accept.
+    /// tracks whether an error has occurred while trying to accept.
     poison: bool,
 }
 
@@ -138,18 +137,14 @@ impl RootToLeavesValidator {
         }
     }
 
-    /// Should be called after accepting the last Directory
+    /// Must be called after accepting the last Directory
     /// Ensures there's no more pending directories.
     #[tracing::instrument(level = "trace", skip_all, err)]
-    pub fn finalize(mut self) -> Result<(), OrderingError> {
+    pub fn finalize(self) -> Result<(), OrderingError> {
         // At the end of the stream, pending must be empty.
         if !self.pending_directories.is_empty() {
-            return Err(OrderingError::DirectoriesMissing(
-                self.pending_directories.clone(),
-            ));
+            return Err(OrderingError::DirectoriesMissing(self.pending_directories));
         }
-
-        self.poison = true;
 
         Ok(())
     }
