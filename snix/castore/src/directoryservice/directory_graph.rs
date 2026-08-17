@@ -15,9 +15,11 @@ use petgraph::{
     visit::{Bfs, DfsPostOrder, Walker},
 };
 use std::collections::{HashMap, HashSet, hash_map};
-use tracing::{Span, instrument, warn};
+use tracing::{debug, instrument, warn};
 
-use crate::directoryservice::{DirectoryService, order_validator::OrderingError};
+use crate::directoryservice::{
+    DirectoryService, LeavesToRootValidator, RootToLeavesValidator, order_validator::OrderingError,
+};
 use crate::{B3Digest, Directory, Node};
 
 /// This represents a full (and validated) graph of [Directory] nodes.
@@ -103,24 +105,30 @@ impl DirectoryGraph {
 /// (insertion order, completeness, connectivity, correct sizes referenced).
 // NOTE: a child is always smaller than its parent
 pub struct DirectoryGraphBuilder {
-    /// The order of [Directory] elements [Self::try_insert] is called with.
-    insertion_order: DirectoryOrder,
+    /// Stores the order validator for the chosen insertion order.
+    order_validator: OrderValidator,
 
     /// A directed graph, using Directory as node weight.
     /// Edges point from parents to children.
     graph: DiGraph<Directory, ()>,
 
-    /// A lookup table from directory digest to node index and size.
-    /// The size is stored to avoid having to calculate it multiple times.
-    digest_to_node_idx_size: HashMap<B3Digest, (NodeIndex, u64)>,
+    /// A lookup table from directory digest to node index.
+    /// Used to lookup where to draw edges.
+    digest_to_node_idx: HashMap<B3Digest, NodeIndex>,
+}
 
-    /// A map from digest to size and all node indexes that are pointing to it.
-    /// Used in the RTL case for all unfinished edges.
-    rtl_edges_todo: HashMap<B3Digest, (u64, Vec<NodeIndex>)>,
-
-    /// Holds the expected root digest.
-    /// Populated in the RTL case only.
-    exp_root_digest: Option<B3Digest>,
+/// Stores the order validator for the chosen [DirectoryOrder]
+enum OrderValidator {
+    RootToLeaves {
+        validator: RootToLeavesValidator,
+        /// For each digest, tracks nodes that referred to it.
+        /// This is to draw edges after when finalizing.
+        referencing_node_idxs: HashMap<B3Digest, HashSet<NodeIndex>>,
+    },
+    /// In the leaves-to-root case we only need to lookup references of
+    /// Directories we already received, so edges can be created
+    /// directly.
+    LeavesToRoot(LeavesToRootValidator),
 }
 
 impl DirectoryGraphBuilder {
@@ -128,11 +136,9 @@ impl DirectoryGraphBuilder {
     /// Leaves-To-Root order.
     pub fn new_leaves_to_root() -> Self {
         Self {
-            insertion_order: DirectoryOrder::LeavesToRoot,
+            order_validator: OrderValidator::LeavesToRoot(LeavesToRootValidator::default()),
             graph: Default::default(),
-            digest_to_node_idx_size: Default::default(),
-            rtl_edges_todo: Default::default(),
-            exp_root_digest: None,
+            digest_to_node_idx: Default::default(),
         }
     }
 
@@ -143,173 +149,65 @@ impl DirectoryGraphBuilder {
     /// [Self::try_insert].
     pub fn new_root_to_leaves(root_digest: B3Digest) -> Self {
         Self {
-            insertion_order: DirectoryOrder::RootToLeaves,
+            order_validator: OrderValidator::RootToLeaves {
+                validator: RootToLeavesValidator::new_with_root_digest(root_digest),
+                referencing_node_idxs: Default::default(),
+            },
             graph: Default::default(),
-            digest_to_node_idx_size: Default::default(),
-            rtl_edges_todo: Default::default(),
-            exp_root_digest: Some(root_digest),
+            digest_to_node_idx: Default::default(),
         }
     }
 
     /// Accepts a directory if previously introduced, or returns an error if it's unknown.
-    #[instrument(level = "trace", skip_all, fields(directory.digest = tracing::field::Empty, directory.size = tracing::field::Empty), err)]
+    #[instrument(level = "trace", skip_all, fields(directory.digest = %directory.digest(), directory.size = directory.size()), err)]
     pub fn try_insert(&mut self, directory: Directory) -> Result<(), OrderingError> {
-        let digest = directory.digest();
-        let size = directory.size();
-
-        Span::current()
-            .record("directory.digest", format_args!("{}", &digest))
-            .record("directory.size", size);
-
-        let hash_map::Entry::Vacant(entry) = self.digest_to_node_idx_size.entry(digest.to_owned())
-        else {
-            warn!("directory received multiple times");
-            return Ok(());
+        // If the directory is already in the graph, we don't actually need to pass it by the validator.
+        let entry = match self.digest_to_node_idx.entry(directory.digest()) {
+            hash_map::Entry::Occupied(_) => {
+                debug!("directory received multiple times");
+                return Ok(());
+            }
+            hash_map::Entry::Vacant(vacant_entry) => vacant_entry,
         };
 
-        let node_idx = self.graph.add_node(directory);
-        entry.insert((node_idx, size));
-
-        if self.insertion_order == DirectoryOrder::RootToLeaves {
-            // If this was the first inserted node, set first_idx.
-            // We also obviously won't find ourselves in [self.rtl_edges_todo],
-            // as we're the first element.
-            if self.graph.node_count() == 1 {
-                let directory = self
-                    .graph
-                    .node_weight(node_idx)
-                    .expect("Snix bug: node not found")
-                    .to_owned();
-                if digest
-                    != self
-                        .exp_root_digest
-                        .take()
-                        .expect("exp_root_digest to be some")
-                {
-                    Err(OrderingError::Unexpected { directory })?
-                }
-            } else if let Some((digest, (referenced_size, src_idxs))) =
-                // Check for our own digest in [self.rtl_edges_todo], pop and add edges to graph
-                self.rtl_edges_todo.remove_entry(&digest)
-            {
-                if referenced_size != size {
-                    Err(OrderingError::WrongSize {
-                        digest,
-                        referenced: referenced_size,
-                        actual: size,
-                    })?
-                }
-
-                for src_idx in src_idxs {
-                    self.graph.add_edge(src_idx, node_idx, ());
-                }
-            } else {
-                let directory = self
-                    .graph
-                    .node_weight(node_idx)
-                    .expect("Snix bug: node not found")
-                    .to_owned();
-
-                Err(OrderingError::Unexpected { directory })?
-            }
-        }
-
-        // Look at outgoing digests. For this we have to retrieve the previously-inserted Directory again.
-        // We copy out the digests (as all code paths add edges, which mutates the graph).
-        let directory = self
-            .graph
-            .node_weight(node_idx)
-            .expect("Snix bug: node not found");
-        let out_digests_sizes = directory
+        // Collect a list of referenced directory digests.
+        let referenced_digests = directory
             .nodes()
-            .filter_map(|(_, node)| {
-                if let Node::Directory { digest, size } = node {
-                    Some((digest.to_owned(), *size))
-                } else {
-                    None
-                }
+            .filter_map(|(_, n)| match n {
+                Node::Directory { digest, .. } => Some(digest.to_owned()),
+                _ => None,
             })
             .collect::<Vec<_>>();
 
-        for (out_digest, out_size) in out_digests_sizes {
-            match self.insertion_order {
-                DirectoryOrder::RootToLeaves => {
-                    // Add outgoing pointers to the graph, or to [self.rtl_edges_todo], if not yet known.
-                    if let Some(&(out_node_idx, seen_dir_size)) =
-                        self.digest_to_node_idx_size.get(&out_digest)
-                    {
-                        // check size
-                        if seen_dir_size != out_size {
-                            Err(OrderingError::WrongSize {
-                                digest: out_digest,
-                                referenced: out_size,
-                                actual: seen_dir_size,
-                            })?
-                        }
+        match &mut self.order_validator {
+            OrderValidator::RootToLeaves {
+                validator,
+                referencing_node_idxs,
+            } => {
+                validator.try_accept(&directory)?;
 
-                        // draw edge
-                        self.graph.add_edge(node_idx, out_node_idx, ());
-                    } else {
-                        // pointer points to something not yet in the graph, add to todo
-                        match self.rtl_edges_todo.entry(out_digest) {
-                            hash_map::Entry::Occupied(mut occupied_entry) => {
-                                let size = occupied_entry.get().0;
-                                if size != out_size {
-                                    Err(OrderingError::WrongSize {
-                                        digest: occupied_entry.key().to_owned(),
-                                        referenced: out_size,
-                                        actual: size,
-                                    })?
-                                }
-                                occupied_entry.get_mut().1.push(node_idx);
-                            }
-                            hash_map::Entry::Vacant(vacant_entry) => {
-                                vacant_entry.insert((out_size, vec![node_idx]));
-                            }
-                        }
-                    }
+                // Insert node
+                let node_idx = self.graph.add_node(directory);
+                entry.insert_entry(node_idx);
+
+                // Insert into referencing_node_idxs
+                for referenced_digest in referenced_digests {
+                    referencing_node_idxs
+                        .entry(referenced_digest)
+                        .or_default()
+                        .insert(node_idx);
                 }
-                DirectoryOrder::LeavesToRoot => {
-                    // Check all pointers in the currently added directory have already been added previously;
-                    // each sent directory may only refer to directories already sent.
-                    if let Some(&(out_node_idx, seen_dir_size)) =
-                        self.digest_to_node_idx_size.get(&out_digest)
-                    {
-                        // check the size from the pointer matches actual size
-                        if seen_dir_size != out_size {
-                            Err(OrderingError::WrongSize {
-                                digest: out_digest,
-                                referenced: out_size,
-                                actual: seen_dir_size,
-                            })?
-                        }
+            }
+            OrderValidator::LeavesToRoot(validator) => {
+                validator.try_accept(&directory)?;
 
-                        // draw the edge
-                        self.graph.add_edge(node_idx, out_node_idx, ());
-                    } else {
-                        let directory = self
-                            .graph
-                            .node_weight(node_idx)
-                            .expect("Snix bug: node not found");
+                // Insert node
+                let node_idx = self.graph.add_node(directory);
+                entry.insert_entry(node_idx);
 
-                        Err(OrderingError::UnknownLTR {
-                            digest: out_digest,
-                            parent_digest: digest.to_owned(),
-                            path_component: directory
-                                .nodes()
-                                .find_map(|(path_component, node)| {
-                                    if let Node::Directory { digest, .. } = node
-                                        && digest == &out_digest
-                                    {
-                                        Some(path_component)
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .expect("PathComponent not found")
-                                .to_owned(),
-                        })?
-                    }
+                // draw edges
+                for referenced_directory_digest in referenced_digests {
+                    self.graph.add_edge(node_idx, *self.digest_to_node_idx.get(&referenced_directory_digest).expect("Snix bug: referenced directory digest not found in digest_to_node_idx"), ());
                 }
             }
         }
@@ -318,25 +216,27 @@ impl DirectoryGraphBuilder {
     }
 
     /// Ensures there's no more directories missing, returns the validated [DirectoryGraph].
-    pub fn build(self) -> Result<DirectoryGraph, OrderingError> {
-        match self.insertion_order {
-            // We must have received the root, and there may not be any rtl_edges_todo.
-            DirectoryOrder::RootToLeaves => {
-                if self.graph.node_count() == 0 {
-                    return Err(OrderingError::EmptySet);
-                }
+    pub fn build(mut self) -> Result<DirectoryGraph, OrderingError> {
+        match self.order_validator {
+            OrderValidator::RootToLeaves {
+                validator,
+                referencing_node_idxs,
+            } => {
+                validator.finalize()?;
 
-                if !self.rtl_edges_todo.is_empty() {
-                    return Err(OrderingError::DirectoriesMissing(HashSet::from_iter(
-                        self.rtl_edges_todo.into_keys(),
-                    )));
+                // draw edges with info from referencing_node_idxs
+                for (directory_to_digest, directories_from) in referencing_node_idxs {
+                    for directory_from in directories_from.iter() {
+                        self.graph.add_edge(
+                            *directory_from,
+                            *self
+                                .digest_to_node_idx
+                                .get(&directory_to_digest)
+                                .expect("Snix bug: digest not found in digest_to_node_idx"),
+                            (),
+                        );
+                    }
                 }
-
-                debug_assert_eq!(
-                    self.graph.externals(petgraph::Incoming).count(),
-                    1,
-                    "one incoming"
-                );
                 Ok(DirectoryGraph {
                     graph: self.graph,
                     // 1. petgraph invariant: adding nodes or edges does not alter indices
@@ -347,23 +247,13 @@ impl DirectoryGraphBuilder {
                     root_idx: NodeIndex::new(0),
                 })
             }
-            DirectoryOrder::LeavesToRoot => {
+            OrderValidator::LeavesToRoot(leaves_to_root_validator) => {
+                leaves_to_root_validator.finalize()?;
                 let incomings = self.graph.externals(petgraph::Incoming).collect::<Vec<_>>();
 
-                if incomings.is_empty() {
-                    return Err(OrderingError::EmptySet);
-                }
+                // NOTE: We already know there's only one incomings, else the validator would not have validated
+                assert_eq!(1, incomings.len(), "Snix bug: There must be 1 incomings");
 
-                if incomings.len() != 1 {
-                    return Err(OrderingError::DirectoriesMissing(HashSet::from_iter(
-                        incomings.iter().map(|i| {
-                            self.graph
-                                .node_weight(*i)
-                                .expect("Snix bug: node not found")
-                                .digest()
-                        }),
-                    )));
-                }
                 Ok(DirectoryGraph {
                     graph: self.graph,
                     root_idx: incomings[0],
