@@ -18,11 +18,11 @@ struct Args {
     tracing_args: snix_tracing::TracingArgs,
 
     #[command(subcommand)]
-    command: Commands,
+    command: Command,
 }
 
 #[derive(Subcommand)]
-enum Commands {
+enum Command {
     /// Runs the snix-castore daemon
     Daemon {
         #[clap(flatten)]
@@ -98,7 +98,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .build()?;
 
     match args.command {
-        Commands::Daemon {
+        Command::Daemon {
             listen_args,
             service_addrs,
         } => {
@@ -162,7 +162,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 .serve_with_incoming_shutdown(listener, shutdown_signal())
                 .await?
         }
-        Commands::Ingest {
+        Command::Ingest {
             input,
             service_addrs,
         } => {
@@ -185,7 +185,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             writeln!(stdout, "{digest}")?;
         }
         #[cfg(feature = "fuse")]
-        Commands::Mount {
+        Command::Mount {
             digest,
             dest,
             service_addrs,
@@ -237,7 +237,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             tokio::task::spawn_blocking(move || fuse_daemon.wait()).await?;
         }
         #[cfg(feature = "virtiofs")]
-        Commands::Virtiofs {
+        Command::Virtiofs {
             digest,
             socket,
             service_addrs,

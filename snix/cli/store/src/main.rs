@@ -38,7 +38,7 @@ struct Args {
     tracing_args: snix_tracing::TracingArgs,
 
     #[command(subcommand)]
-    command: Commands,
+    command: Command,
 }
 
 #[derive(Clone, PartialEq, Eq, clap::ValueEnum)]
@@ -68,7 +68,7 @@ impl std::fmt::Display for ImportNarOutputFormats {
 }
 
 #[derive(Subcommand)]
-enum Commands {
+enum Command {
     /// Runs the snix-store daemon.
     Daemon {
         /// The address to listen on.
@@ -209,7 +209,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut stdout_writer = tracing_handle.get_stdout_writer();
 
     match args.command {
-        Commands::Daemon {
+        Command::Daemon {
             listen_args,
             service_addrs,
         } => {
@@ -283,7 +283,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .serve_with_incoming_shutdown(listener, shutdown_signal())
                 .await?;
         }
-        Commands::ImportPath {
+        Command::ImportPath {
             paths,
             service_addrs,
         } => {
@@ -396,7 +396,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .await?;
         }
 
-        Commands::ImportNar {
+        Command::ImportNar {
             paths,
             service_addrs,
             ref format,
@@ -458,7 +458,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         }
 
-        Commands::Copy {
+        Command::Copy {
             service_addrs,
             reference_graph_path,
             jsonl,
@@ -588,7 +588,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .await?;
         }
         #[cfg(feature = "fuse")]
-        Commands::Mount {
+        Command::Mount {
             dest,
             service_addrs,
             list_root,
@@ -637,7 +637,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             tokio::task::spawn_blocking(move || fuse_daemon.wait()).await?
         }
         #[cfg(feature = "virtiofs")]
-        Commands::VirtioFs {
+        Command::VirtioFs {
             socket,
             service_addrs,
             list_root,

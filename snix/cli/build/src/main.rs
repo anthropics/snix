@@ -22,13 +22,13 @@ static GLOBAL: MiMalloc = MiMalloc;
 #[command(author, version, about, long_about = None)]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Command,
 
     #[clap(flatten)]
     tracing_args: snix_tracing::TracingArgs,
 }
 #[derive(Subcommand)]
-enum Commands {
+enum Command {
     /// Runs the snix-build daemon.
     Daemon {
         #[arg(long, short = 'l')]
@@ -51,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .build()?;
 
     match args.command {
-        Commands::Daemon {
+        Command::Daemon {
             listen_address,
             castore_service_addrs,
             build_service_addr,
