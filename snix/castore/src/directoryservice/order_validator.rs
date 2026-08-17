@@ -141,12 +141,13 @@ impl RootToLeavesValidator {
     /// Ensures there's no more pending directories.
     #[tracing::instrument(level = "trace", skip_all, err)]
     pub fn finalize(self) -> Result<(), OrderingError> {
-        // At the end of the stream, pending must be empty.
-        if !self.pending_directories.is_empty() {
-            return Err(OrderingError::DirectoriesMissing(self.pending_directories));
+        match self.pending_directories.len() {
+            0 => Ok(()),
+            1 if self.pending_directories.iter().next().unwrap() == &self.root_digest => {
+                Err(OrderingError::EmptySet)
+            }
+            _ => Err(OrderingError::DirectoriesMissing(self.pending_directories)),
         }
-
-        Ok(())
     }
 
     // Adds each child node to introduced_directories and pending_directories.
