@@ -1,3 +1,14 @@
+#![deny(missing_docs)]
+//! Produces a graph of [Directory],
+//!
+//! Use [DirectoryGraphBuilder] with the chosen insertion order,
+//! call [DirectoryGraphBuilder::try_insert] to insert a Node.
+//! Once the whole closure has been inserted, [DirectoryGraphBuilder::build]
+//! can be called to return a [DirectoryGraph].
+//!
+//! This [DirectoryGraph] can then be drained in Root-To-Leaves or
+//! Leaves-To-Root order.
+
 use petgraph::{
     graph::{DiGraph, NodeIndex},
     visit::{Bfs, DfsPostOrder, Walker},
@@ -70,6 +81,7 @@ impl DirectoryGraph {
         self.drain(DirectoryOrder::RootToLeaves)
     }
 
+    /// Returns the directory at the root of the graph
     pub fn root(&self) -> &Directory {
         self.graph
             .node_weight(self.root_idx)
@@ -138,6 +150,7 @@ impl DirectoryGraphBuilder {
         }
     }
 
+    /// Accepts a directory if previously introduced, or returns an error if it's unknown.
     #[instrument(level = "trace", skip_all, fields(directory.digest = tracing::field::Empty, directory.size = tracing::field::Empty), err)]
     pub fn try_insert(&mut self, directory: Directory) -> Result<(), OrderingError> {
         let digest = directory.digest();
@@ -303,6 +316,7 @@ impl DirectoryGraphBuilder {
         Ok(())
     }
 
+    /// Ensures there's no more directories missing, returns the validated [DirectoryGraph].
     pub fn build(self) -> Result<DirectoryGraph, OrderingError> {
         match self.insertion_order {
             // We must have received the root, and there may not be any rtl_edges_todo.
