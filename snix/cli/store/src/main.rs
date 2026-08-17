@@ -190,6 +190,33 @@ enum Command {
         /// Whether to expose blob and directory digests as extended attributes.
         show_xattr: bool,
     },
+    #[cfg(feature = "compat-migrate-directory-sizes")]
+    Tools {
+        #[command(subcommand)]
+        command: ToolsCommand,
+    },
+}
+
+#[cfg(feature = "compat-migrate-directory-sizes")]
+#[derive(Subcommand)]
+enum ToolsCommand {
+    /// Lists all PathInfos, for each one describing a directory, recalculates the directory closure, then puts it back.
+    /// This can be used to migrate old Directory closures to use the correct size fields.
+    RewriteDirectories {
+        #[arg(long, env, default_value = "grpc+http://[::1]:8000")]
+        directory_service_addr: String,
+
+        #[arg(long, env, default_value = "grpc+http://[::1]:8000")]
+        path_info_service_addr: String,
+
+        /// Don't write new PathInfos with minimized directory sizes
+        #[clap(long, short, action)]
+        dry_run: bool,
+
+        /// Number of PathInfos to process concurrently
+        #[arg(long, env, default_value = "10")]
+        concurrency: usize,
+    },
 }
 
 #[cfg(feature = "fuse")]
@@ -671,6 +698,79 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 start_virtiofs_daemon(fs, socket)
             })
             .await??;
+        }
+
+        #[cfg(feature = "compat-migrate-directory-sizes")]
+        Command::Tools { command } => {
+            let ToolsCommand::RewriteDirectories {
+                directory_service_addr,
+                path_info_service_addr,
+                dry_run,
+                concurrency,
+            } = command;
+
+            let directory_service =
+                snix_castore::directoryservice::from_addr(&directory_service_addr).await?;
+            let path_info_service =
+                snix_store::pathinfoservice::from_addr(&path_info_service_addr, None).await?;
+
+            let rewrite_directories_span = info_span!(
+                "rewrite_directories",
+                "indicatif.pb_show" = tracing::field::Empty
+            );
+            rewrite_directories_span.pb_set_style(&snix_tracing::PB_SPINNER_LONG_STYLE);
+            rewrite_directories_span.pb_set_message("Rewriting directories");
+            rewrite_directories_span.pb_start();
+
+            let work = path_info_service
+                .list()
+                .map(move |e| {
+                    let path_info_service = path_info_service.clone();
+                    let directory_service = directory_service.clone();
+                    async move {
+                        match e {
+                            Ok(path_info) => {
+                                use snix_cli_store::rewrite_directories;
+
+                                Ok(rewrite_directories::rewrite_pathinfo(
+                                    path_info,
+                                    dry_run,
+                                    path_info_service,
+                                    directory_service,
+                                )
+                                .await?)
+                            }
+                            Err(err) => {
+                                warn!(%err, "failed to get next PathInfo");
+                                Err(err)
+                            }
+                        }
+                    }
+                    .in_current_span()
+                })
+                .buffer_unordered(concurrency)
+                .inspect_ok(|_| rewrite_directories_span.pb_inc(1))
+                .try_fold((0_u64, 0_u64), |(rewritten, total), x| async move {
+                    Ok((if x { rewritten + 1 } else { rewritten }, total + 1))
+                });
+
+            tokio::select! {
+                _ = snix_cli::shutdown_signal() => {},
+                res = work => {
+                    match res {
+                        Ok((rewritten, total)) => {
+                            info!("Done, rewrote {rewritten} of {total} PathInfo");
+                        },
+                        Err(err) => {
+                            if let Err(e) = tracing_handle.shutdown().await {
+                                eprintln!("failed to shutdown tracing: {e}");
+                            }
+
+                            return Err(err)
+                        },
+                    }
+                }
+            }
         }
     };
 

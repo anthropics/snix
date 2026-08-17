@@ -42,7 +42,8 @@ tracing.workspace = true
 tracing-indicatif.workspace = true
 
 [features]
-default = ["fuse", "otlp", "tonic-reflection"]
+default = ["fuse", "otlp", "tonic-reflection", "compat-migrate-directory-sizes"]
+compat-migrate-directory-sizes = ["snix-castore/compat-accept-bigger-sizes"]
 fuse = ["snix-castore/fuse", "snix-store/fs"]
 virtiofs = ["snix-castore/virtiofs", "snix-store/fs"]
 tonic-reflection = ["dep:tonic-reflection"]

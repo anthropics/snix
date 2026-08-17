@@ -23746,10 +23746,12 @@ rec {
           }
         ];
         features = {
+          "compat-migrate-directory-sizes" = [ "snix-castore/compat-accept-bigger-sizes" ];
           "default" = [
             "fuse"
             "otlp"
             "tonic-reflection"
+            "compat-migrate-directory-sizes"
           ];
           "fuse" = [
             "snix-castore/fuse"
@@ -23772,6 +23774,7 @@ rec {
           ];
         };
         resolvedDefaultFeatures = [
+          "compat-migrate-directory-sizes"
           "default"
           "fuse"
           "otlp"
