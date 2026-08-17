@@ -2,7 +2,7 @@ use async_stream::try_stream;
 use futures::StreamExt;
 use futures::{Stream, stream::BoxStream};
 use std::collections::{HashMap, HashSet, hash_map};
-use tracing::{Span, trace, warn};
+use tracing::{Span, debug, trace};
 
 use super::Directory;
 use crate::{B3Digest, Node};
@@ -112,7 +112,7 @@ impl RootToLeavesValidator {
         match self.referenced_directories.get(&digest) {
             Some(s) if *s == size => {
                 if !self.pending_directories.remove(&digest) {
-                    warn!("directory received multiple times");
+                    debug!("directory received multiple times");
                 };
 
                 // Introduce children
@@ -233,13 +233,9 @@ impl LeavesToRootValidator {
     }
 
     /// Accepts a directory if previously introduced, or returns an error if it's unknown.
-    #[tracing::instrument(level = "trace", skip_all, fields(directory.digest = tracing::field::Empty, directory.size = tracing::field::Empty), err)]
+    #[tracing::instrument(level = "trace", skip_all, fields(directory.digest = %directory.digest(), directory.size = directory.size()), err)]
     pub fn try_accept(&mut self, directory: &Directory) -> Result<(), OrderingError> {
         assert!(!self.poison, "Snix bug: LeavesToRootValidator poisoned");
-
-        Span::current()
-            .record("directory.digest", format_args!("{}", &directory.digest()))
-            .record("directory.size", directory.size());
 
         // every directory referenced must already have been seen.
         // Remove them from pending if still in there.
@@ -275,7 +271,7 @@ impl LeavesToRootValidator {
         let directory_digest = directory.digest();
         match self.accepted_directories.entry(directory_digest) {
             hash_map::Entry::Occupied(_) => {
-                warn!("directory received multiple times");
+                debug!("directory received multiple times");
             }
             hash_map::Entry::Vacant(entry) => {
                 entry.insert(directory.size());
