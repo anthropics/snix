@@ -15,6 +15,10 @@ paths = [
 
   # Nix fails, but Snix only emits a "UselessInherit" warning
   "scope/dup-inherit",
+
+  # A bug in hash modulo resulting in incorrect
+  # store path
+  "builtins/derivation/hash-modulo",
 ]
 
 builtins = ["readFile", "__nixPath", "unsafeGetAttrPos"]

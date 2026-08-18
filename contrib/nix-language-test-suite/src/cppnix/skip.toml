@@ -30,6 +30,10 @@ paths = [
   # Nix still accepts this
   "builtins/derivation/json-key",
 
+  # hash modulo broken in 2.3. It's broken in 2.3 and not a newly
+  # introduced bug because there is now a similar test case in upstream
+  "builtins/derivation/hash-modulo",
+
   # something changed in storePath behaviour between 2.3 and 2.30,
   # and it makes the same test failing in 2.3
   #
