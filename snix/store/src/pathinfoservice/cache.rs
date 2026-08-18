@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use futures::{TryStreamExt, stream::BoxStream};
+use futures::stream::BoxStream;
 use nix_compat::nixbase32;
 use snix_castore::composition::{CompositionContext, ServiceBuilder};
 use tonic::async_trait;
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, warn};
 
 use crate::pathinfoservice;
 
@@ -68,12 +68,14 @@ where
             || self.far.has(digest).await.map_err(Error::FarGet)?)
     }
 
+    #[instrument(level = "trace", skip_all, err, fields(path_info.digest = nixbase32::encode(_path_info.store_path.digest()), instance_name = %self.instance_name))]
     async fn put(&self, _path_info: PathInfo) -> Result<PathInfo, pathinfoservice::Error> {
-        Err(Error::Unimplemented)?
+        Err(Error::Unsupported)?
     }
 
     fn list(&self) -> BoxStream<'static, Result<PathInfo, pathinfoservice::Error>> {
-        Box::pin(tokio_stream::once(Err(Error::Unimplemented)).err_into())
+        warn!("listing unsupported");
+        Box::pin(tokio_stream::once(Err(Error::Unsupported.into())))
     }
 }
 
@@ -96,8 +98,8 @@ pub enum Error {
     #[error("getting from far: {0}")]
     FarGet(#[source] pathinfoservice::Error),
 
-    #[error("puts are unimplemented")]
-    Unimplemented,
+    #[error("unsupported")]
+    Unsupported,
 }
 
 impl TryFrom<url::Url> for CacheConfig {
