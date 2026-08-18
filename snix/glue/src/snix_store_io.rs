@@ -82,7 +82,6 @@ impl SnixStoreIO {
     ///
     /// [StorePath]: nix_compat::store_path::StorePath
     /// [descend_to]: snix_castore::directoryservice::traversal::descend_to
-    #[instrument(skip(self, store_path), fields(store_path=%store_path, indicatif.pb_show=tracing::field::Empty), ret(level = Level::TRACE), err(level = Level::TRACE))]
     async fn store_path_to_path_info(
         &self,
         store_path: &StorePathRef<'_>,

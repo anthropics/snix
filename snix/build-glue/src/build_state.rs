@@ -89,6 +89,8 @@ impl BuildState {
         store_path: &StorePathRef<'_>,
         sub_path: &snix_castore::Path,
     ) -> io::Result<Option<PathInfo>> {
+        Span::current().pb_set_message(&format!("Accessing {store_path}/{sub_path}"));
+
         // Find the root node for the store_path.
         // It asks the PathInfoService first, but in case there was a Derivation
         // produced that would build it, fall back to triggering the build.
