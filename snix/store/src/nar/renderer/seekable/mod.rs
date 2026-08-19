@@ -73,7 +73,17 @@ impl<'bs, BS: BlobService + Clone + 'bs> Reader<'bs, BS> {
         // If this is a directory, resolve all subdirectories
         let directories = if let Node::Directory { digest, .. } = root_node {
             let mut builder = DirectoryGraphBuilder::new_root_to_leaves(digest.to_owned());
-            let mut directories = directory_service.get_recursive(digest);
+            let mut directories = directory_service.get_recursive(digest).peekable();
+
+            if directories.peek().await.is_none() {
+                // The only way we could run into this is by the
+                // DirectoryService not having the root directory we asked
+                // for, which hints to misconfiguration, so explicitly warn!.
+                let err = RenderError::DirectoryNotFound(*digest, "root".into());
+                warn!(%err, "tried to render NAR, but DirectoryService didn't contain the root directory");
+                Err(err)?;
+            }
+
             while let Some(directory) = directories
                 .try_next()
                 .await
@@ -84,19 +94,7 @@ impl<'bs, BS: BlobService + Clone + 'bs> Reader<'bs, BS> {
                     .map_err(RenderError::OrderingError)?;
             }
 
-            let directory_graph = builder.build().map_err(|err| {
-                if err == snix_castore::directoryservice::OrderingError::EmptySet {
-                    // The graph should at least contain the root, if there's no child directories.
-                    // The only way we could run into this is by the
-                    // DirectoryService not having the root directory we asked
-                    // for, which hints to misconfiguration, so explicitly warn!.
-                    let err = RenderError::DirectoryNotFound(*digest, "root".into());
-                    warn!(%err, "tried to render NAR, but DirectoryService didn't contain the root directory");
-                    err
-                } else {
-                    RenderError::OrderingError(err)
-                }
-            })?;
+            let directory_graph = builder.build().map_err(RenderError::OrderingError)?;
 
             HashMap::from_iter(
                 directory_graph

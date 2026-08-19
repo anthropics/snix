@@ -111,9 +111,14 @@ where
                 return;
             }
 
-            trace!("not found in near, asking remote…");
+            trace!("not found in 'near', asking 'far'");
 
-            let mut directories = far.get_recursive(&digest);
+            let mut directories = std::pin::pin!(far.get_recursive(&digest).peekable());
+            if directories.as_mut().peek().await.is_none() {
+                trace!("not found in 'far' either");
+                return;
+            }
+
             let mut builder = DirectoryGraphBuilder::new_root_to_leaves(digest);
 
             // Return to the client, while inserting to the graph builder.
@@ -122,19 +127,15 @@ where
                 yield directory;
             }
 
-            match builder.build() {
-                Ok(directory_graph) => {
-                    // Drain into near
-                    let mut near_putter = near.put_multiple_start();
-                    for directory in directory_graph.drain_leaves_to_root() {
-                        near_putter.put(directory).await.map_err(Error::NearPut)?;
-                    }
-                    let actual_digest = near_putter.close().await.map_err(Error::NearPut)?;
-                    debug_assert_eq!(digest, actual_digest);
-                }
-                Err(crate::directoryservice::OrderingError::EmptySet) => return,
-                Err(err) => Err(Error::DirectoryOrdering(err))?
+            let directory_graph = builder.build().map_err(Error::DirectoryOrdering)?;
+
+            // Drain into near
+            let mut near_putter = near.put_multiple_start();
+            for directory in directory_graph.drain_leaves_to_root() {
+                near_putter.put(directory).await.map_err(Error::NearPut)?;
             }
+            let actual_digest = near_putter.close().await.map_err(Error::NearPut)?;
+            debug_assert_eq!(digest, actual_digest);
         }
         .boxed()
     }
