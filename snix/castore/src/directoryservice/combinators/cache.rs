@@ -7,6 +7,7 @@ use tonic::async_trait;
 use tracing::{instrument, trace};
 
 use crate::composition::{CompositionContext, ServiceBuilder};
+use crate::directoryservice::DirectoryServiceGraphExt;
 use crate::directoryservice::directory_graph::DirectoryGraphBuilder;
 use crate::directoryservice::{self, DirectoryPutter, DirectoryService, SimplePutter};
 use crate::{B3Digest, Directory};
@@ -53,32 +54,31 @@ where
         // We currently wait for all children to be received before returning
         // the requested directory, so subsequent children requests don't fail when these
         // stores are used.
-        // FUTUREWORK: make this configurable, allow firing off a background task populating the children.
-        let mut directories = self.far.get_recursive(digest);
-        let mut graph_builder = DirectoryGraphBuilder::new_root_to_leaves(*digest);
-
-        let mut resp_directory = None;
-        while let Some(directory) = directories.try_next().await.map_err(Error::FarGet)? {
-            graph_builder
-                .try_insert(directory.clone())
-                .map_err(Error::DirectoryOrdering)?;
-            if resp_directory.is_none() {
-                resp_directory = Some(directory);
-            }
-        }
+        let directory_graph = self
+            .far
+            .get_directory_graph(digest)
+            .await
+            .map_err(Error::FarGet)?;
 
         // If far had the directory, put into near.
-        if let Some(resp_directory) = resp_directory {
-            let directory_graph = graph_builder.build().map_err(Error::DirectoryOrdering)?;
+        if let Some(directory_graph) = directory_graph {
+            let root = directory_graph.root().to_owned();
+
             // Drain into near
-            let mut near_putter = self.near.put_multiple_start();
-            for directory in directory_graph.drain_leaves_to_root() {
-                near_putter.put(directory).await.map_err(Error::NearPut)?;
+            let digest_near = self
+                .near
+                .put_directory_graph(directory_graph)
+                .await
+                .map_err(Error::NearPut)?;
+
+            if digest_near != *digest {
+                Err(Error::InsertingGraphMismatch {
+                    digest_expected: *digest,
+                    digest_actual: digest_near,
+                })?;
             }
 
-            let actual_digest = near_putter.close().await.map_err(Error::NearPut)?;
-            debug_assert_eq!(digest, &actual_digest);
-            Ok(Some(resp_directory))
+            Ok(Some(root))
         } else {
             Ok(None)
         }
@@ -123,19 +123,20 @@ where
 
             // Return to the client, while inserting to the graph builder.
             while let Some(directory) = directories.try_next().await.map_err(Error::FarGet)? {
-                builder.try_insert(directory.clone()).map_err(Error::DirectoryOrdering)?;
+                builder.try_insert(directory.clone())?;
                 yield directory;
             }
 
-            let directory_graph = builder.build().map_err(Error::DirectoryOrdering)?;
+            let directory_graph = builder.build()?;
 
             // Drain into near
-            let mut near_putter = near.put_multiple_start();
-            for directory in directory_graph.drain_leaves_to_root() {
-                near_putter.put(directory).await.map_err(Error::NearPut)?;
+            let digest_near = near.put_directory_graph(directory_graph).await.map_err(Error::NearPut)?;
+            if digest_near != digest {
+                Err(Error::InsertingGraphMismatch {
+                    digest_expected: digest,
+                    digest_actual: digest_near,
+                })?;
             }
-            let actual_digest = near_putter.close().await.map_err(Error::NearPut)?;
-            debug_assert_eq!(digest, actual_digest);
         }
         .boxed()
     }
@@ -150,8 +151,6 @@ where
 pub enum Error {
     #[error("wrong arguments: {0}")]
     WrongConfig(&'static str),
-    #[error("Directory Graph ordering error: {0}")]
-    DirectoryOrdering(#[from] crate::directoryservice::OrderingError),
     #[error("serde-qs error: {0}")]
     SerdeQS(#[from] serde_qs::Error),
 
@@ -161,6 +160,13 @@ pub enum Error {
     NearPut(#[source] directoryservice::Error),
     #[error("getting from far: {0}")]
     FarGet(#[source] directoryservice::Error),
+    #[error(
+        "inserting closure with root {digest_expected} into near returned different digest ({digest_actual})"
+    )]
+    InsertingGraphMismatch {
+        digest_expected: B3Digest,
+        digest_actual: B3Digest,
+    },
 
     #[error("puts are unimplemented")]
     Unimplemented,

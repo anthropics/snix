@@ -8,11 +8,10 @@ use std::{
 use futures::ready;
 use pin_project::pin_project;
 use segments::Segments;
-use snix_castore::Node;
+use snix_castore::blobservice::BlobService;
 use snix_castore::directoryservice::DirectoryService;
-use snix_castore::{blobservice::BlobService, directoryservice::DirectoryGraphBuilder};
+use snix_castore::{Node, directoryservice::DirectoryServiceGraphExt};
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncSeek, AsyncWrite};
-use tokio_stream::StreamExt;
 use tracing::{instrument, warn};
 
 use crate::nar::RenderError;
@@ -70,31 +69,16 @@ impl<'bs, BS: BlobService + Clone + 'bs> Reader<'bs, BS> {
         directory_service: impl DirectoryService,
         // FUTUREWORK: add concurrency arg
     ) -> Result<Self, RenderError> {
-        // If this is a directory, resolve all subdirectories
         let directories = if let Node::Directory { digest, .. } = root_node {
-            let mut builder = DirectoryGraphBuilder::new_root_to_leaves(digest.to_owned());
-            let mut directories = directory_service.get_recursive(digest).peekable();
-
-            if directories.peek().await.is_none() {
+            // If this is a directory, resolve all subdirectories
+            let directory_graph = directory_service.get_directory_graph(digest).await.map_err(RenderError::DirectoryService)?.ok_or_else(|| {
                 // The only way we could run into this is by the
                 // DirectoryService not having the root directory we asked
                 // for, which hints to misconfiguration, so explicitly warn!.
                 let err = RenderError::DirectoryNotFound(*digest, "root".into());
                 warn!(%err, "tried to render NAR, but DirectoryService didn't contain the root directory");
-                Err(err)?;
-            }
-
-            while let Some(directory) = directories
-                .try_next()
-                .await
-                .map_err(RenderError::DirectoryService)?
-            {
-                builder
-                    .try_insert(directory)
-                    .map_err(RenderError::OrderingError)?;
-            }
-
-            let directory_graph = builder.build().map_err(RenderError::OrderingError)?;
+                err
+            })?;
 
             HashMap::from_iter(
                 directory_graph

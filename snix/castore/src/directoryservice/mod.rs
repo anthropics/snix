@@ -19,7 +19,7 @@ pub mod traversal;
 #[cfg(test)]
 pub mod tests;
 
-pub use self::directory_graph::{DirectoryGraph, DirectoryGraphBuilder};
+pub use self::directory_graph::{DirectoryGraph, DirectoryGraphBuilder, DirectoryServiceGraphExt};
 pub use self::failing_putter::FailingPutter;
 pub use self::from_addr::from_addr;
 pub use self::grpc::{GRPCDirectoryService, GRPCDirectoryServiceConfig};

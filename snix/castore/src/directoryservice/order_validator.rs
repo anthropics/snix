@@ -34,6 +34,12 @@ pub enum OrderingError {
     EmptySet,
 }
 
+impl From<OrderingError> for crate::directoryservice::Error {
+    fn from(value: OrderingError) -> Self {
+        Self(Box::new(value))
+    }
+}
+
 /// A struct holding state while consuming a sequence of Directories in
 /// Root-To-Leaves order.
 ///

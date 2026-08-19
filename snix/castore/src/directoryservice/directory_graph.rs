@@ -9,6 +9,7 @@
 //! This [DirectoryGraph] can then be drained in Root-To-Leaves or
 //! Leaves-To-Root order.
 
+use futures::{StreamExt, TryStreamExt};
 use petgraph::{
     graph::{DiGraph, NodeIndex},
     visit::{Bfs, DfsPostOrder, Walker},
@@ -16,7 +17,7 @@ use petgraph::{
 use std::collections::{HashMap, HashSet, hash_map};
 use tracing::{Span, instrument, warn};
 
-use crate::directoryservice::order_validator::OrderingError;
+use crate::directoryservice::{DirectoryService, order_validator::OrderingError};
 use crate::{B3Digest, Directory, Node};
 
 /// This represents a full (and validated) graph of [Directory] nodes.
@@ -369,6 +370,63 @@ impl DirectoryGraphBuilder {
                 })
             }
         }
+    }
+}
+
+/// Extension trait to get a [DirectoryGraph] from a [DirectoryService], and insert into it.
+#[tonic::async_trait]
+pub trait DirectoryServiceGraphExt {
+    /// Queries the [DirectoryService] for the [DirectoryGraph] with the given root digest.
+    async fn get_directory_graph(
+        &self,
+        digest: &B3Digest,
+    ) -> Result<Option<DirectoryGraph>, super::Error>;
+
+    /// Inserts the given [DirectoryGraph] into the [DirectoryService].
+    async fn put_directory_graph(
+        &self,
+        directory_graph: DirectoryGraph,
+    ) -> Result<B3Digest, super::Error>;
+
+    // FUTUREWORK: get_recursive_validated to get a stream wrapped with order validator?
+}
+
+#[tonic::async_trait]
+impl<T> DirectoryServiceGraphExt for T
+where
+    T: DirectoryService,
+{
+    /// Queries the DirectoryService for the directory graph with the given root digest.
+    async fn get_directory_graph(
+        &self,
+        digest: &B3Digest,
+    ) -> Result<Option<DirectoryGraph>, super::Error> {
+        let mut builder = DirectoryGraphBuilder::new_root_to_leaves(digest.to_owned());
+        let mut directories = std::pin::pin!(self.get_recursive(digest).peekable());
+
+        if directories.as_mut().peek().await.is_none() {
+            return Ok(None);
+        }
+
+        while let Some(directory) = directories.try_next().await? {
+            builder.try_insert(directory)?;
+        }
+
+        Ok(Some(builder.build()?))
+    }
+
+    /// Inserts the given [DirectoryGraph] into the service.
+    async fn put_directory_graph(
+        &self,
+        directory_graph: DirectoryGraph,
+    ) -> Result<B3Digest, super::Error> {
+        let mut putter = self.put_multiple_start();
+
+        for directory in directory_graph.drain_leaves_to_root() {
+            putter.put(directory).await?;
+        }
+
+        Ok(putter.close().await?)
     }
 }
 
