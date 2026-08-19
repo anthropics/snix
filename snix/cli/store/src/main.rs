@@ -8,6 +8,7 @@ use nix_compat::nixhash::{CAHash, NixHash};
 use nix_compat::store_path;
 use nix_compat::store_path::StorePath;
 use nix_compat::wire::de::Error;
+use snix_castore::directoryservice;
 use snix_castore::import::fs::ingest_path;
 use snix_cli::shutdown_signal;
 use snix_cli_store::path_metadata::{self, PathMetadata};
@@ -241,9 +242,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .add_service(BlobServiceServer::new(GRPCBlobServiceWrapper::new(
                     blob_service,
                 )))
-                .add_service(DirectoryServiceServer::new(
-                    GRPCDirectoryServiceWrapper::new(directory_service),
-                ))
+                .add_service(
+                    DirectoryServiceServer::new(GRPCDirectoryServiceWrapper::new(
+                        directory_service,
+                    ))
+                    .max_decoding_message_size(directoryservice::GRPC_MAX_DECODING_MESSAGE_SIZE),
+                )
                 .add_service(PathInfoServiceServer::new(GRPCPathInfoServiceWrapper::new(
                     path_info_service,
                     nar_calculation_service,

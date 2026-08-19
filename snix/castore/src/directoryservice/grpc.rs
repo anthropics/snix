@@ -13,6 +13,11 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Code, Status, async_trait};
 use tracing::{Instrument as _, instrument, warn};
 
+/// Maximum size of proto messages endoded and decoded.
+/// Unfortunately there's directories out there larger than 4MiB, so bump this
+/// by a bit.
+pub const MAX_DECODING_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
+
 /// Connects to a (remote) snix-store DirectoryService over gRPC.
 #[derive(Clone)]
 pub struct GRPCDirectoryService<T> {
@@ -275,6 +280,9 @@ impl ServiceBuilder for GRPCDirectoryServiceConfig {
             crate::tonic::channel_from_url(&self.url.parse()?).await?,
             snix_tracing::propagate::tonic::send_trace,
         );
+
+        let client = client.max_decoding_message_size(MAX_DECODING_MESSAGE_SIZE);
+
         Ok(Arc::new(GRPCDirectoryService::from_client(
             instance_name.to_string(),
             client,

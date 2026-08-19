@@ -22,7 +22,10 @@ pub mod tests;
 pub use self::directory_graph::{DirectoryGraph, DirectoryGraphBuilder, DirectoryServiceGraphExt};
 pub use self::failing_putter::FailingPutter;
 pub use self::from_addr::from_addr;
-pub use self::grpc::{GRPCDirectoryService, GRPCDirectoryServiceConfig};
+pub use self::grpc::{
+    GRPCDirectoryService, GRPCDirectoryServiceConfig,
+    MAX_DECODING_MESSAGE_SIZE as GRPC_MAX_DECODING_MESSAGE_SIZE,
+};
 pub use self::object_store::{ObjectStoreDirectoryService, ObjectStoreDirectoryServiceConfig};
 pub use self::order_validator::{LeavesToRootValidator, OrderingError, RootToLeavesValidator};
 pub use self::redb::{RedbDirectoryService, RedbDirectoryServiceConfig};

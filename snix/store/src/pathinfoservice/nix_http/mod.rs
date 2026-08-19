@@ -118,7 +118,9 @@ where
                     {
                         GRPCDirectoryService::from_client(
                             instance_name_grpc,
-                            DirectoryServiceClient::new(channel),
+                            DirectoryServiceClient::new(channel).max_decoding_message_size(
+                                directoryservice::GRPC_MAX_DECODING_MESSAGE_SIZE,
+                            ),
                         )
                     },
                 ),

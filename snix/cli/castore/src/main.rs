@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use snix_castore::directoryservice;
 use snix_castore::import::{archive::ingest_archive, fs::ingest_path};
 use snix_castore::proto::blob_service_server::BlobServiceServer;
 use snix_castore::proto::directory_service_server::DirectoryServiceServer;
@@ -129,9 +130,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 .add_service(BlobServiceServer::new(GRPCBlobServiceWrapper::new(
                     blob_service,
                 )))
-                .add_service(DirectoryServiceServer::new(
-                    GRPCDirectoryServiceWrapper::new(directory_service),
-                ));
+                .add_service(
+                    DirectoryServiceServer::new(GRPCDirectoryServiceWrapper::new(
+                        directory_service,
+                    ))
+                    .max_decoding_message_size(directoryservice::GRPC_MAX_DECODING_MESSAGE_SIZE),
+                );
 
             #[cfg(feature = "tonic-reflection")]
             {
