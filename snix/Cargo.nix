@@ -7935,20 +7935,7 @@ rec {
         libName = "find_msvc_tools";
 
       };
-      "fixedbitset 0.4.2" = rec {
-        crateName = "fixedbitset";
-        version = "0.4.2";
-        edition = "2015";
-        sha256 = "101v41amgv5n9h4hcghvrbfk5vrncx1jwm35rn5szv4rk55i7rqc";
-        authors = [
-          "bluss"
-        ];
-        features = {
-          "default" = [ "std" ];
-          "serde" = [ "dep:serde" ];
-        };
-      };
-      "fixedbitset 0.5.7" = rec {
+      "fixedbitset" = rec {
         crateName = "fixedbitset";
         version = "0.5.7";
         edition = "2021";
@@ -16057,61 +16044,7 @@ rec {
           "std"
         ];
       };
-      "petgraph 0.6.5" = rec {
-        crateName = "petgraph";
-        version = "0.6.5";
-        edition = "2018";
-        sha256 = "1ns7mbxidnn2pqahbbjccxkrqkrll2i5rbxx43ns6rh6fn3cridl";
-        authors = [
-          "bluss"
-          "mitchmindtree"
-        ];
-        dependencies = [
-          {
-            name = "fixedbitset";
-            packageId = "fixedbitset 0.4.2";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "indexmap";
-            packageId = "indexmap 2.12.1";
-          }
-        ];
-        features = {
-          "all" = [
-            "unstable"
-            "quickcheck"
-            "matrix_graph"
-            "stable_graph"
-            "graphmap"
-            "rayon"
-          ];
-          "default" = [
-            "graphmap"
-            "stable_graph"
-            "matrix_graph"
-          ];
-          "quickcheck" = [ "dep:quickcheck" ];
-          "rayon" = [
-            "dep:rayon"
-            "indexmap/rayon"
-          ];
-          "serde" = [ "dep:serde" ];
-          "serde-1" = [
-            "serde"
-            "serde_derive"
-          ];
-          "serde_derive" = [ "dep:serde_derive" ];
-          "unstable" = [ "generate" ];
-        };
-        resolvedDefaultFeatures = [
-          "default"
-          "graphmap"
-          "matrix_graph"
-          "stable_graph"
-        ];
-      };
-      "petgraph 0.8.3" = rec {
+      "petgraph" = rec {
         crateName = "petgraph";
         version = "0.8.3";
         edition = "2021";
@@ -16123,7 +16056,7 @@ rec {
         dependencies = [
           {
             name = "fixedbitset";
-            packageId = "fixedbitset 0.5.7";
+            packageId = "fixedbitset";
             usesDefaultFeatures = false;
           }
           {
@@ -16138,6 +16071,12 @@ rec {
           {
             name = "indexmap";
             packageId = "indexmap 2.12.1";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            optional = true;
             usesDefaultFeatures = false;
           }
         ];
@@ -16184,7 +16123,13 @@ rec {
           "std" = [ "indexmap/std" ];
           "unstable" = [ "generate" ];
         };
-        resolvedDefaultFeatures = [ "std" ];
+        resolvedDefaultFeatures = [
+          "default"
+          "graphmap"
+          "matrix_graph"
+          "stable_graph"
+          "std"
+        ];
       };
       "pin-project" = rec {
         crateName = "pin-project";
@@ -17086,7 +17031,7 @@ rec {
           }
           {
             name = "petgraph";
-            packageId = "petgraph 0.8.3";
+            packageId = "petgraph";
             usesDefaultFeatures = false;
             features = [ "std" ];
           }
@@ -22588,7 +22533,7 @@ rec {
           }
           {
             name = "petgraph";
-            packageId = "petgraph 0.6.5";
+            packageId = "petgraph";
           }
           {
             name = "pin-project-lite";
