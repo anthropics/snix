@@ -18150,9 +18150,9 @@ rec {
       };
       "redb" = rec {
         crateName = "redb";
-        version = "4.0.0";
+        version = "4.2.0";
         edition = "2024";
-        sha256 = "1pnbyxyrkg2fm8v5hn6m2rdgpw2h29mzkk00mjvp44bvx8qz5xv7";
+        sha256 = "0difkncvpwdf1m0bpfwdxhh6l4r611ly8apc6vjhrs87w1iknv6y";
         authors = [
           "Christopher Berner <me@cberner.com>"
         ];
@@ -18170,10 +18170,16 @@ rec {
         ];
         features = {
           "chrono_v0_4" = [ "dep:chrono_v0_4" ];
+          "default" = [ "std" ];
+          "experimental_cursor" = [ "experimental-api-5" ];
           "logging" = [ "dep:log" ];
           "uuid" = [ "dep:uuid" ];
         };
-        resolvedDefaultFeatures = [ "logging" ];
+        resolvedDefaultFeatures = [
+          "default"
+          "logging"
+          "std"
+        ];
       };
       "redox_syscall" = rec {
         crateName = "redox_syscall";
