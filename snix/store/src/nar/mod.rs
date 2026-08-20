@@ -1,4 +1,5 @@
-use snix_castore::{B3Digest, directoryservice::OrderingError};
+use snix_castore::B3Digest;
+use snix_castore::directoryservice::order_validator;
 
 mod import;
 mod listing;
@@ -23,7 +24,7 @@ pub enum RenderError {
     DirectoryNotFound(B3Digest, bytes::Bytes),
 
     #[error("Invalid Ordering")]
-    OrderingError(#[source] OrderingError),
+    OrderingError(#[source] order_validator::OrderingError),
 
     #[error("unable to find blob {0}, referred from {1:?}")]
     BlobNotFound(B3Digest, bytes::Bytes),

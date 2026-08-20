@@ -9,6 +9,7 @@ use tracing::{instrument, trace};
 use crate::composition::{CompositionContext, ServiceBuilder};
 use crate::directoryservice::DirectoryServiceGraphExt;
 use crate::directoryservice::directory_graph::DirectoryGraphBuilder;
+use crate::directoryservice::order_validator::RootToLeaves;
 use crate::directoryservice::{self, DirectoryPutter, DirectoryService, SimplePutter};
 use crate::{B3Digest, Directory};
 
@@ -119,7 +120,7 @@ where
                 return;
             }
 
-            let mut builder = DirectoryGraphBuilder::new_root_to_leaves(digest);
+            let mut builder = DirectoryGraphBuilder::<RootToLeaves>::new(digest);
 
             // Return to the client, while inserting to the graph builder.
             while let Some(directory) = directories.try_next().await.map_err(Error::FarGet)? {

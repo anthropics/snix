@@ -11,7 +11,7 @@ mod failing_putter;
 mod from_addr;
 mod grpc;
 mod object_store;
-mod order_validator;
+pub mod order_validator;
 mod redb;
 mod simple_putter;
 pub mod traversal;
@@ -27,7 +27,6 @@ pub use self::grpc::{
     MAX_DECODING_MESSAGE_SIZE as GRPC_MAX_DECODING_MESSAGE_SIZE,
 };
 pub use self::object_store::{ObjectStoreDirectoryService, ObjectStoreDirectoryServiceConfig};
-pub use self::order_validator::{LeavesToRootValidator, OrderingError, RootToLeavesValidator};
 pub use self::redb::{RedbDirectoryService, RedbDirectoryServiceConfig};
 pub use self::simple_putter::SimplePutter;
 

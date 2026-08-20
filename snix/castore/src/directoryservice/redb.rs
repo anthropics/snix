@@ -9,7 +9,10 @@ use super::{Directory, DirectoryPutter, DirectoryService, traversal};
 use crate::{
     B3Digest,
     composition::{CompositionContext, ServiceBuilder},
-    directoryservice::directory_graph::DirectoryGraphBuilder,
+    directoryservice::{
+        directory_graph::DirectoryGraphBuilder,
+        order_validator::{self, LeavesToRoot},
+    },
     proto,
 };
 
@@ -236,7 +239,7 @@ impl DirectoryService for RedbDirectoryService {
     fn put_multiple_start(&self) -> Box<dyn DirectoryPutter> {
         Box::new(RedbDirectoryPutter {
             db: self.db.clone(),
-            builder: Some(DirectoryGraphBuilder::new_leaves_to_root()),
+            builder: Some(DirectoryGraphBuilder::<LeavesToRoot>::new()),
         })
     }
 }
@@ -246,7 +249,7 @@ pub struct RedbDirectoryPutter {
 
     /// The directories (inside the directory validator) that we insert later,
     /// or None, if they were already inserted.
-    builder: Option<DirectoryGraphBuilder>,
+    builder: Option<DirectoryGraphBuilder<LeavesToRoot>>,
 }
 
 #[async_trait]
@@ -310,7 +313,7 @@ pub enum Error {
     SerdeQS(#[from] serde_qs::Error),
 
     #[error("Directory Graph ordering error")]
-    DirectoryOrdering(#[from] crate::directoryservice::OrderingError),
+    DirectoryOrdering(#[from] order_validator::OrderingError),
 
     #[error("DirectoryPutter already closed")]
     DirectoryPutterAlreadyClosed,

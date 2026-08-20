@@ -16,9 +16,10 @@ use tonic::async_trait;
 use tracing::{Level, instrument, trace, warn};
 use url::Url;
 
-use super::{Directory, DirectoryPutter, DirectoryService, RootToLeavesValidator};
+use super::{Directory, DirectoryPutter, DirectoryService};
 use crate::composition::{CompositionContext, ServiceBuilder};
 use crate::directoryservice::directory_graph::DirectoryGraphBuilder;
+use crate::directoryservice::order_validator::{self, LeavesToRoot, OrderValidator, RootToLeaves};
 use crate::{B3Digest, Node, proto};
 
 /// Stores directory closures in an object store.
@@ -145,7 +146,7 @@ impl DirectoryService for ObjectStoreDirectoryService {
                     .new_read(decompressed_stream)
                     .err_into::<Error>();
 
-                let mut order_validator = RootToLeavesValidator::new_with_root_digest(root_directory_digest);
+                let mut order_validator = RootToLeaves::new_with_root_digest(root_directory_digest);
                 while let Some(encoded_directory) = encoded_directories.try_next().await? {
                     // hash the encoded proto message, only proceed if we would accept a directory with this digest.
                     let digest = B3Digest::from(blake3::hash(&encoded_directory));
@@ -163,7 +164,8 @@ impl DirectoryService for ObjectStoreDirectoryService {
                 }
 
                 order_validator.finalize().map_err(Error::DirectoryOrdering)?;
-        }.boxed()
+        }
+        .boxed()
     }
 
     #[instrument(skip_all)]
@@ -186,7 +188,7 @@ enum Error {
     PutForDirectoryWithChildren,
 
     #[error("Directory Graph ordering error")]
-    DirectoryOrdering(#[from] crate::directoryservice::OrderingError),
+    DirectoryOrdering(#[from] order_validator::OrderingError),
     #[error("next directory in batch has unexpected digest {0}")]
     UnexpectedDigest(B3Digest),
     #[error("failed to decode protobuf: {0}")]
@@ -280,7 +282,7 @@ struct ObjectStoreDirectoryPutter<'a> {
     object_store: Arc<dyn ObjectStore>,
     base_path: &'a Path,
 
-    builder: Option<DirectoryGraphBuilder>,
+    builder: Option<DirectoryGraphBuilder<LeavesToRoot>>,
 }
 
 impl<'a> ObjectStoreDirectoryPutter<'a> {
@@ -288,7 +290,7 @@ impl<'a> ObjectStoreDirectoryPutter<'a> {
         Self {
             object_store,
             base_path,
-            builder: Some(DirectoryGraphBuilder::new_leaves_to_root()),
+            builder: Some(DirectoryGraphBuilder::<LeavesToRoot>::new()),
         }
     }
 }

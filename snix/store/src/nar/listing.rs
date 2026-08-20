@@ -1,9 +1,8 @@
 use futures::TryStreamExt;
 use nix_compat::nar::listing::{Listing, ListingEntry, ListingVersion};
-use snix_castore::{
-    B3Digest, Directory, Node,
-    directoryservice::{DirectoryService, OrderingError, RootToLeavesValidator},
-};
+use snix_castore::{B3Digest, Directory, Node, directoryservice::DirectoryService};
+
+use snix_castore::directoryservice::order_validator::{self, OrderValidator, RootToLeaves};
 use std::{
     collections::{BTreeMap, HashMap},
     sync::atomic::{AtomicU64, Ordering},
@@ -42,7 +41,7 @@ where
 
     if let Node::Directory { digest, .. } = root_node {
         let mut directories_stream = directory_service.get_recursive(digest);
-        let mut validator = RootToLeavesValidator::new_with_root_digest(digest.to_owned());
+        let mut validator = RootToLeaves::new_with_root_digest(digest.to_owned());
         while let Some(directory) = directories_stream.try_next().await? {
             validator.try_accept(&directory)?;
             directories.insert(directory.digest(), directory);
@@ -146,7 +145,7 @@ pub enum Error {
     #[error("from directoryservice: {0}")]
     DirectoryService(#[from] snix_castore::directoryservice::Error),
     #[error("ordering error from directoryservice: {0}")]
-    OrderingError(#[from] OrderingError),
+    OrderingError(#[from] order_validator::OrderingError),
 }
 
 #[cfg(test)]

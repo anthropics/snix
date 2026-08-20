@@ -1,4 +1,5 @@
-use crate::directoryservice::{DirectoryService, LeavesToRootValidator};
+use crate::directoryservice::DirectoryService;
+use crate::directoryservice::order_validator::{LeavesToRoot, OrderValidator};
 use crate::{B3Digest, DirectoryError, proto};
 use futures::stream::BoxStream;
 use futures::{StreamExt, TryStreamExt};
@@ -82,7 +83,7 @@ where
         let mut req_inner = request.into_inner();
 
         // Validate all received directories.
-        let mut validator = LeavesToRootValidator::new();
+        let mut validator = LeavesToRoot::new();
 
         // Insert into the backing DirectoryService as we receive.
         let mut directory_putter = self.directory_service.put_multiple_start();

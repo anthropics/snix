@@ -2,7 +2,7 @@ use async_stream::try_stream;
 use futures::StreamExt;
 use futures::{Stream, stream::BoxStream};
 use std::collections::{HashMap, HashSet, hash_map};
-use tracing::{Span, debug, trace};
+use tracing::{debug, trace};
 
 use super::Directory;
 use crate::{B3Digest, Node};
@@ -40,6 +40,14 @@ impl From<OrderingError> for crate::directoryservice::Error {
     }
 }
 
+/// Common trait implemented by both [RootToLeaves] and [LeavesToRoot].
+pub trait OrderValidator {
+    /// Succeeds if the directory is acceptable with the chosen insertion order.
+    fn try_accept(&mut self, directory: &Directory) -> Result<(), OrderingError>;
+    /// Succeeds if the accepted directories are a full closure.
+    fn finalize(self) -> Result<(), OrderingError>;
+}
+
 /// A struct holding state while consuming a sequence of Directories in
 /// Root-To-Leaves order.
 ///
@@ -56,7 +64,7 @@ impl From<OrderingError> for crate::directoryservice::Error {
 /// received directories), to recognize getting sent unrelated directories,
 /// as well as a list of introduced, but not yet received digest (to detect
 /// still-missing directories).
-pub struct RootToLeavesValidator {
+pub struct RootToLeaves {
     /// the expected root digest
     root_digest: B3Digest,
 
@@ -72,7 +80,7 @@ pub struct RootToLeavesValidator {
     poison: bool,
 }
 
-impl RootToLeavesValidator {
+impl RootToLeaves {
     /// Initialize with an expected root directory
     /// That directory should be sent next.
     pub fn new_with_root_digest(root_digest: B3Digest) -> Self {
@@ -96,17 +104,54 @@ impl RootToLeavesValidator {
         digest == &self.root_digest || self.referenced_directories.contains_key(digest)
     }
 
+    // Adds each child node to introduced_directories and pending_directories.
+    fn introduce_children_of(&mut self, directory: &Directory) {
+        for (_name, node) in directory.nodes() {
+            if let Node::Directory { digest, size } = node {
+                // if there's a pointer to a new directory
+                if self
+                    .referenced_directories
+                    .insert(digest.to_owned(), *size)
+                    .is_none()
+                {
+                    self.pending_directories.insert(digest.to_owned());
+                }
+            }
+        }
+    }
+
+    /// This receives a stream of Directories, validating them to be in Root-To-Leaves order.
+    /// The expected root digest needs to be passed in.
+    /// If the order is correct, they are yielded wrapped in an Ok().
+    /// If not, we yield an error.
+    pub fn validate_stream<'s, S>(
+        root_digest: B3Digest,
+        directories: S,
+    ) -> BoxStream<'s, Result<Directory, OrderingError>>
+    where
+        S: Stream<Item = Directory> + Send + 's,
+    {
+        let mut validator = RootToLeaves::new_with_root_digest(root_digest);
+        let mut directories = directories.boxed();
+
+        Box::pin(try_stream! {
+            while let Some(directory) = directories.next().await {
+                        validator.try_accept(&directory)?;
+                        yield directory;
+            }
+            validator.finalize()?;
+        })
+    }
+}
+
+impl OrderValidator for RootToLeaves {
     /// Accepts a directory if previously introduced, or returns an error if it's unknown.
-    #[tracing::instrument(level = "trace", skip_all, fields(directory.digest = tracing::field::Empty, directory.size = tracing::field::Empty), err)]
-    pub fn try_accept(&mut self, directory: &Directory) -> Result<(), OrderingError> {
+    #[tracing::instrument(level = "trace", skip_all, fields(directory.digest = %directory.digest(), directory.size = directory.size()), err)]
+    fn try_accept(&mut self, directory: &Directory) -> Result<(), OrderingError> {
         assert!(!self.poison, "Snix bug: RootToLeavesValidator poisoned");
 
         let size = directory.size();
         let digest = directory.digest();
-
-        Span::current()
-            .record("directory.digest", format_args!("{}", &digest))
-            .record("directory.size", size);
 
         // Every incoming directory must already have been introduced.
         match self.referenced_directories.get(&digest) {
@@ -146,7 +191,7 @@ impl RootToLeavesValidator {
     /// Must be called after accepting the last Directory
     /// Ensures there's no more pending directories.
     #[tracing::instrument(level = "trace", skip_all, err)]
-    pub fn finalize(self) -> Result<(), OrderingError> {
+    fn finalize(self) -> Result<(), OrderingError> {
         match self.pending_directories.len() {
             0 => Ok(()),
             1 if self.pending_directories.iter().next().unwrap() == &self.root_digest => {
@@ -154,45 +199,6 @@ impl RootToLeavesValidator {
             }
             _ => Err(OrderingError::DirectoriesMissing(self.pending_directories)),
         }
-    }
-
-    // Adds each child node to introduced_directories and pending_directories.
-    fn introduce_children_of(&mut self, directory: &Directory) {
-        for (_name, node) in directory.nodes() {
-            if let Node::Directory { digest, size } = node {
-                // if there's a pointer to a new directory
-                if self
-                    .referenced_directories
-                    .insert(digest.to_owned(), *size)
-                    .is_none()
-                {
-                    self.pending_directories.insert(digest.to_owned());
-                }
-            }
-        }
-    }
-
-    /// This receives a stream of Directories, validating them to be in Root-To-Leaves order.
-    /// The expected root digest needs to be passed in.
-    /// If the order is correct, they are yielded wrapped in an Ok().
-    /// If not, we yield an error.
-    pub fn validate_stream<'s, S>(
-        root_digest: B3Digest,
-        directories: S,
-    ) -> BoxStream<'s, Result<Directory, OrderingError>>
-    where
-        S: Stream<Item = Directory> + Send + 's,
-    {
-        let mut validator = RootToLeavesValidator::new_with_root_digest(root_digest);
-        let mut directories = directories.boxed();
-
-        Box::pin(try_stream! {
-            while let Some(directory) = directories.next().await {
-                        validator.try_accept(&directory)?;
-                        yield directory;
-            }
-            validator.finalize()?;
-        })
     }
 }
 
@@ -204,7 +210,7 @@ impl RootToLeavesValidator {
 /// have already been accepted before, and that the sizes attached alongside the
 /// pointers match the actual sizes.
 /// Commonly used when _uploading_ a directory closure _to_ a store.
-pub struct LeavesToRootValidator {
+pub struct LeavesToRoot {
     /// tracks inserted directories, and their sizes observed.
     accepted_directories: HashMap<B3Digest, u64>,
 
@@ -221,7 +227,7 @@ pub struct LeavesToRootValidator {
     poison: bool,
 }
 
-impl LeavesToRootValidator {
+impl LeavesToRoot {
     pub fn new() -> Self {
         Self {
             accepted_directories: Default::default(),
@@ -232,9 +238,31 @@ impl LeavesToRootValidator {
         }
     }
 
+    /// This receives a stream of Directories, validating them to be in Leaves-To-Root order.
+    /// If the order is correct, they are yielded wrapped in an Ok().
+    /// If not, we yield an error.
+    pub fn validate_stream<'s, S>(directories: S) -> BoxStream<'s, Result<Directory, OrderingError>>
+    where
+        S: Stream<Item = Directory> + Send + 's,
+    {
+        let mut directories = directories.boxed();
+        let mut validator = Self::new();
+
+        Box::pin(try_stream! {
+            while let Some(directory) = directories.next().await {
+                validator.try_accept(&directory)?;
+                yield directory;
+            }
+
+            validator.finalize()?;
+        })
+    }
+}
+
+impl OrderValidator for LeavesToRoot {
     /// Accepts a directory if previously introduced, or returns an error if it's unknown.
     #[tracing::instrument(level = "trace", skip_all, fields(directory.digest = %directory.digest(), directory.size = directory.size()), err)]
-    pub fn try_accept(&mut self, directory: &Directory) -> Result<(), OrderingError> {
+    fn try_accept(&mut self, directory: &Directory) -> Result<(), OrderingError> {
         assert!(!self.poison, "Snix bug: LeavesToRootValidator poisoned");
 
         // every directory referenced must already have been seen.
@@ -290,7 +318,7 @@ impl LeavesToRootValidator {
     /// directories.
     #[tracing::instrument(level = "trace", skip_all, err)]
     #[allow(unused_mut)]
-    pub fn finalize(mut self) -> Result<(), OrderingError> {
+    fn finalize(mut self) -> Result<(), OrderingError> {
         assert!(!self.poison, "Snix bug: LeavesToRootValidator poisoned");
 
         if self.accepted_directories.is_empty() {
@@ -317,31 +345,11 @@ impl LeavesToRootValidator {
 
         Ok(())
     }
-
-    /// This receives a stream of Directories, validating them to be in Leaves-To-Root order.
-    /// If the order is correct, they are yielded wrapped in an Ok().
-    /// If not, we yield an error.
-    pub fn validate_stream<'s, S>(directories: S) -> BoxStream<'s, Result<Directory, OrderingError>>
-    where
-        S: Stream<Item = Directory> + Send + 's,
-    {
-        let mut directories = directories.boxed();
-        let mut validator = Self::new();
-
-        Box::pin(try_stream! {
-            while let Some(directory) = directories.next().await {
-                validator.try_accept(&directory)?;
-                yield directory;
-            }
-
-            validator.finalize()?;
-        })
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{LeavesToRootValidator, RootToLeavesValidator};
+    use super::{LeavesToRoot, OrderValidator, RootToLeaves};
     use crate::directoryservice::Directory;
     use crate::fixtures::{DIRECTORY_A, DIRECTORY_B, DIRECTORY_C, DIRECTORY_D, DIRECTORY_E};
     use futures::TryStreamExt;
@@ -369,7 +377,7 @@ mod tests {
         #[case] exp_fail_upload_last: bool,
         #[case] exp_fail_finalize: bool,
     ) {
-        let mut validator = LeavesToRootValidator::default();
+        let mut validator = LeavesToRoot::default();
         let mut it = directories_to_upload.iter().peekable();
 
         while let Some(d) = it.next() {
@@ -411,7 +419,7 @@ mod tests {
         #[case] exp_fail_upload_last: bool,
     ) {
         let root_digest = directories_to_upload[0].digest();
-        let mut validator = RootToLeavesValidator::new_with_root_digest(root_digest);
+        let mut validator = RootToLeaves::new_with_root_digest(root_digest);
         let mut it = directories_to_upload.iter().peekable();
 
         while let Some(d) = it.next() {
@@ -441,7 +449,7 @@ mod tests {
     #[test]
     /// This initializes a validator with another root than what we try to upload.
     fn root_to_leaves_root_mismatch() {
-        let mut validator = RootToLeavesValidator::new_with_root_digest(DIRECTORY_A.digest());
+        let mut validator = RootToLeaves::new_with_root_digest(DIRECTORY_A.digest());
 
         validator
             .try_accept(&DIRECTORY_B)
@@ -459,7 +467,7 @@ mod tests {
         ];
         let root_digest = directories_to_upload[0].digest();
 
-        let validated_stream = RootToLeavesValidator::validate_stream(
+        let validated_stream = RootToLeaves::validate_stream(
             root_digest,
             futures::stream::iter(directories_to_upload.iter().map(|d| (*d).to_owned())),
         );
@@ -471,7 +479,7 @@ mod tests {
 
         assert_eq!(directories_to_upload, validated_directories);
 
-        RootToLeavesValidator::validate_stream(root_digest, futures::stream::empty())
+        RootToLeaves::validate_stream(root_digest, futures::stream::empty())
             .try_collect::<Vec<_>>()
             .await
             .expect_err("an empty stream to fail");

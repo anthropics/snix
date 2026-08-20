@@ -3,6 +3,7 @@ use super::DirectoryPutter;
 use super::DirectoryService;
 use crate::B3Digest;
 use crate::directoryservice::directory_graph::DirectoryGraphBuilder;
+use crate::directoryservice::order_validator::{self, LeavesToRoot};
 use tonic::async_trait;
 use tracing::instrument;
 use tracing::warn;
@@ -13,7 +14,7 @@ use tracing::warn;
 pub struct SimplePutter<'a, DS> {
     directory_service: &'a DS,
 
-    builder: Option<DirectoryGraphBuilder>,
+    builder: Option<DirectoryGraphBuilder<LeavesToRoot>>,
 }
 
 impl<'a, DS> SimplePutter<'a, DS>
@@ -23,7 +24,7 @@ where
     pub fn new(directory_service: &'a DS) -> Self {
         Self {
             directory_service,
-            builder: Some(DirectoryGraphBuilder::new_leaves_to_root()),
+            builder: Some(DirectoryGraphBuilder::<LeavesToRoot>::new()),
         }
     }
 }
@@ -77,7 +78,7 @@ pub enum Error {
         actual: B3Digest,
     },
     #[error("failure during graph validation")]
-    OrderingError(#[from] super::OrderingError),
+    OrderingError(#[from] order_validator::OrderingError),
 }
 
 impl From<Error> for super::Error {

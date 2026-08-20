@@ -1,7 +1,7 @@
 use super::{Directory, DirectoryPutter, DirectoryService};
 use crate::B3Digest;
 use crate::composition::{CompositionContext, ServiceBuilder};
-use crate::directoryservice::RootToLeavesValidator;
+use crate::directoryservice::order_validator::{self, OrderValidator, RootToLeaves};
 use crate::proto::{self, get_directory_request::ByWhat};
 use futures::StreamExt;
 use futures::stream::BoxStream;
@@ -113,8 +113,7 @@ where
         let mut grpc_client = self.grpc_client.clone();
         let root_directory_digest = *root_directory_digest;
 
-        let mut order_validator =
-            RootToLeavesValidator::new_with_root_digest(root_directory_digest);
+        let mut order_validator = RootToLeaves::new_with_root_digest(root_directory_digest);
 
         async_stream::try_stream! {
             let mut directories = grpc_client
@@ -215,7 +214,7 @@ impl DirectoryPutter for GRPCPutter {
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Directory Graph ordering error: {0}")]
-    DirectoryOrdering(#[from] crate::directoryservice::OrderingError),
+    DirectoryOrdering(#[from] order_validator::OrderingError),
 
     #[error("DirectoryPutter already closed")]
     DirectoryPutterAlreadyClosed,
