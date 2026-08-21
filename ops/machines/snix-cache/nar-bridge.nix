@@ -20,7 +20,7 @@ in
 
   services.snix-store-daemon = {
     enable = true;
-    package = depot.snix.cli.store.with-features-xp-store-composition-cli-otlp;
+    package = depot.snix.cli.store.with-features-xp-store-composition-cli;
 
     settings = {
       blobservices.root = {
@@ -69,7 +69,7 @@ in
 
   services.nar-bridge = {
     enable = true;
-    package = depot.snix.cli.nar-bridge.with-features-xp-store-composition-cli-otlp;
+    package = depot.snix.cli.nar-bridge.with-features-xp-store-composition-cli;
 
     settings = {
       blobservices.root = {

@@ -12,8 +12,17 @@
       // (depot.snix.utils.mkFeaturePowerset {
         inherit (old) crateName;
         features = [
-          "otlp"
           "xp-store-composition-cli"
         ];
+        override =
+          old:
+          old
+          // {
+            features = old.features ++ [
+              "otlp"
+              "tracing-chrome"
+              "tracing-tracy"
+            ];
+          };
       });
   })

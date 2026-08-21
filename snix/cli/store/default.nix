@@ -46,16 +46,23 @@ in
         inherit (old) crateName;
         features = (
           [
-            "cloud"
             "fuse"
-            "otlp"
-            "tonic-reflection"
-            "tracing-chrome"
-            "tracing-tracy"
             "xp-store-composition-cli"
           ]
           # virtiofs feature currently fails to build on Darwin
           ++ lib.optional pkgs.stdenv.isLinux "virtiofs"
         );
+        override =
+          old:
+          old
+          // {
+            features = old.features ++ [
+              "compat-migrate-directory-sizes"
+              "otlp"
+              "tonic-reflection"
+              "tracing-chrome"
+              "tracing-tracy"
+            ];
+          };
       });
   })
