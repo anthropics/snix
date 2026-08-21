@@ -51,20 +51,19 @@ in
         lib.foldl' addElement [ [ ] ] xs;
     in
     lib.listToAttrs (
-      map (featuresPowerset: {
+      map (features: {
         name =
-          if featuresPowerset != [ ] then
-            "with-features-${lib.concatStringsSep "-" featuresPowerset}"
-          else
-            "no-features";
+          if features != [ ] then "with-features-${lib.concatStringsSep "-" features}" else "no-features";
         value =
           (depot.snix.crates.workspaceMembers.${crateName}.build.override (
             old:
-            {
-              runTests = true;
-              features = featuresPowerset;
-            }
-            // (if lib.isFunction override then override old else override)
+            let
+              attrs = {
+                runTests = true;
+                inherit features;
+              };
+            in
+            attrs // (if lib.isFunction override then override (old // attrs) else override)
           )).overrideAttrs
             ({
               # Ensure that powerset CI steps run with low priority
