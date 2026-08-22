@@ -399,7 +399,7 @@ fn output_path_construction() {
     foo_env.insert("system".to_string(), ":".into());
 
     // asssemble foo outputs
-    foo_drv.outputs = Outputs::with_single_output();
+    foo_drv.outputs = Outputs::default();
 
     // assemble foo input_derivations
     foo_drv

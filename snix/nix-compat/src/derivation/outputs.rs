@@ -35,8 +35,8 @@ pub enum OutputsError {
 pub struct Iter<'a>(IterI<'a>);
 
 enum IterI<'a> {
-    Single(std::iter::Once<(&'a OutputName, &'a Output)>),
-    Multiple(std::collections::btree_map::Iter<'a, OutputName, Output>),
+    Fixed(std::iter::Once<(&'a OutputName, &'a Output)>),
+    InputAddressed(std::collections::btree_map::Iter<'a, OutputName, Output>),
 }
 
 impl<'a> Iterator for Iter<'a> {
@@ -44,14 +44,14 @@ impl<'a> Iterator for Iter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.0 {
-            IterI::Single(it) => it.next(),
-            IterI::Multiple(it) => it.next(),
+            IterI::Fixed(it) => it.next(),
+            IterI::InputAddressed(it) => it.next(),
         }
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
         match &self.0 {
-            IterI::Single(it) => it.size_hint(),
-            IterI::Multiple(it) => it.size_hint(),
+            IterI::Fixed(it) => it.size_hint(),
+            IterI::InputAddressed(it) => it.size_hint(),
         }
     }
 }
@@ -60,8 +60,8 @@ impl<'a> ExactSizeIterator for Iter<'a> {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum OutputsInner {
-    Single(Output),
-    Multiple(BTreeMap<OutputName, Output>),
+    Fixed(Output),
+    InputAddressed(BTreeMap<OutputName, Output>),
 }
 
 /// Derivation outputs.
@@ -70,8 +70,7 @@ enum OutputsInner {
 /// with some extra invariants.
 ///
 /// # Invariants
-/// - If there is only one output it is named `out`
-/// - Only a single FOD output is allowed
+/// - Only a single FOD output is allowed and it must be named `out`
 /// - Duplicately named outputs is an error
 /// - Outputs can not be empty
 ///
@@ -109,28 +108,9 @@ impl Outputs {
     /// assert!(b.contains_key(&OutputName::out()));
     /// ```
     pub const fn from_fod_hash(output_hash: OutputHash) -> Self {
-        Outputs(OutputsInner::Single(Output {
+        Outputs(OutputsInner::Fixed(Output {
             path: None,
             output_hash: Some(output_hash),
-        }))
-    }
-
-    /// Return a new `Ouputs` with just a single output.
-    ///
-    /// That single output is always called `out`.
-    ///
-    /// # Examples
-    /// ```
-    /// use nix_compat::derivation::{Outputs, OutputName};
-    ///
-    /// let b = Outputs::with_single_output();
-    /// assert!(b.is_single());
-    /// assert!(b.contains_key(&OutputName::out()));
-    /// ```
-    pub const fn with_single_output() -> Self {
-        Outputs(OutputsInner::Single(Output {
-            path: None,
-            output_hash: None,
         }))
     }
 
@@ -144,19 +124,21 @@ impl Outputs {
     where
         I: IntoIterator<Item = (OutputName, Output)>,
     {
-        let mut it = it.into_iter();
+        let mut it = it.into_iter().peekable();
         let Some((output_name, output)) = it.next() else {
             return Err(OutputsError::NoOutputs());
         };
-        if let Some((second_name, second_output)) = it.next() {
-            if output.is_fixed() || second_output.is_fixed() {
+        let mut outputs = BTreeMap::new();
+        if output.is_fixed() {
+            if it.peek().is_some() {
                 return Err(OutputsError::MoreThanOneOutputButFixed());
             }
-            let mut outputs = BTreeMap::new();
-            outputs.insert(output_name, output);
-            if outputs.insert(second_name.clone(), second_output).is_some() {
-                return Err(OutputsError::DuplicateOutputName(second_name));
+            if output_name != OutputName::out() {
+                return Err(OutputsError::InvalidOutputName(output_name.to_string()));
             }
+            Ok(Outputs(OutputsInner::Fixed(output)))
+        } else {
+            outputs.insert(output_name, output);
             for (output_name, output) in it {
                 if output.is_fixed() {
                     return Err(OutputsError::MoreThanOneOutputButFixed());
@@ -165,11 +147,7 @@ impl Outputs {
                     return Err(OutputsError::DuplicateOutputName(output_name));
                 }
             }
-            Ok(Outputs(OutputsInner::Multiple(outputs)))
-        } else if output_name == OutputName::out() {
-            Ok(Outputs(OutputsInner::Single(output)))
-        } else {
-            Err(OutputsError::InvalidOutputName(output_name.to_string()))
+            Ok(Outputs(OutputsInner::InputAddressed(outputs)))
         }
     }
 
@@ -177,16 +155,16 @@ impl Outputs {
     #[must_use]
     pub fn contains_key(&self, name: &OutputName) -> bool {
         match &self.0 {
-            OutputsInner::Single(_) => *name == OutputName::out(),
-            OutputsInner::Multiple(outputs) => outputs.contains_key(name),
+            OutputsInner::Fixed(_) => *name == OutputName::out(),
+            OutputsInner::InputAddressed(outputs) => outputs.contains_key(name),
         }
     }
 
     /// Returns a reference to the [`Output`] corresponding to the provided `name`.
     pub fn get(&self, name: &OutputName) -> Option<&Output> {
         match &self.0 {
-            OutputsInner::Single(output) if *name == OutputName::out() => Some(output),
-            OutputsInner::Multiple(outputs) => outputs.get(name),
+            OutputsInner::Fixed(output) if *name == OutputName::out() => Some(output),
+            OutputsInner::InputAddressed(outputs) => outputs.get(name),
             _ => None,
         }
     }
@@ -194,11 +172,11 @@ impl Outputs {
     /// Gets an iterator over the entries of the outputs, sorted by name.
     pub fn iter(&self) -> Iter<'_> {
         match &self.0 {
-            OutputsInner::Single(output) => {
+            OutputsInner::Fixed(output) => {
                 const OUT: &OutputName = &OutputName::out();
-                Iter(IterI::Single(std::iter::once((OUT, output))))
+                Iter(IterI::Fixed(std::iter::once((OUT, output))))
             }
-            OutputsInner::Multiple(outputs) => Iter(IterI::Multiple(outputs.iter())),
+            OutputsInner::InputAddressed(outputs) => Iter(IterI::InputAddressed(outputs.iter())),
         }
     }
 
@@ -229,7 +207,7 @@ impl Outputs {
     /// ```
     /// use nix_compat::derivation::{Output, Outputs, OutputName};
     ///
-    /// let a = Outputs::with_single_output();
+    /// let a = Outputs::default();
     ///
     /// let values: Vec<Output> = a.values().cloned().collect();
     /// assert_eq!(values, [Output::default()]);
@@ -244,7 +222,7 @@ impl Outputs {
     /// ```
     /// use nix_compat::derivation::{Outputs, OutputName};
     ///
-    /// let a = Outputs::with_single_output();
+    /// let a = Outputs::default();
     /// assert_eq!(a.len(), 1);
     ///
     /// let b = Outputs::try_from_iter([
@@ -256,8 +234,8 @@ impl Outputs {
     #[expect(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         match &self.0 {
-            OutputsInner::Single(_) => 1,
-            OutputsInner::Multiple(outputs) => outputs.len(),
+            OutputsInner::Fixed(_) => 1,
+            OutputsInner::InputAddressed(outputs) => outputs.len(),
         }
     }
 
@@ -270,7 +248,7 @@ impl Outputs {
     /// # use nix_compat::derivation::{OutputHash, OutputHashMode};
     /// # use nix_compat::nixhash::NixHash;
     ///
-    /// let a = Outputs::with_single_output();
+    /// let a = Outputs::default();
     /// assert!(a.is_single());
     ///
     /// # const DIGEST_SHA256: [u8; 32] =
@@ -294,7 +272,7 @@ impl Outputs {
     /// Returns `true` if this is a single fixed-output.
     #[must_use]
     pub fn is_fixed(&self) -> bool {
-        matches!(&self.0, OutputsInner::Single(out) if out.is_fixed())
+        matches!(&self.0, OutputsInner::Fixed(_))
     }
 
     /// This calculates all output paths of a `Outputs` and updates the struct.
@@ -322,7 +300,7 @@ impl Outputs {
         hash_derivation_modulo: &Sha256,
     ) -> Result<(), OutputsError> {
         match &mut self.0 {
-            OutputsInner::Single(output) => {
+            OutputsInner::Fixed(output) => {
                 // Assert that outputs are not yet populated, to avoid using this function wrongly.
                 // We don't also go over self.environment, but it's a sufficient
                 // footgun prevention mechanism.
@@ -349,9 +327,9 @@ impl Outputs {
 
                 output.path = Some(store_path.to_owned());
             }
-            OutputsInner::Multiple(outputs) => {
+            OutputsInner::InputAddressed(outputs) => {
                 for (output_name, output) in outputs.iter_mut() {
-                    assert!(!output.is_fixed(), "Snix bug: multiple FOD");
+                    debug_assert!(!output.is_fixed(), "Snix bug: multiple FOD");
 
                     // Assemble the name, which is either the drv-name suffixed `-{output_name}`,
                     // except in the `out` case, where it's omitted.
@@ -390,7 +368,10 @@ impl<'a> IntoIterator for &'a Outputs {
 
 impl Default for Outputs {
     fn default() -> Self {
-        Self(OutputsInner::Single(Default::default()))
+        Self(OutputsInner::InputAddressed(BTreeMap::from_iter([(
+            OutputName::out(),
+            Output::default(),
+        )])))
     }
 }
 
@@ -407,10 +388,10 @@ impl Outputs {
     /// Clear any [`StorePath`] from each output.
     pub fn trim_store_paths(&mut self) {
         match &mut self.0 {
-            OutputsInner::Single(output) => {
+            OutputsInner::Fixed(output) => {
                 output.path = None;
             }
-            OutputsInner::Multiple(outputs) => {
+            OutputsInner::InputAddressed(outputs) => {
                 for output in outputs.values_mut() {
                     output.path = None;
                 }
@@ -472,14 +453,19 @@ impl<'de> serde::Deserialize<'de> for Outputs {
                             )));
                         }
                     }
-                    Ok(Outputs(OutputsInner::Multiple(outputs)))
-                } else if output_name == OutputName::out() {
-                    Ok(Outputs(OutputsInner::Single(output)))
+                    Ok(Outputs(OutputsInner::InputAddressed(outputs)))
+                } else if output.is_fixed() {
+                    if output_name != OutputName::out() {
+                        return Err(A::Error::invalid_value(
+                            Unexpected::Other(output_name.as_str()),
+                            &"single derivation output named 'out'",
+                        ));
+                    }
+                    Ok(Outputs(OutputsInner::Fixed(output)))
                 } else {
-                    Err(A::Error::invalid_value(
-                        Unexpected::Other(output_name.as_str()),
-                        &"single derivation output named 'out'",
-                    ))
+                    Ok(Outputs(OutputsInner::InputAddressed(BTreeMap::from_iter(
+                        [(output_name, output)],
+                    ))))
                 }
             }
         }
@@ -528,13 +514,16 @@ mod tests {
         path: None,
     };
 
-    const SINGLE_OUTPUTS: Outputs = Outputs::with_single_output();
     const FOD_OUTPUTS: Outputs = Outputs::from_fod_hash(OutputHash {
         mode: OutputHashMode::Flat,
         hash: NixHash::Sha256(DIGEST_SHA256),
     });
     static TRY_SINGLE: LazyLock<Outputs> = LazyLock::new(|| {
         Outputs::try_from_iter([(OutputName::out(), Default::default())]).expect("single output")
+    });
+    static TRY_SINGLE_NON_OUT: LazyLock<Outputs> = LazyLock::new(|| {
+        Outputs::try_from_iter([(OutputName::from_static("bin").unwrap(), Default::default())])
+            .expect("single output")
     });
     static TRY_FOD: LazyLock<Outputs> = LazyLock::new(|| -> Outputs {
         Outputs::try_from_iter([(
@@ -558,7 +547,7 @@ mod tests {
     #[should_panic(expected = "no outputs defined")]
     #[case::empty(&[])]
     #[should_panic(expected = "invalid output name: bin")]
-    #[case::single(&[(OutputName::from_static("bin").unwrap(), Default::default())])]
+    #[case::fod_non_out(&[(OutputName::from_static("bin").unwrap(), FOD_OUTPUT)])]
     #[should_panic(expected = "duplicate output name: bin")]
     #[case::duplicate(&[
         (OutputName::from_static("bin").unwrap(), Default::default()),
@@ -582,7 +571,7 @@ mod tests {
     #[should_panic(expected = "no outputs defined")]
     #[case::empty(&[])]
     #[should_panic(expected = "invalid output name: bin")]
-    #[case::single(&[(OutputName::from_static("bin").unwrap(), Default::default())])]
+    #[case::fod_non_out(&[(OutputName::from_static("bin").unwrap(), FOD_OUTPUT)])]
     #[should_panic(
         expected = "encountered fixed-output derivation, but more than 1 output in total"
     )]
@@ -596,9 +585,9 @@ mod tests {
     }
 
     #[rstest]
-    #[case::single(&SINGLE_OUTPUTS)]
     #[case::fod(&FOD_OUTPUTS)]
     #[case::try_single(&TRY_SINGLE)]
+    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT)]
     #[case::try_fod(&TRY_FOD)]
     #[case::default(&Default::default())]
     fn is_single(#[case] value: &Outputs) {
@@ -619,8 +608,8 @@ mod tests {
     }
 
     #[rstest]
-    #[case::single(&SINGLE_OUTPUTS)]
     #[case::try_single(&TRY_SINGLE)]
+    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT)]
     #[case::multiple(&TRY_MULTIPLE)]
     #[case::default(&Default::default())]
     fn is_not_fixed(#[case] value: &Outputs) {
@@ -628,9 +617,9 @@ mod tests {
     }
 
     #[rstest]
-    #[case::single(&SINGLE_OUTPUTS, 1)]
     #[case::fod(&FOD_OUTPUTS, 1)]
     #[case::try_fod(&TRY_FOD, 1)]
+    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT, 1)]
     #[case::try_single(&TRY_SINGLE, 1)]
     #[case::multiple(&TRY_MULTIPLE, 2)]
     #[case::default(&Default::default(), 1)]
@@ -639,10 +628,10 @@ mod tests {
     }
 
     #[rstest]
-    #[case::single(&SINGLE_OUTPUTS, OutputName::out(), Some(&Default::default()))]
     #[case::fod(&FOD_OUTPUTS, OutputName::out(), Some(&FOD_OUTPUT))]
     #[case::try_fod(&TRY_FOD, OutputName::out(), Some(&FOD_OUTPUT))]
     #[case::try_single(&TRY_SINGLE, OutputName::out(), Some(&Default::default()))]
+    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT, OutputName::from_static("bin").unwrap(), Some(&Default::default()))]
     #[case::multiple_out(&TRY_MULTIPLE, OutputName::out(), None)]
     #[case::multiple_bin(&TRY_MULTIPLE, OutputName::from_static("bin").unwrap(), Some(&Default::default()))]
     #[case::default(&Default::default(), OutputName::out(), Some(&Default::default()))]
@@ -651,10 +640,10 @@ mod tests {
     }
 
     #[rstest]
-    #[case::single(&SINGLE_OUTPUTS, OutputName::out())]
     #[case::fod(&FOD_OUTPUTS, OutputName::out())]
     #[case::try_fod(&TRY_FOD, OutputName::out())]
     #[case::try_single(&TRY_SINGLE, OutputName::out())]
+    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT, OutputName::from_static("bin").unwrap())]
     #[case::multiple_bin(&TRY_MULTIPLE, OutputName::from_static("bin").unwrap())]
     #[case::default(&Default::default(), OutputName::out())]
     fn contains_key(#[case] value: &Outputs, #[case] name: OutputName) {
@@ -668,10 +657,10 @@ mod tests {
     }
 
     #[rstest]
-    #[case::single(&SINGLE_OUTPUTS, vec![(OutputName::out(), Default::default())])]
     #[case::fod(&FOD_OUTPUTS, vec![(OutputName::out(), FOD_OUTPUT.clone())])]
     #[case::try_fod(&TRY_FOD, vec![(OutputName::out(), FOD_OUTPUT.clone())])]
     #[case::try_single(&TRY_SINGLE, vec![(OutputName::out(), Default::default())])]
+    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT, vec![(OutputName::from_static("bin").unwrap(), Default::default())])]
     #[case::multiple(&TRY_MULTIPLE, vec![
         (OutputName::from_static("bin").unwrap(), Default::default()),
         (OutputName::from_static("dev").unwrap(), Default::default()),
@@ -686,10 +675,10 @@ mod tests {
     }
 
     #[rstest]
-    #[case::single(&SINGLE_OUTPUTS, vec![OutputName::out()])]
     #[case::fod(&FOD_OUTPUTS, vec![OutputName::out()])]
     #[case::try_fod(&TRY_FOD, vec![OutputName::out()])]
     #[case::try_single(&TRY_SINGLE, vec![OutputName::out()])]
+    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT, vec![OutputName::from_static("bin").unwrap()])]
     #[case::multiple(&TRY_MULTIPLE, vec![
         OutputName::from_static("bin").unwrap(),
         OutputName::from_static("dev").unwrap(),
@@ -701,10 +690,10 @@ mod tests {
     }
 
     #[rstest]
-    #[case::single(&SINGLE_OUTPUTS, vec![Default::default()])]
     #[case::fod(&FOD_OUTPUTS, vec![FOD_OUTPUT.clone()])]
     #[case::try_fod(&TRY_FOD, vec![FOD_OUTPUT.clone()])]
     #[case::try_single(&TRY_SINGLE, vec![Default::default()])]
+    #[case::try_single_non_out(&TRY_SINGLE_NON_OUT, vec![Default::default()])]
     #[case::multiple(&TRY_MULTIPLE, vec![Default::default(), Default::default()])]
     #[case::default(&Default::default(), vec![Default::default()])]
     fn values(#[case] value: &Outputs, #[case] expected: Vec<Output>) {
