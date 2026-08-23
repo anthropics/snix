@@ -49,7 +49,7 @@ in
     environment.TRACER = "otlp";
     serviceConfig = {
       ExecStart =
-        "${depot.snix.cli.store.with-features-xp-store-composition-cli-otlp}/bin/snix-store copy"
+        "${depot.snix.cli.store.with-features-xp-store-composition-cli}/bin/snix-store copy"
         + " --experimental-store-composition ${storeCompositionFile}"
         + " --jsonl /run/watch-store.sock";
       Type = "simple";

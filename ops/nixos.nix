@@ -64,6 +64,7 @@ rec {
 
   meta.ci.targets = [
     "archivistEC2System"
+    "build03System"
     "gerrit01System"
     "meta01System"
     "public01System"
