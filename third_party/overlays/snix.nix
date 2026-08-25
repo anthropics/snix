@@ -24,6 +24,15 @@ depot.nix.readTree.drvTargets {
     ];
   });
 
+  keycloak = prev.keycloak.overrideAttrs (old: rec {
+    version = "26.7.2";
+
+    src = prev.fetchzip {
+      url = "https://github.com/keycloak/keycloak/releases/download/${version}/keycloak-${version}.zip";
+      hash = "sha256-D4Hj4OHX8veFjIDbvbQN0E7C2oHVpbD2U4TV1Z8fZ8Y=";
+    };
+  });
+
   # Use an old version of hugo, else the website only shows
   # "This line is from layouts/index.html."
   hugo = prev.hugo.overrideAttrs (old: {
