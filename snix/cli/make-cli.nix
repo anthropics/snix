@@ -18,7 +18,8 @@ lib.makeOverridable (
       package:
       let
         all-features = lib.attrNames depot.snix.crates.internal.crates.${package.crateName}.features or { };
-        os-features = if pkgs.stdenv.isDarwin then lib.remove "virtiofs" all-features else all-features;
+        os-features =
+          if pkgs.stdenv.hostPlatform.isDarwin then lib.remove "virtiofs" all-features else all-features;
         reduced-features = lib.remove "tracing-chrome" (lib.remove "tracy" os-features);
       in
       package.override (old: {

@@ -94,9 +94,9 @@ impl std::fmt::Debug for Fetch {
             Fetch::URL { url, exp_hash } => {
                 let url = redact_url(url);
                 if let Some(exp_hash) = exp_hash {
-                    write!(f, "URL [url: {}, exp_hash: Some({})]", &url, exp_hash)
+                    write!(f, "URL [url: {}, exp_hash: Some({})]", url, exp_hash)
                 } else {
-                    write!(f, "URL [url: {}, exp_hash: None]", &url)
+                    write!(f, "URL [url: {}, exp_hash: None]", url)
                 }
             }
             Fetch::Tarball {
@@ -117,11 +117,11 @@ impl std::fmt::Debug for Fetch {
             }
             Fetch::NAR { url, hash } => {
                 let url = redact_url(url);
-                write!(f, "NAR [url: {}, hash: {}]", &url, hash)
+                write!(f, "NAR [url: {}, hash: {}]", url, hash)
             }
             Fetch::Executable { url, hash } => {
                 let url = redact_url(url);
-                write!(f, "Executable [url: {}, hash: {}]", &url, hash)
+                write!(f, "Executable [url: {}, hash: {}]", url, hash)
             }
             Fetch::Git() => todo!(),
         }

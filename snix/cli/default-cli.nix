@@ -17,5 +17,5 @@ depot.snix.cli.make-cli {
     depot.snix.cli.store
   ];
   base = depot.snix.cli.base;
-  features = lib.optional pkgs.stdenv.isLinux "virtiofs";
+  features = lib.optional pkgs.stdenv.hostPlatform.isLinux "virtiofs";
 }

@@ -13,7 +13,7 @@
   features =
     old.features
     # virtiofs feature currently fails to build on Darwin
-    ++ lib.optional pkgs.stdenv.isLinux "virtiofs";
+    ++ lib.optional pkgs.stdenv.hostPlatform.isLinux "virtiofs";
 })).overrideAttrs
   (old: rec {
     meta.ci = {

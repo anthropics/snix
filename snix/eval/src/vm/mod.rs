@@ -970,7 +970,7 @@ where
                             .io_handle
                             .as_ref()
                             .get_env(OsStr::new("HOME"))
-                            .and_then(|h| if h.is_empty() { None } else { Some(h) })
+                            .filter(|h| !h.is_empty())
                             .map(PathBuf::from);
 
                         match home_dir {

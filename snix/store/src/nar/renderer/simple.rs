@@ -73,7 +73,7 @@ where
                 Some(blob_reader) => Ok(BufReader::new(blob_reader)),
                 None => Err(RenderError::NARWriterError(io::Error::new(
                     io::ErrorKind::NotFound,
-                    format!("blob with digest {} not found", &digest),
+                    format!("blob with digest {} not found", digest),
                 ))),
             }?;
 

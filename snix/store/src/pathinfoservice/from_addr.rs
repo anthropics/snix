@@ -76,11 +76,11 @@ mod tests {
     /// This configures redb with a host, not path, which should fail.
     #[case::redb_invalid_host("redb://foo.example", false)]
     /// This configures redb with a valid path, but with authority component, which should fail.
-    #[case::redb_invalid_path_authority(&format!("redb://{}", &TMPDIR_REDB_1.path().join("foo").to_str().unwrap()), false)]
+    #[case::redb_invalid_path_authority(&format!("redb://{}", TMPDIR_REDB_1.path().join("foo").to_str().unwrap()), false)]
     /// This configures redb with a valid path, which should succeed.
-    #[case::redb_valid_path(&format!("redb:{}", &TMPDIR_REDB_1.path().join("foo").to_str().unwrap()), true)]
+    #[case::redb_valid_path(&format!("redb:{}", TMPDIR_REDB_1.path().join("foo").to_str().unwrap()), true)]
     /// This configures redb with a host, and a valid path path, which should fail.
-    #[case::redb_invalid_host_with_valid_path(&format!("redb://foo.example{}", &TMPDIR_REDB_2.path().join("bar").to_str().unwrap()), false)]
+    #[case::redb_invalid_host_with_valid_path(&format!("redb://foo.example{}", TMPDIR_REDB_2.path().join("bar").to_str().unwrap()), false)]
     /// This configures redb in-memory.
     #[case::redb_memory_valid("redb+memory:", true)]
     /// This configures redb in-memory, but wrongly adds a path.

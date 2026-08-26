@@ -111,7 +111,7 @@ in
         PROTO_ROOT = depot.snix.build.protos.protos;
         nativeBuildInputs = [ pkgs.protobuf ];
         SNIX_BUILD_SANDBOX_SHELL =
-          if pkgs.stdenv.isLinux then pkgs.pkgsStatic.busybox + "/bin/sh" else "/bin/sh";
+          if pkgs.stdenv.hostPlatform.isLinux then pkgs.pkgsStatic.busybox + "/bin/sh" else "/bin/sh";
       };
 
       snix-build-glue = prev: {

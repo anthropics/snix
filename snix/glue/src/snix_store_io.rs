@@ -173,7 +173,7 @@ impl EvalIO for SnixStoreIO {
                                     );
                                     Err(io::Error::new(
                                         io::ErrorKind::NotFound,
-                                        format!("blob {} not found", &digest),
+                                        format!("blob {} not found", digest),
                                     ))
                                 }
                             }

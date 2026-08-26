@@ -111,7 +111,6 @@ in
           old.patches
           ++ (with depot.third_party.lix_forgejo.patches; [
             signin_redirect
-            api_dont_notify
             forgejo_is_now_gerrit_native
             forgejo_knows_about_gerrit
           ]);

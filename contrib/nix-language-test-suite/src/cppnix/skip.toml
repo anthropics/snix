@@ -50,9 +50,6 @@ paths = [
   #   /nix/store/lc5bhdsagh8mrxkdbvdkmw9nv1vykavn-foo.drv
   "builtins/derivation/invalid-structured-attrs",
 
-  # Our version of Lix does not reject it yet.
-  "builtins/derivation/json-key",
-
   # Lix is more strict here and fails with
   # "unsupported input attribute 'foo' for the 'github' scheme"
   #

@@ -100,8 +100,8 @@ where
             let channel =
                 snix_castore::tonic::TonicConnector::from_url(&grpc_url)?.connect_expect_lazy();
 
-            let instance_name_layered = format!("{}-layered", &instance_name);
-            let instance_name_grpc = format!("{}-grpc", &instance_name);
+            let instance_name_layered = format!("{}-layered", instance_name);
+            let instance_name_grpc = format!("{}-grpc", instance_name);
 
             (
                 blobservice::Cache::new(

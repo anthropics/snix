@@ -103,7 +103,7 @@ impl Segments {
                                     .ok_or_else(|| {
                                         io::Error::new(
                                             io::ErrorKind::NotFound,
-                                            format!("blob {0} not found", &digest),
+                                            format!("blob {0} not found", digest),
                                         )
                                     })?;
 

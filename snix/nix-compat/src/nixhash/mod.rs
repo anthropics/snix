@@ -507,16 +507,14 @@ mod tests {
             hex!("7e022bdd3c851830173f9faaa006a230a0e0fdad4c953e85bff4bf0da036e12f");
 
         // passing hash algo out of band should succeed
-        let nix_hash = NixHash::from_str(
-            &format!("sha256-{}", &broken_base64),
-            Some(HashAlgo::Sha256),
-        )
-        .expect("must succeed");
+        let nix_hash =
+            NixHash::from_str(&format!("sha256-{}", broken_base64), Some(HashAlgo::Sha256))
+                .expect("must succeed");
         assert_eq!(&expected_digest, &nix_hash.digest_as_bytes());
 
         // not passing hash algo out of band should succeed
         let nix_hash =
-            NixHash::from_str(&format!("sha256-{}", &broken_base64), None).expect("must succeed");
+            NixHash::from_str(&format!("sha256-{}", broken_base64), None).expect("must succeed");
         assert_eq!(&expected_digest, &nix_hash.digest_as_bytes());
 
         // not passing SRI, but hash algo out of band should fail
@@ -536,13 +534,13 @@ mod tests {
             hex!("b3271e24c5049270430872bc786b3aad45372109fe1e741f5117c2ac3c583daf");
 
         let nix_hash =
-            NixHash::from_str(&format!("sha256-{}", &weird_base64), Some(HashAlgo::Sha256))
+            NixHash::from_str(&format!("sha256-{}", weird_base64), Some(HashAlgo::Sha256))
                 .expect("must succeed");
         assert_eq!(&expected_digest, &nix_hash.digest_as_bytes());
 
         // not passing hash algo out of band should succeed
         let nix_hash =
-            NixHash::from_str(&format!("sha256-{}", &weird_base64), None).expect("must succeed");
+            NixHash::from_str(&format!("sha256-{}", weird_base64), None).expect("must succeed");
         assert_eq!(&expected_digest, &nix_hash.digest_as_bytes());
 
         // not passing SRI, but hash algo out of band should fail

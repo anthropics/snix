@@ -159,7 +159,7 @@ impl BuildState {
                 let span = Span::current();
                 span.pb_start();
                 span.pb_set_style(&snix_tracing::PB_SPINNER_STYLE);
-                span.pb_set_message(&format!("⏳Waiting for inputs {}", &store_path));
+                span.pb_set_message(&format!("⏳Waiting for inputs {}", store_path));
 
                 // derivation_to_build_request needs castore nodes for all inputs.
                 // Provide them, which means, here is where we recursively build
@@ -207,7 +207,7 @@ impl BuildState {
                     .chain(resolved_inputs.keys().cloned())
                     .collect();
 
-                span.pb_set_message(&format!("🔨Building {}", &store_path));
+                span.pb_set_message(&format!("🔨Building {}", store_path));
 
                 // create a build
                 let build_result = self

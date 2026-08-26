@@ -40,7 +40,7 @@ where
         span.record("blob.digest", req_digest.to_string());
 
         match self.blob_service.chunks(&req_digest).await {
-            Ok(None) => Err(Status::not_found(format!("blob {} not found", &req_digest))),
+            Ok(None) => Err(Status::not_found(format!("blob {} not found", req_digest))),
             Ok(Some(chunk_metas)) => Ok(Response::new(super::StatBlobResponse {
                 chunks: chunk_metas,
                 ..Default::default()
@@ -73,7 +73,7 @@ where
                     ReaderStream::new(r).map(|chunk| Ok(super::BlobChunk { data: chunk? }));
                 Ok(Response::new(Box::pin(chunks_stream)))
             }
-            Ok(None) => Err(Status::not_found(format!("blob {} not found", &req_digest))),
+            Ok(None) => Err(Status::not_found(format!("blob {} not found", req_digest))),
             Err(e) => {
                 warn!(err=%e, "failed to call open_read");
                 Err(e.into())

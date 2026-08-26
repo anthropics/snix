@@ -92,7 +92,7 @@ async fn get_range(
             ..GetObjectRequest::default()
         })
         .await
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        .map_err(io::Error::other)?;
 
     let mut body = vec![];
     resp.body
@@ -112,7 +112,7 @@ fn exact_chunks(mut buf: Box<[u8]>) -> Option<Box<[[u8; 32]]>> {
         let ptr = buf.as_mut_ptr();
         let len = buf.len();
 
-        if len % 32 != 0 {
+        if !len.is_multiple_of(32) {
             return None;
         }
 
@@ -204,7 +204,7 @@ async fn func(
         ..Default::default()
     })
     .await
-    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    .map_err(io::Error::other)?;
 
     tracing::info!("… and it worked!");
 

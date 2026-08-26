@@ -27,7 +27,7 @@
             "xp-composition-url-refs"
           ]
           # virtiofs feature currently fails to build on Darwin
-          ++ lib.optional pkgs.stdenv.isLinux "virtiofs"
+          ++ lib.optional pkgs.stdenv.hostPlatform.isLinux "virtiofs"
         );
         override.testPreRun = ''
           export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt

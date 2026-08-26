@@ -138,7 +138,7 @@ fn eval_test(
         }
 
         if matches!(nix_version, NixVersion::LixLatest) {
-            cmd.args(["--extra-deprecated-features", "url-literals"]);
+            cmd.args(["--extra-deprecated-features", "url-literals ancient-let"]);
         }
 
         if test_case.runtime_opts.xml_output {

@@ -22,7 +22,7 @@
             "xp-store-composition-cli"
           ]
           # virtiofs feature currently fails to build on Darwin
-          ++ lib.optional pkgs.stdenv.isLinux "virtiofs"
+          ++ lib.optional pkgs.stdenv.hostPlatform.isLinux "virtiofs"
         );
       }
     );

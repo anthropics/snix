@@ -69,10 +69,7 @@ pub async fn parse_response<'a>(
 
             let code = response.code.unwrap();
             if code != 200 {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("HTTP response {code}"),
-                ));
+                return Err(io::Error::other(format!("HTTP response {code}")));
             }
 
             break get_content_length(response.headers)?;

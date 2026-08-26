@@ -3,7 +3,7 @@ use std::env;
 fn main() {
     println!(
         "cargo:rustc-env=SNIX_CURRENT_SYSTEM={}",
-        &env::var("TARGET").unwrap()
+        env::var("TARGET").unwrap()
     );
     println!("cargo:rerun-if-changed-env=TARGET");
 

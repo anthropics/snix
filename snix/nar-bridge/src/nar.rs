@@ -272,7 +272,7 @@ mod tests {
             .await
             .assert_status_not_found();
 
-        let valid_url = &format!("/nar/snix-castore/{}", &*NAR_STR_SYMLINK);
+        let valid_url = &format!("/nar/snix-castore/{}", *NAR_STR_SYMLINK);
         let qps = &[("narsize", &NAR_CONTENTS_SYMLINK.len().to_string())];
 
         // Missing narsize should be BadRequest

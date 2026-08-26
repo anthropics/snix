@@ -23,7 +23,7 @@ pkgs.mkShell {
     pkgs.protobuf
     pkgs.tracy_0_13
   ]
-  ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+  ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
     pkgs.perf
     pkgs.bubblewrap
     pkgs.cbtemulator
@@ -34,7 +34,7 @@ pkgs.mkShell {
 
   # Use the mold linker for faster link times.
   # mold is an ELF linker, so this only applies on Linux.
-  env = pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+  env = pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
     RUSTFLAGS = "-C link-arg=-fuse-ld=mold";
   };
 
@@ -45,7 +45,7 @@ pkgs.mkShell {
   # refactorings are not observed as eval perf changes.
   shellHook = ''
     export SNIX_BUILD_SANDBOX_SHELL=${
-      if pkgs.stdenv.isLinux then pkgs.busybox-sandbox-shell + "/bin/busybox" else "/bin/sh"
+      if pkgs.stdenv.hostPlatform.isLinux then pkgs.busybox-sandbox-shell + "/bin/busybox" else "/bin/sh"
     }
     export SNIX_BENCH_NIX_PATH=nixpkgs=${toString pkgs.path}
 

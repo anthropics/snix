@@ -3,9 +3,6 @@
 { ... }:
 {
   patches = {
-    # Make it possible not to be notified upon issue creation.
-    # Minimize noise.
-    api_dont_notify = ./api-dont-notify.patch;
     # Sign in redirection to the OAuth 2 handler.
     signin_redirect = ./signin-redirect.patch;
     # Series to make Forgejo more Gerrit compatible.
