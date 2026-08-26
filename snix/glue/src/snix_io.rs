@@ -11,6 +11,8 @@ use std::ffi::{OsStr, OsString};
 use std::io::{self, Cursor};
 use std::path::{Path, PathBuf};
 
+const COREPKGS_FETCHURL: &str = "/__corepkgs__/fetchurl.nix";
+
 // TODO: Merge this together with SnixStoreIO?
 pub struct SnixIO<T> {
     // Actual underlying [EvalIO] implementation.
@@ -50,9 +52,7 @@ where
         //
         // This workaround is similar to what cppnix does for passing
         // the path through.
-        //
-        // TODO: this comparison is bad we should use the sane path library.
-        if path.starts_with("/__corepkgs__/fetchurl.nix") {
+        if path == COREPKGS_FETCHURL {
             return Ok(Box::new(Cursor::new(include_bytes!("fetchurl.nix"))));
         }
 
@@ -60,6 +60,10 @@ where
     }
 
     fn file_type(&self, path: &Path) -> io::Result<FileType> {
+        if path == COREPKGS_FETCHURL {
+            return Ok(FileType::Regular);
+        }
+
         self.actual.as_ref().file_type(path)
     }
 
