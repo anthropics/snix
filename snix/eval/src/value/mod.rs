@@ -322,21 +322,34 @@ impl Value {
         kind: CoercionKind,
         span: Span,
     ) -> Result<Value, ErrorKind> {
+        enum Item {
+            Value(Value),
+            WithSeparator(Value),
+            Space,
+        }
+
         let mut result = BString::default();
-        let mut vals = vec![self];
-        // Track if we are coercing the first value of a list to correctly emit
-        // separating white spaces.
-        let mut is_list_head = None;
-        // FIXME(raitobezarius): as per https://b.tvl.fyi/issues/364
-        // we might be interested into more powerful context-related coercion kinds.
+        let mut vals = vec![Item::Value(self)];
+        // FUTUREWORK: maybe more powerful context-related coercion kinds (#32)?
         let mut context: NixContext = NixContext::new();
 
         loop {
-            let value = if let Some(v) = vals.pop() {
-                v.force(co, span).await?
-            } else {
-                return Ok(Value::String(NixString::new_context_from(context, result)));
+            let (value, space_after) = match vals.pop() {
+                None => return Ok(Value::String(NixString::new_context_from(context, result))),
+                Some(Item::Space) => {
+                    result.push(b' ');
+                    continue;
+                }
+                Some(Item::Value(value)) => (value.force(co, span).await?, false),
+                Some(Item::WithSeparator(value)) => (value.force(co, span).await?, true),
             };
+
+            // Separate non-final list elements with a space, except when the element is
+            // an empty list. Queue the space so nested values are fully coerced before
+            // the separator is emitted.
+            if space_after && !matches!(&value, Value::List(list) if list.is_empty()) {
+                vals.push(Item::Space);
+            }
             let coerced: Result<BString, _> = match (value, kind) {
                 // coercions that are always done
                 (Value::String(mut s), _) => {
@@ -391,10 +404,10 @@ impl Value {
                         // Recurse on the result, as attribute set coercion
                         // actually works recursively, e.g. you can even return
                         // /another/ set with a __toString attr.
-                        vals.push(result);
+                        vals.push(Item::Value(result));
                         continue;
                     } else if let Some(out_path) = attrs.select("outPath") {
-                        vals.push(out_path.clone());
+                        vals.push(Item::Value(out_path.clone()));
                         continue;
                     } else {
                         return Err(ErrorKind::NotCoercibleToString { from: "set", kind });
@@ -415,14 +428,13 @@ impl Value {
 
                 // Lists are coerced by coercing their elements and interspersing spaces
                 (Value::List(list), CoercionKind { strong: true, .. }) => {
-                    for elem in list.into_iter().rev() {
-                        vals.push(elem);
-                    }
-                    // In case we are coercing a list within a list we don't want
-                    // to touch this. Since the algorithm is nonrecursive, the
-                    // space would not have been created yet (due to continue).
-                    if is_list_head.is_none() {
-                        is_list_head = Some(true);
+                    let len = list.len();
+                    for (i, value) in list.into_iter().enumerate().rev() {
+                        if i < len - 1 {
+                            vals.push(Item::WithSeparator(value))
+                        } else {
+                            vals.push(Item::Value(value))
+                        }
                     }
                     continue;
                 }
@@ -450,14 +462,6 @@ impl Value {
                     panic!("Snix bug: .coerce_to_string() called on internal value")
                 }
             };
-
-            if let Some(head) = is_list_head {
-                if !head {
-                    result.push(b' ');
-                } else {
-                    is_list_head = Some(false);
-                }
-            }
 
             result.push_str(&coerced?);
         }
