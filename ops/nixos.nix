@@ -27,11 +27,13 @@ rec {
           ("nixos=" + nixpkgsStorePath)
           ("nixpkgs=" + nixpkgsStorePath)
         ];
+
+      nixpkgs.pkgs = pkgs;
     };
 
   nixosFor =
     configuration:
-    (depot.third_party.nixos {
+    (import (depot.third_party.sources.nixpkgs + "/nixos") {
       configuration =
         { ... }:
         {
