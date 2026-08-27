@@ -73,11 +73,4 @@ in [
     __structuredAttrs = true;
     outputs = ["out"];
   }).drvPath
-
-  # structured attrs, setting __json, which will show up as an encoded __json key inside the __json.
-  (builtins.derivation (base // {
-    __structuredAttrs = true;
-    foo = "bar";
-    __json = "foo";
-  })).drvPath
 ]

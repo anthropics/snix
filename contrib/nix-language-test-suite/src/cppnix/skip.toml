@@ -27,6 +27,9 @@ paths = [
   #   /nix/store/lc5bhdsagh8mrxkdbvdkmw9nv1vykavn-foo.drv
   "builtins/derivation/invalid-structured-attrs",
 
+  # Nix still accepts this
+  "builtins/derivation/json-key",
+
   # something changed in storePath behaviour between 2.3 and 2.30,
   # and it makes the same test failing in 2.3
   #
@@ -47,6 +50,9 @@ paths = [
   #   /nix/store/lc5bhdsagh8mrxkdbvdkmw9nv1vykavn-foo.drv
   "builtins/derivation/invalid-structured-attrs",
 
+  # Our version of Lix does not reject it yet.
+  "builtins/derivation/json-key",
+
   # Lix is more strict here and fails with
   # "unsupported input attribute 'foo' for the 'github' scheme"
   #
@@ -62,3 +68,7 @@ paths = [
 ]
 
 [nix_latest]
+paths = [
+  # Nix still accepts this
+  "builtins/derivation/json-key",
+]

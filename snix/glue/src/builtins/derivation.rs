@@ -293,6 +293,10 @@ pub(crate) mod derivation_builtins {
 
                 // all other args.
                 _ => {
+                    if arg_name == builder::structured_attrs::JSON_KEY {
+                        return Err(DerivationError::StructuredAttrsJsonKeyPresent.into());
+                    }
+
                     match structured_attrs {
                         // In SA case, force and add to structured attrs.
                         Some(ref mut structured_attrs) => {
@@ -309,9 +313,6 @@ pub(crate) mod derivation_builtins {
                         }
                         // In non-SA case, coerce to string and add to env.
                         None => {
-                            if arg_name == builder::structured_attrs::JSON_KEY {
-                                return Err(DerivationError::StructuredAttrsJsonKeyPresent.into());
-                            }
                             let val_str = try_cek_to_value!(
                                 strong_importing_coerce_to_string(&co, value).await
                             );
