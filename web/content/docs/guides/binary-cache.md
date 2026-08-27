@@ -95,9 +95,7 @@ services.nar-bridge = {
 ### nginx
 Both of these services listen on local unix domain sockets.
 
-To expose them, you can use nginx. [^nginx-grpc].
-
-The example below exposes the `snix-[ca]store` gRPC endpoints, as well as all read paths for nar-bridge (rendering NARInfos, NARs and nar-listings).
+To expose them, we will use nginx. The example below exposes the `snix-[ca]store` gRPC endpoints, as well as all read paths for nar-bridge (rendering NARInfos, NARs and nar-listings).
 We don't expose the write path for nar-bridge, as we use snix gRPC for cache uploads. All write paths and otherwise costly requests require mTLS.
 
 Note the example below also uses [nginx' support for `useGrpcErrorPages`][nginx-use-grpc-error-pages] merged into nixpkgs, so make sure your pin is past that commit.
