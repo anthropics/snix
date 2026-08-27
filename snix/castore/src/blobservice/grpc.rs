@@ -374,7 +374,7 @@ mod tests {
         });
 
         // wait for the socket to be created
-        Retry::spawn(
+        Retry::start(
             ExponentialBackoff::from_millis(20).max_delay(Duration::from_secs(10)),
             || async {
                 if socket_path.exists() {

@@ -94,7 +94,7 @@ impl BigtableDirectoryService {
             .spawn()
             .expect("failed to spawn emulator");
 
-        Retry::spawn(
+        Retry::start(
             ExponentialBackoff::from_millis(20)
                 .max_delay(Duration::from_secs(1))
                 .take(3),
