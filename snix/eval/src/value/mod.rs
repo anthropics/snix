@@ -1,16 +1,16 @@
 //! This module implements the backing representation of runtime
 //! values in the Nix language.
-use std::cmp::Ordering;
-use std::fmt::Display;
-use std::num::{NonZeroI32, NonZeroUsize};
-use std::path::PathBuf;
-use std::rc::Rc;
-use std::sync::LazyLock;
-
 use bstr::{BString, ByteVec};
 use codemap::Span;
 use lexical_core::format::CXX_LITERAL;
 use serde::Deserialize;
+use std::cmp::Ordering;
+use std::fmt::Display;
+use std::io::Write;
+use std::num::{NonZeroI32, NonZeroUsize};
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::sync::LazyLock;
 
 #[cfg(feature = "arbitrary")]
 mod arbitrary;
@@ -350,13 +350,15 @@ impl Value {
             if space_after && !matches!(&value, Value::List(list) if list.is_empty()) {
                 vals.push(Item::Space);
             }
-            let coerced: Result<BString, _> = match (value, kind) {
+
+            match (value, kind) {
                 // coercions that are always done
                 (Value::String(mut s), _) => {
                     if let Some(ctx) = s.take_context() {
                         context.extend(*ctx);
                     }
-                    Ok((*s).into())
+
+                    result.push_str(s);
                 }
 
                 // TODO(sterni): Think about proper encoding handling here. This needs
@@ -376,7 +378,7 @@ impl Value {
                     context = context.append(NixContextElement::Plain(
                         imported.to_string_lossy().to_string(),
                     ));
-                    Ok(imported.into_os_string().into_encoded_bytes().into())
+                    result.push_str(imported.as_os_str().as_encoded_bytes());
                 }
                 (
                     Value::Path(p),
@@ -384,7 +386,9 @@ impl Value {
                         import_paths: false,
                         ..
                     },
-                ) => Ok(p.into_os_string().into_encoded_bytes().into()),
+                ) => {
+                    result.push_str(p.as_os_str().as_encoded_bytes());
+                }
 
                 // Attribute sets can be converted to strings if they either have an
                 // `__toString` attribute which holds a function that receives the
@@ -416,14 +420,19 @@ impl Value {
 
                 // strong coercions
                 (Value::Null, CoercionKind { strong: true, .. })
-                | (Value::Bool(false), CoercionKind { strong: true, .. }) => Ok("".into()),
-                (Value::Bool(true), CoercionKind { strong: true, .. }) => Ok("1".into()),
-
-                (Value::Integer(i), CoercionKind { strong: true, .. }) => Ok(format!("{i}").into()),
+                | (Value::Bool(false), CoercionKind { strong: true, .. }) => {
+                    // empty string
+                }
+                (Value::Bool(true), CoercionKind { strong: true, .. }) => {
+                    result.push_str("1");
+                }
+                (Value::Integer(i), CoercionKind { strong: true, .. }) => {
+                    write!(&mut result, "{i}").unwrap();
+                }
                 (Value::Float(f), CoercionKind { strong: true, .. }) => {
                     // contrary to normal Display, coercing a float to a string will
                     // result in unconditional 6 decimal places
-                    Ok(format!("{f:.6}").into())
+                    write!(&mut result, "{f:.6}").unwrap();
                 }
 
                 // Lists are coerced by coercing their elements and interspersing spaces
@@ -447,10 +456,12 @@ impl Value {
                 | val @ (Value::Bool(_), _)
                 | val @ (Value::Integer(_), _)
                 | val @ (Value::Float(_), _)
-                | val @ (Value::List(_), _) => Err(ErrorKind::NotCoercibleToString {
-                    from: val.0.type_of(),
-                    kind,
-                }),
+                | val @ (Value::List(_), _) => {
+                    return Err(ErrorKind::NotCoercibleToString {
+                        from: val.0.type_of(),
+                        kind,
+                    });
+                }
 
                 (c @ Value::Catchable(_), _) => return Ok(c),
 
@@ -462,8 +473,6 @@ impl Value {
                     panic!("Snix bug: .coerce_to_string() called on internal value")
                 }
             };
-
-            result.push_str(&coerced?);
         }
     }
 
