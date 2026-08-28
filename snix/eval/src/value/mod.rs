@@ -411,10 +411,8 @@ impl Value {
                         // actually works recursively, e.g. you can even return
                         // /another/ set with a __toString attr.
                         vals.push(Item::Value(result));
-                        continue;
                     } else if let Some(out_path) = attrs.select("outPath") {
                         vals.push(Item::Value(out_path.clone()));
-                        continue;
                     } else {
                         return Err(ErrorKind::NotCoercibleToString { from: "set", kind });
                     }
@@ -447,7 +445,6 @@ impl Value {
                             vals.push(Item::Value(value))
                         }
                     }
-                    continue;
                 }
 
                 (Value::Thunk(_), _) => panic!("Snix bug: force returned unforced thunk"),
