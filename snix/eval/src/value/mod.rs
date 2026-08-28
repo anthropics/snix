@@ -328,15 +328,14 @@ impl Value {
             Space,
         }
 
-        let mut result = BString::default();
-        let mut vals = vec![Item::Value(self)];
-        // FUTUREWORK: maybe more powerful context-related coercion kinds (#32)?
-        let mut context: NixContext = NixContext::new();
+        let mut out = BString::default();
+        let mut out_context: NixContext = NixContext::new();
 
-        while let Some(item) = vals.pop() {
+        let mut worklist = vec![Item::Value(self)];
+        while let Some(item) = worklist.pop() {
             let value = match item {
                 Item::Space => {
-                    result.push(b' ');
+                    out.push(b' ');
                     continue;
                 }
                 Item::Value(value) => value.force(co, span).await?,
@@ -347,7 +346,7 @@ impl Value {
                     // an empty list. Queue the space so nested values are fully coerced before
                     // the separator is emitted.
                     if !matches!(&value, Value::List(list) if list.is_empty()) {
-                        vals.push(Item::Space);
+                        worklist.push(Item::Space);
                     }
                     value
                 }
@@ -357,10 +356,10 @@ impl Value {
                 // coercions that are always done
                 (Value::String(mut s), _) => {
                     if let Some(ctx) = s.take_context() {
-                        context.extend(*ctx);
+                        out_context.extend(*ctx);
                     }
 
-                    result.push_str(s);
+                    out.push_str(s);
                 }
 
                 // TODO(sterni): Think about proper encoding handling here. This needs
@@ -377,10 +376,10 @@ impl Value {
                     let imported = generators::request_path_import(co, *p).await;
                     // When we import a path from the evaluator, we must attach
                     // its original path as its context.
-                    context = context.append(NixContextElement::Plain(
+                    out_context = out_context.append(NixContextElement::Plain(
                         imported.to_string_lossy().to_string(),
                     ));
-                    result.push_str(imported.as_os_str().as_encoded_bytes());
+                    out.push_str(imported.as_os_str().as_encoded_bytes());
                 }
                 (
                     Value::Path(p),
@@ -389,7 +388,7 @@ impl Value {
                         ..
                     },
                 ) => {
-                    result.push_str(p.as_os_str().as_encoded_bytes());
+                    out.push_str(p.as_os_str().as_encoded_bytes());
                 }
 
                 // Attribute sets can be converted to strings if they either have an
@@ -410,9 +409,9 @@ impl Value {
                         // Recurse on the result, as attribute set coercion
                         // actually works recursively, e.g. you can even return
                         // /another/ set with a __toString attr.
-                        vals.push(Item::Value(result));
+                        worklist.push(Item::Value(result));
                     } else if let Some(out_path) = attrs.select("outPath") {
-                        vals.push(Item::Value(out_path.clone()));
+                        worklist.push(Item::Value(out_path.clone()));
                     } else {
                         return Err(ErrorKind::NotCoercibleToString { from: "set", kind });
                     }
@@ -424,15 +423,15 @@ impl Value {
                     // empty string
                 }
                 (Value::Bool(true), CoercionKind { strong: true, .. }) => {
-                    result.push_str("1");
+                    out.push_str("1");
                 }
                 (Value::Integer(i), CoercionKind { strong: true, .. }) => {
-                    write!(&mut result, "{i}").unwrap();
+                    write!(&mut out, "{i}").unwrap();
                 }
                 (Value::Float(f), CoercionKind { strong: true, .. }) => {
                     // contrary to normal Display, coercing a float to a string will
                     // result in unconditional 6 decimal places
-                    write!(&mut result, "{f:.6}").unwrap();
+                    write!(&mut out, "{f:.6}").unwrap();
                 }
 
                 // Lists are coerced by coercing their elements and interspersing spaces
@@ -440,9 +439,9 @@ impl Value {
                     let len = list.len();
                     for (i, value) in list.into_iter().enumerate().rev() {
                         if i < len - 1 {
-                            vals.push(Item::WithSeparator(value))
+                            worklist.push(Item::WithSeparator(value))
                         } else {
-                            vals.push(Item::Value(value))
+                            worklist.push(Item::Value(value))
                         }
                     }
                 }
@@ -473,7 +472,7 @@ impl Value {
                 }
             }
         }
-        Ok(Value::String(NixString::new_context_from(context, result)))
+        Ok(Value::String(NixString::new_context_from(out_context, out)))
     }
 
     pub(crate) async fn nix_eq_owned_genco(
