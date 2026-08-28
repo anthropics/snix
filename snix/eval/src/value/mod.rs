@@ -333,23 +333,25 @@ impl Value {
         // FUTUREWORK: maybe more powerful context-related coercion kinds (#32)?
         let mut context: NixContext = NixContext::new();
 
-        loop {
-            let (value, space_after) = match vals.pop() {
-                None => return Ok(Value::String(NixString::new_context_from(context, result))),
-                Some(Item::Space) => {
+        while let Some(item) = vals.pop() {
+            let value = match item {
+                Item::Space => {
                     result.push(b' ');
                     continue;
                 }
-                Some(Item::Value(value)) => (value.force(co, span).await?, false),
-                Some(Item::WithSeparator(value)) => (value.force(co, span).await?, true),
-            };
+                Item::Value(value) => value.force(co, span).await?,
+                Item::WithSeparator(value) => {
+                    let value = value.force(co, span).await?;
 
-            // Separate non-final list elements with a space, except when the element is
-            // an empty list. Queue the space so nested values are fully coerced before
-            // the separator is emitted.
-            if space_after && !matches!(&value, Value::List(list) if list.is_empty()) {
-                vals.push(Item::Space);
-            }
+                    // Separate non-final list elements with a space, except when the element is
+                    // an empty list. Queue the space so nested values are fully coerced before
+                    // the separator is emitted.
+                    if !matches!(&value, Value::List(list) if list.is_empty()) {
+                        vals.push(Item::Space);
+                    }
+                    value
+                }
+            };
 
             match (value, kind) {
                 // coercions that are always done
@@ -472,8 +474,9 @@ impl Value {
                 | (Value::FinaliseRequest(_), _) => {
                     panic!("Snix bug: .coerce_to_string() called on internal value")
                 }
-            };
+            }
         }
+        Ok(Value::String(NixString::new_context_from(context, result)))
     }
 
     pub(crate) async fn nix_eq_owned_genco(
