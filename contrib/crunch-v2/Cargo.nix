@@ -822,6 +822,25 @@ rec {
         ];
 
       };
+      "block-buffer 0.12.1" = rec {
+        crateName = "block-buffer";
+        version = "0.12.1";
+        edition = "2024";
+        sha256 = "1ak0cvmxz3yifqmzv6aba9606brsz7d5g3piv5xdcvjsx7dwgxnj";
+        libName = "block_buffer";
+        authors = [
+          "RustCrypto Developers"
+        ];
+        dependencies = [
+          {
+            name = "hybrid-array";
+            packageId = "hybrid-array";
+          }
+        ];
+        features = {
+          "zeroize" = [ "dep:zeroize" ];
+        };
+      };
       "block-buffer 0.9.0" = rec {
         crateName = "block-buffer";
         version = "0.9.0";
@@ -1979,7 +1998,7 @@ rec {
         ];
 
       };
-      "crypto-common" = rec {
+      "crypto-common 0.1.7" = rec {
         crateName = "crypto-common";
         version = "0.1.7";
         edition = "2018";
@@ -2004,6 +2023,30 @@ rec {
           "rand_core" = [ "dep:rand_core" ];
         };
         resolvedDefaultFeatures = [ "std" ];
+      };
+      "crypto-common 0.2.2" = rec {
+        crateName = "crypto-common";
+        version = "0.2.2";
+        edition = "2024";
+        sha256 = "0lql5wjlrjkd3r0w32rwbgqfmgg84ms3h65ldnlckmkc3nb4qvnf";
+        libName = "crypto_common";
+        authors = [
+          "RustCrypto Developers"
+        ];
+        dependencies = [
+          {
+            name = "hybrid-array";
+            packageId = "hybrid-array";
+          }
+        ];
+        features = {
+          "getrandom" = [
+            "rand_core"
+            "dep:getrandom"
+          ];
+          "rand_core" = [ "dep:rand_core" ];
+          "zeroize" = [ "hybrid-array/zeroize" ];
+        };
       };
       "crypto-mac" = rec {
         crateName = "crypto-mac";
@@ -2227,7 +2270,7 @@ rec {
           }
           {
             name = "crypto-common";
-            packageId = "crypto-common";
+            packageId = "crypto-common 0.1.7";
           }
         ];
         features = {
@@ -2252,6 +2295,48 @@ rec {
           "core-api"
           "default"
           "std"
+        ];
+      };
+      "digest 0.11.3" = rec {
+        crateName = "digest";
+        version = "0.11.3";
+        edition = "2024";
+        sha256 = "1hnmhd4rkybr11292w42pz9ppzx1h49glrhqg107k4s1b2xnvpgi";
+        authors = [
+          "RustCrypto Developers"
+        ];
+        dependencies = [
+          {
+            name = "block-buffer";
+            packageId = "block-buffer 0.12.1";
+            optional = true;
+          }
+          {
+            name = "crypto-common";
+            packageId = "crypto-common 0.2.2";
+            rename = "common";
+          }
+        ];
+        features = {
+          "blobby" = [ "dep:blobby" ];
+          "block-api" = [ "dep:block-buffer" ];
+          "default" = [ "block-api" ];
+          "dev" = [ "blobby" ];
+          "getrandom" = [
+            "common/getrandom"
+            "rand_core"
+          ];
+          "mac" = [ "dep:ctutils" ];
+          "oid" = [ "dep:const-oid" ];
+          "rand_core" = [ "common/rand_core" ];
+          "zeroize" = [
+            "dep:zeroize"
+            "block-buffer?/zeroize"
+          ];
+        };
+        resolvedDefaultFeatures = [
+          "block-api"
+          "default"
         ];
       };
       "digest 0.9.0" = rec {
@@ -4074,6 +4159,32 @@ rec {
         ];
 
       };
+      "hybrid-array" = rec {
+        crateName = "hybrid-array";
+        version = "0.4.14";
+        edition = "2024";
+        sha256 = "0srzagwa3b41ildy4x3d7ckng51dj7aprkchnaysfbqm5asi8wbh";
+        libName = "hybrid_array";
+        authors = [
+          "RustCrypto Developers"
+        ];
+        dependencies = [
+          {
+            name = "typenum";
+            packageId = "typenum";
+            features = [ "const-generics" ];
+          }
+        ];
+        features = {
+          "arbitrary" = [ "dep:arbitrary" ];
+          "bytemuck" = [ "dep:bytemuck" ];
+          "ctutils" = [ "dep:ctutils" ];
+          "serde" = [ "dep:serde" ];
+          "subtle" = [ "dep:subtle" ];
+          "zerocopy" = [ "dep:zerocopy" ];
+          "zeroize" = [ "dep:zeroize" ];
+        };
+      };
       "hyper" = rec {
         crateName = "hyper";
         version = "0.14.32";
@@ -5240,7 +5351,7 @@ rec {
           }
           {
             name = "digest";
-            packageId = "digest 0.10.7";
+            packageId = "digest 0.11.3";
             optional = true;
           }
           {
@@ -13228,6 +13339,7 @@ rec {
           "scale-info" = [ "dep:scale-info" ];
           "scale_info" = [ "scale-info/derive" ];
         };
+        resolvedDefaultFeatures = [ "const-generics" ];
       };
       "unicode-ident" = rec {
         crateName = "unicode-ident";
