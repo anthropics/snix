@@ -134,7 +134,8 @@ where
     if file_type.is_dir() {
         Ok(IngestionEntry::Dir { path })
     } else if file_type.is_symlink() {
-        let target = std::fs::read_link(walkdir_direntry.path())
+        let target = tokio::fs::read_link(walkdir_direntry.path())
+            .await
             .map_err(|e| Error::Stat(walkdir_direntry.path().to_path_buf(), e))?
             .into_os_string()
             .into_vec();
