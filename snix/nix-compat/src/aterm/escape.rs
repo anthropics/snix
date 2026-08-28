@@ -13,7 +13,16 @@ static AC: LazyLock<AhoCorasick> = LazyLock::new(|| {
 /// Given a byte sequence, writes it in escaped form to the passed writer.
 /// Does not add surrounding quotes.
 pub fn write_escaped<P: AsRef<[u8]>>(s: P, w: &mut impl std::io::Write) -> std::io::Result<()> {
-    AC.try_stream_replace_all(s.as_ref(), w, &REPLACEMENTS)
+    let s = s.as_ref();
+    let mut pos = 0;
+
+    for m in AC.find_iter(s) {
+        w.write_all(&s[pos..m.start()])?;
+        w.write_all(REPLACEMENTS[m.pattern().as_usize()].as_bytes())?;
+        pos = m.end();
+    }
+
+    w.write_all(&s[pos..])
 }
 
 #[cfg(test)]
