@@ -93,27 +93,24 @@ impl DerivationBuilder {
     {
         // For each input_derivation, look up the hash derivation modulo,
         // and replace the derivation path with the hash_derivation_modulo.
-        let mut replacements = self
-            .input_derivations
-            .iter()
-            .map(|(drv_path, output_names)| {
-                if let Some(hdm) = lookup.lookup_hdm(&drv_path.as_ref()) {
-                    Ok((hdm, output_names))
-                } else {
-                    Err(DerivationError::MissingInputDerivation(drv_path.clone()))
-                }
-            })
-            .collect::<Result<Vec<_>, DerivationError>>()?;
+        let mut replacements = BTreeMap::<Sha256, BTreeSet<OutputName>>::new();
+        for (drv_path, output_names) in &self.input_derivations {
+            let hdm = lookup
+                .lookup_hdm(&drv_path.as_ref())
+                .ok_or_else(|| DerivationError::MissingInputDerivation(drv_path.clone()))?;
 
-        // changing the keys changes the order, so we need to sort by keys again
-        replacements.sort_by_key(|(k, _output_names)| *k);
+            replacements
+                .entry(hdm)
+                .or_default()
+                .extend(output_names.iter().cloned());
+        }
 
         let mut hasher = Sha256Digester::new();
         let _ = self.serialize_with_replacements(
             &mut hasher,
             environment,
             outputs,
-            replacements.into_iter(),
+            replacements.iter(),
         );
 
         Ok(hasher.finalize())
