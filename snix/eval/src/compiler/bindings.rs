@@ -541,12 +541,6 @@ impl Compiler<'_, '_> {
     /// 2. Keys can refer to nested attribute sets.
     /// 3. Attribute sets can (optionally) be recursive.
     pub(super) fn compile_attr_set(&mut self, slot: LocalIdx, node: &ast::AttrSet) {
-        // Open a scope to track the positions of the temporaries used by the
-        // `OpAttrs` instruction.
-        let temporaries = self
-            .scope_mut()
-            .begin_scope("compile_attr_set::temporaries");
-
         let kind = if node.rec_token().is_some() {
             BindingsKind::RecAttrs
         } else {
@@ -555,10 +549,6 @@ impl Compiler<'_, '_> {
 
         let guard = self.compile_bindings(slot, kind, node);
         self.scope_mut().end_scope(guard);
-
-        // Remove the temporary scope, but do not emit any additional cleanup
-        // (OpAttrs consumes all of these locals).
-        self.scope_mut().end_scope(temporaries);
     }
 
     /// Emit definitions for all variables in the top-level global env passed to the evaluation (eg
@@ -619,10 +609,8 @@ impl Compiler<'_, '_> {
                 // Binding is a merged or nested attribute set, and needs to be
                 // recursively compiled as another binding.
                 Binding::Set(set) => self.thunk(binding.value_slot, &set, |c, _| {
-                    let temporaries = c.scope_mut().begin_scope("bind_values::temporaries");
                     let g = c.compile_bindings(binding.value_slot, set.kind, &set);
                     c.scope_mut().end_scope(g);
-                    c.scope_mut().end_scope(temporaries);
                 }),
             }
 
@@ -693,13 +681,11 @@ impl Compiler<'_, '_> {
 
     pub(super) fn compile_legacy_let(&mut self, slot: LocalIdx, node: &ast::LegacyLet) {
         self.emit_warning(node, WarningKind::DeprecatedLegacyLet);
-        let temporaries = self.scope_mut().begin_scope("compile_legacy_let");
         let g = self.compile_bindings(slot, BindingsKind::RecAttrs, node);
-        self.scope_mut().end_scope(g);
 
-        // Remove the temporary scope, but do not emit any additional cleanup
+        // Remove the scope, but do not emit any additional cleanup
         // (OpAttrs consumes all of these locals).
-        self.scope_mut().end_scope(temporaries);
+        self.scope_mut().end_scope(g);
 
         self.emit_constant("body".into(), node);
         self.push_op(Op::AttrsSelect, node);
