@@ -11,7 +11,7 @@ use rowan::ast::AstChildren;
 
 use crate::spans::{EntireFile, OrEntireFile};
 
-use super::*;
+use super::{scope::ScopeGuard, *};
 
 type PeekableAttrs = Peekable<AstChildren<ast::Attr>>;
 
@@ -543,7 +543,9 @@ impl Compiler<'_, '_> {
     pub(super) fn compile_attr_set(&mut self, slot: LocalIdx, node: &ast::AttrSet) {
         // Open a scope to track the positions of the temporaries used by the
         // `OpAttrs` instruction.
-        self.scope_mut().begin_scope();
+        let temporaries = self
+            .scope_mut()
+            .begin_scope("compile_attr_set::temporaries");
 
         let kind = if node.rec_token().is_some() {
             BindingsKind::RecAttrs
@@ -551,11 +553,12 @@ impl Compiler<'_, '_> {
             BindingsKind::Attrs
         };
 
-        self.compile_bindings(slot, kind, node);
+        let guard = self.compile_bindings(slot, kind, node);
+        self.scope_mut().end_scope(guard);
 
         // Remove the temporary scope, but do not emit any additional cleanup
         // (OpAttrs consumes all of these locals).
-        self.scope_mut().end_scope();
+        self.scope_mut().end_scope(temporaries);
     }
 
     /// Emit definitions for all variables in the top-level global env passed to the evaluation (eg
@@ -616,9 +619,10 @@ impl Compiler<'_, '_> {
                 // Binding is a merged or nested attribute set, and needs to be
                 // recursively compiled as another binding.
                 Binding::Set(set) => self.thunk(binding.value_slot, &set, |c, _| {
-                    c.scope_mut().begin_scope();
-                    c.compile_bindings(binding.value_slot, set.kind, &set);
-                    c.scope_mut().end_scope();
+                    let temporaries = c.scope_mut().begin_scope("bind_values::temporaries");
+                    let g = c.compile_bindings(binding.value_slot, set.kind, &set);
+                    c.scope_mut().end_scope(g);
+                    c.scope_mut().end_scope(temporaries);
                 }),
             }
 
@@ -638,12 +642,12 @@ impl Compiler<'_, '_> {
         }
     }
 
-    fn compile_bindings<N>(&mut self, slot: LocalIdx, kind: BindingsKind, node: &N)
+    fn compile_bindings<N>(&mut self, slot: LocalIdx, kind: BindingsKind, node: &N) -> ScopeGuard
     where
         N: ToSpan + HasEntryProxy,
     {
         let mut count = 0;
-        self.scope_mut().begin_scope();
+        let scope_guard = self.scope_mut().begin_scope("compile_bindings");
 
         // Vector to track all observed bindings.
         let mut bindings = TrackedBindings::new();
@@ -657,11 +661,11 @@ impl Compiler<'_, '_> {
             // still need an attrset to exist, but it is empty.
             if kind.is_attrs() {
                 self.emit_constant(Value::Attrs(NixAttrs::empty()), node);
-                return;
+                return scope_guard;
             }
 
             self.emit_warning(node, WarningKind::EmptyLet);
-            return;
+            return scope_guard;
         }
 
         // Actually bind values and ensure they are on the stack.
@@ -671,6 +675,8 @@ impl Compiler<'_, '_> {
             self.push_op(Op::Attrs, node);
             self.push_uvarint(count as u64);
         }
+
+        scope_guard
     }
 
     /// Compile a standard `let ...; in ...` expression.
@@ -678,21 +684,22 @@ impl Compiler<'_, '_> {
     /// Unless in a non-standard scope, the encountered values are simply pushed
     /// on the stack and their indices noted in the entries vector.
     pub(super) fn compile_let_in(&mut self, slot: LocalIdx, node: &ast::LetIn) {
-        self.compile_bindings(slot, BindingsKind::LetIn, node);
+        let guard = self.compile_bindings(slot, BindingsKind::LetIn, node);
 
         // Deal with the body, then clean up the locals afterwards.
         self.compile(slot, node.body().unwrap());
-        self.cleanup_scope(node);
+        self.cleanup_scope(node, guard);
     }
 
     pub(super) fn compile_legacy_let(&mut self, slot: LocalIdx, node: &ast::LegacyLet) {
         self.emit_warning(node, WarningKind::DeprecatedLegacyLet);
-        self.scope_mut().begin_scope();
-        self.compile_bindings(slot, BindingsKind::RecAttrs, node);
+        let temporaries = self.scope_mut().begin_scope("compile_legacy_let");
+        let g = self.compile_bindings(slot, BindingsKind::RecAttrs, node);
+        self.scope_mut().end_scope(g);
 
         // Remove the temporary scope, but do not emit any additional cleanup
         // (OpAttrs consumes all of these locals).
-        self.scope_mut().end_scope();
+        self.scope_mut().end_scope(temporaries);
 
         self.emit_constant("body".into(), node);
         self.push_op(Op::AttrsSelect, node);

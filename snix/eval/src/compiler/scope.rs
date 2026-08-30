@@ -332,21 +332,32 @@ impl Scope {
     }
 
     /// Increase the current scope depth (e.g. within a new bindings
-    /// block, or `with`-scope).
-    pub fn begin_scope(&mut self) {
+    /// block, or `with`-scope). Pass a short descriptive string as
+    /// `name`. This will be used in debug builds to aid debugging
+    /// scoping issues. The returned [ScopeGuard] must be passed back
+    /// to `end_scope`.
+    pub fn begin_scope(&mut self, name: &'static str) -> ScopeGuard {
         self.scope_depth += 1;
+        ScopeGuard::new(self.scope_depth, name)
     }
 
     /// Decrease the scope depth and remove all locals still tracked
     /// for the current scope.
+    /// Pass in the [ScopeGuard] instance you obtained when opening
+    /// this scope via [Scope::begin_scope]. The [ScopeGuard]
+    /// instances have to be passed on the correct order. In other
+    /// words: the last scope opened must be the first one closed. If
+    /// the order mismatched this will panic in debug builds.
     ///
     /// Returns the count of locals that were dropped while marked as
     /// initialised (used by the compiler to determine whether to emit
     /// scope cleanup operations), as well as the spans of the
     /// definitions of unused locals (used by the compiler to emit
     /// unused binding warnings).
-    pub fn end_scope(&mut self) -> (usize, Vec<codemap::Span>) {
+    pub fn end_scope(&mut self, guard: ScopeGuard) -> (usize, Vec<codemap::Span>) {
         debug_assert!(self.scope_depth != 0, "can not end top scope");
+
+        guard.close(self.scope_depth);
 
         let mut pops = 0;
         let mut unused_spans = vec![];
@@ -391,5 +402,94 @@ impl Scope {
     /// Access the current scope depth.
     pub fn scope_depth(&self) -> usize {
         self.scope_depth
+    }
+}
+
+#[must_use = "ScopeGuards are there to ensure a given scope is closed and not simply forgotten about. Return it via the end_scope function."]
+/// Guard that helps uphold the scope depth correctness invariant.
+///
+/// Scopes should be closed and they should be closed in the right
+/// order. If that isn't the case the compiler has somehow lost track
+/// of scopes and the resulting program will not be correct.
+pub(crate) struct ScopeGuard {
+    #[cfg(debug_assertions)]
+    depth: usize,
+
+    #[cfg(debug_assertions)]
+    name: &'static str,
+}
+
+impl ScopeGuard {
+    fn new(depth: usize, name: &'static str) -> Self {
+        #[cfg(not(debug_assertions))]
+        let _ = (depth, name);
+
+        Self {
+            #[cfg(debug_assertions)]
+            depth,
+            #[cfg(debug_assertions)]
+            name,
+        }
+    }
+
+    fn close(self, depth: usize) {
+        #[cfg(debug_assertions)]
+        assert_eq!(
+            self.depth, depth,
+            "Snix bug: the scope `{}` was closed out of order. The guard is for depth {} but was used to close {}.",
+            self.name, self.depth, depth
+        );
+
+        let _ = depth;
+
+        // don't run drop on this; drop panics in case someone didn't
+        // close the scope e.g. didn't call this function
+        std::mem::forget(self);
+    }
+}
+
+impl Drop for ScopeGuard {
+    fn drop(&mut self) {
+        // the impl is always there as otherwise clippy will complain
+        // about the `std::mem::forget(…)` in the happy path.
+        #[cfg(debug_assertions)]
+        if !std::thread::panicking() {
+            panic!(
+                "Snix bug: the scope `{}` for level {} was opened but never closed.",
+                self.name, self.depth
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ScopeGuard;
+
+    #[test]
+    #[should_panic(
+        expected = "Snix bug: the scope `test-invalid-depth` was closed out of order. The guard is for depth 1 but was used to close 2."
+    )]
+    fn scope_guard_panics_with_invalid_depth() {
+        let level = 1;
+        let guard = ScopeGuard::new(level, "test-invalid-depth");
+        guard.close(level + 1);
+    }
+
+    #[test]
+    fn scope_guard_doest_not_panics_with_valid_depth() {
+        let level = 1;
+        let guard = ScopeGuard::new(level, "test-valid-depth");
+        guard.close(level);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Snix bug: the scope `test-panic-on-drop` for level 1 was opened but never closed."
+    )]
+    fn scope_guard_panics_when_dropped() {
+        let level = 1;
+        let guard = ScopeGuard::new(level, "test-panic-on-drop");
+        drop(guard);
     }
 }

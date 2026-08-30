@@ -21,6 +21,7 @@ mod scope;
 use codemap::Span;
 use rnix::ast::{self, AstToken, InterpolPart, PathContent};
 use rustc_hash::FxHashMap;
+use scope::ScopeGuard;
 use smol_str::SmolStr;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -749,7 +750,7 @@ impl Compiler<'_, '_> {
 
         // Open a temporary scope to correctly account for stack items
         // that exist during the construction.
-        self.scope_mut().begin_scope();
+        let scope_guard = self.scope_mut().begin_scope("compile_list");
 
         for item in node.items() {
             // Start tracing new stack slots from the second list
@@ -770,7 +771,7 @@ impl Compiler<'_, '_> {
 
         self.push_op(Op::List, node);
         self.push_uvarint(count as u64);
-        self.scope_mut().end_scope();
+        self.scope_mut().end_scope(scope_guard);
     }
 
     fn compile_attr(&mut self, slot: LocalIdx, node: &ast::Attr) {
@@ -1024,7 +1025,7 @@ impl Compiler<'_, '_> {
     /// pop/remove the indices of attribute sets that are implicitly
     /// in scope through `with` on the "with-stack".
     fn compile_with(&mut self, slot: LocalIdx, node: &ast::With) {
-        self.scope_mut().begin_scope();
+        let scope_guard = self.scope_mut().begin_scope("compile_with");
         // TODO: Detect if the namespace is just an identifier, and
         // resolve that directly (thus avoiding duplication on the
         // stack).
@@ -1049,7 +1050,7 @@ impl Compiler<'_, '_> {
 
         self.push_op(Op::PopWith, node);
         self.scope_mut().pop_with();
-        self.cleanup_scope(node);
+        self.cleanup_scope(node, scope_guard);
     }
 
     /// Compiles pattern function arguments, such as `{ a, b }: ...`.
@@ -1326,10 +1327,12 @@ impl Compiler<'_, '_> {
 
         let span = self.span_for(node);
         let slot = self.scope_mut().declare_phantom(span, false);
-        self.scope_mut().begin_scope();
+        let guard = self
+            .scope_mut()
+            .begin_scope("compile_lambda_or_thunk::content");
 
         let throw_idx = content(self, slot);
-        self.cleanup_scope(node);
+        self.cleanup_scope(node, guard);
         if let Some(throw_idx) = throw_idx {
             self.patch_jump(throw_idx);
         }
@@ -1501,11 +1504,11 @@ impl Compiler<'_, '_> {
 
     /// Decrease scope depth of the current function and emit
     /// instructions to clean up the stack at runtime.
-    fn cleanup_scope<N: ToSpan>(&mut self, node: &N) {
+    fn cleanup_scope<N: ToSpan>(&mut self, node: &N, guard: ScopeGuard) {
         // When ending a scope, all corresponding locals need to be
         // removed, but the value of the body needs to remain on the
         // stack. This is implemented by a separate instruction.
-        let (popcount, unused_spans) = self.scope_mut().end_scope();
+        let (popcount, unused_spans) = self.scope_mut().end_scope(guard);
 
         for span in &unused_spans {
             self.emit_warning(span, WarningKind::UnusedBinding);
