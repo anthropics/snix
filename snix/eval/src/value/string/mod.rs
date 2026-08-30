@@ -332,7 +332,7 @@ unsafe impl Sync for NixString {}
 impl Drop for NixString {
     #[cfg(not(feature = "no_leak"))]
     fn drop(&mut self) {
-        if self.context().is_some() {
+        if self.has_context() {
             // SAFETY: There's no way to construct a NixString that doesn't leave the allocation correct
             // according to the rules of dealloc
             unsafe {
@@ -357,7 +357,7 @@ impl Drop for NixString {
 
 impl Clone for NixString {
     fn clone(&self) -> Self {
-        if cfg!(feature = "no_leak") || self.context().is_some() {
+        if cfg!(feature = "no_leak") || self.has_context() {
             // SAFETY: There's no way to construct a NixString that doesn't leave the allocation correct
             // according to the rules of clone
             unsafe { Self(NixStringInner::clone(self.0)) }
