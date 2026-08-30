@@ -1,0 +1,7 @@
+lang {
+    builtins "toString" "map"
+}
+
+runtime-opts {
+    eval-strict
+}
