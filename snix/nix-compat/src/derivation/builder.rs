@@ -283,7 +283,6 @@ impl DerivationBuilder {
         }
 
         // validate env, none of the keys may be empty.
-        // We skip the `name` validation seen in go-nix.
         for k in self.environment.keys() {
             if k.is_empty() {
                 return Err(DerivationError::InvalidEnvironmentKey(k.to_string()));
