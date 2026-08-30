@@ -1,5 +1,3 @@
-// A test case that requires HOME to be /fake-home
-
 lang {
   features "path-interpolation"
 }
