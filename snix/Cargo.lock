@@ -5615,6 +5615,7 @@ dependencies = [
  "nix-compat",
  "pin-project",
  "pin-project-lite",
+ "pretty_assertions",
  "prost",
  "redb",
  "reqwest 0.13.4",
