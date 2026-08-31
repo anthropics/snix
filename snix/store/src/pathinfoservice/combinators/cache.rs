@@ -6,9 +6,7 @@ use snix_castore::composition::{CompositionContext, ServiceBuilder};
 use tonic::async_trait;
 use tracing::{debug, instrument, warn};
 
-use crate::pathinfoservice;
-
-use super::{PathInfo, PathInfoService};
+use crate::pathinfoservice::{self, PathInfo, PathInfoService};
 
 /// Asks near first, if not found, asks far.
 /// If found in there, returns it, and *inserts* it into
