@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use futures::{StreamExt, TryFutureExt, TryStreamExt, stream::BoxStream};
+use futures::{
+    StreamExt, TryFutureExt, TryStreamExt,
+    stream::{BoxStream, FuturesUnordered},
+};
 use tonic::async_trait;
 use tracing::instrument;
 
@@ -42,7 +45,7 @@ where
     #[instrument(skip(self, digest), fields(directory.digest = %digest, instance_name = %self.instance_name))]
     async fn get(&self, digest: &B3Digest) -> Result<Option<Directory>, directoryservice::Error> {
         // prepare requests to all backends, and annotate the backend_idx in the error case.
-        let mut requests: Vec<_> = self
+        let mut requests = self
             .services
             .iter()
             .enumerate()
@@ -50,25 +53,20 @@ where
                 svc.get(digest)
                     .map_err(move |err| Error::Backend(backend_idx, err))
             })
-            .collect();
+            .collect::<FuturesUnordered<_>>();
 
-        while !requests.is_empty() {
-            let (resp, _fut_idx, remaining) = futures::future::select_all(requests).await;
-
+        while let Some(resp) = requests.next().await {
             match resp {
                 // If this Ok(Some(_)), return, we're done
                 Ok(Some(directory)) => return Ok(Some(directory)),
                 // Skip over backends that reported they don't have it.
                 Ok(None) => {}
                 // Bubble up errors. We already mapped the backend_idx into the error.
-                Err(err) => return Err(err)?,
+                Err(err) => Err(err)?,
             }
-
-            requests = remaining;
         }
-
         // if we exhausted all backends, return Ok(None).
-        return Ok(None);
+        Ok(None)
     }
 
     #[instrument(skip_all, fields(directory.digest = %root_directory_digest, instance_name = %self.instance_name))]
@@ -79,44 +77,40 @@ where
         let digest = *root_directory_digest;
 
         // Create a bunch of futures that return ready once they get the first element of the stream, or an EOF.
-        let mut requests: Vec<_> = self
+        let mut requests = self
             .services
             .iter()
             .enumerate()
-            .map(|(backend_idx, svc)| {
-                Box::pin(async move {
-                    let mut stream = svc
-                        .get_recursive(&digest)
-                        .map_err(move |err| Error::Backend(backend_idx, err));
-                    if let Some(directory) = stream.try_next().await? {
-                        Ok::<_, Error>(Some((directory, stream)))
-                    } else {
-                        Ok(None)
-                    }
-                })
+            .map(|(backend_idx, svc)| async move {
+                let mut stream = svc
+                    .get_recursive(&digest)
+                    .map_err(move |err| Error::Backend(backend_idx, err));
+
+                match stream.try_next().await? {
+                    Some(directory) => Ok::<_, Error>(Some((directory, stream))),
+                    None => Ok(None),
+                }
             })
-            .collect();
+            .collect::<FuturesUnordered<_>>();
 
         async_stream::try_stream! {
-            while !requests.is_empty() {
-                let (resp, _fut_idx, remaining) = futures::future::select_all(requests).await;
-
+            while let Some(resp) = requests.next().await {
                 match resp {
                     // If this Ok(Some(_, _)), yield from that stream.
                     Ok(Some((directory, mut stream))) => {
                         yield directory;
 
                         while let Some(directory) = stream.try_next().await? {
-                            yield directory
+                            yield directory;
                         }
+
+                        break;
                     }
-                    Ok(None) => {
-                        // Skip over backends that reported they don't have it.
-                    },
+                    // Skip over backends that reported they don't have it.
+                    Ok(None) => {},
                     // Bubble up errors. We already mapped the backend_idx into the error.
                     Err(err) => Err(directoryservice::Error::from(err))?,
                 }
-                requests = remaining;
             }
             // if we exhausted all backends, this returns an empty stream
         }
