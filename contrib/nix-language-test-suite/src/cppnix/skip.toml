@@ -6,7 +6,7 @@ paths = [
   # In 2.3, even if NIX_PATH is overwritten,
   # nix search path includes `corepkgs` and test
   # assertion fails
-  "search_path/eval-okay-search-path",
+  "search-path/eval-okay-search-path",
 
   # Nix changed how filterSource works,
   # so the output of latest Nix and others (Nix2.3, Lix) differs
