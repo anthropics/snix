@@ -1,14 +1,11 @@
 use std::sync::Arc;
 
-use futures::{
-    StreamExt, TryFutureExt, TryStreamExt,
-    stream::{BoxStream, FuturesUnordered},
-};
+use futures::{StreamExt, TryStreamExt, stream::BoxStream};
 use tonic::async_trait;
 use tracing::instrument;
 
 use crate::{
-    B3Digest, Directory,
+    B3Digest, Directory, combinators,
     composition::{CompositionContext, ServiceBuilder},
     directoryservice::{self, DirectoryPutter, DirectoryService, FailingPutter},
 };
@@ -44,29 +41,13 @@ where
 {
     #[instrument(skip(self, digest), fields(directory.digest = %digest, instance_name = %self.instance_name))]
     async fn get(&self, digest: &B3Digest) -> Result<Option<Directory>, directoryservice::Error> {
-        // prepare requests to all backends, and annotate the backend_idx in the error case.
-        let mut requests = self
-            .services
-            .iter()
-            .enumerate()
-            .map(|(backend_idx, svc)| {
-                svc.get(digest)
-                    .map_err(move |err| Error::Backend(backend_idx, err))
-            })
-            .collect::<FuturesUnordered<_>>();
-
-        while let Some(resp) = requests.next().await {
-            match resp {
-                // If this Ok(Some(_)), return, we're done
-                Ok(Some(directory)) => return Ok(Some(directory)),
-                // Skip over backends that reported they don't have it.
-                Ok(None) => {}
-                // Bubble up errors. We already mapped the backend_idx into the error.
-                Err(err) => Err(err)?,
-            }
-        }
-        // if we exhausted all backends, return Ok(None).
-        Ok(None)
+        Ok(combinators::race::race_unary(&self.services, |svc| async {
+            // Skip over `Ok(None)` by returning None,
+            // but keep the Option<Directory> in the returned Ok() value.
+            Some(svc.get(digest).await.transpose()?.map(Some))
+        })
+        .await
+        .map_err(Error::Racing)?)
     }
 
     #[instrument(skip_all, fields(directory.digest = %root_directory_digest, instance_name = %self.instance_name))]
@@ -75,45 +56,18 @@ where
         root_directory_digest: &B3Digest,
     ) -> BoxStream<'_, Result<Directory, directoryservice::Error>> {
         let digest = *root_directory_digest;
+        combinators::race::race_stream(&self.services, move |svc| async move {
+            let mut stream = svc.get_recursive(&digest).peekable();
 
-        // Create a bunch of futures that return ready once they get the first element of the stream, or an EOF.
-        let mut requests = self
-            .services
-            .iter()
-            .enumerate()
-            .map(|(backend_idx, svc)| async move {
-                let mut stream = svc
-                    .get_recursive(&digest)
-                    .map_err(move |err| Error::Backend(backend_idx, err));
-
-                match stream.try_next().await? {
-                    Some(directory) => Ok::<_, Error>(Some((directory, stream))),
-                    None => Ok(None),
-                }
-            })
-            .collect::<FuturesUnordered<_>>();
-
-        async_stream::try_stream! {
-            while let Some(resp) = requests.next().await {
-                match resp {
-                    // If this Ok(Some(_, _)), yield from that stream.
-                    Ok(Some((directory, mut stream))) => {
-                        yield directory;
-
-                        while let Some(directory) = stream.try_next().await? {
-                            yield directory;
-                        }
-
-                        break;
-                    }
-                    // Skip over backends that reported they don't have it.
-                    Ok(None) => {},
-                    // Bubble up errors. We already mapped the backend_idx into the error.
-                    Err(err) => Err(directoryservice::Error::from(err))?,
-                }
+            // Skip over backends that reported they don't have it.
+            if std::pin::Pin::new(&mut stream).peek().await.is_none() {
+                None
+            } else {
+                Some(stream)
             }
-            // if we exhausted all backends, this returns an empty stream
-        }
+        })
+        .map_err(Error::Racing)
+        .err_into()
         .boxed()
     }
 
@@ -133,8 +87,8 @@ pub enum Error {
     #[error("wrong arguments: {0}")]
     WrongConfig(&'static str),
 
-    #[error("error from service at index {0}")]
-    Backend(usize, #[source] directoryservice::Error),
+    #[error("error from racing")]
+    Racing(#[source] combinators::race::Error<directoryservice::Error>),
 
     #[error("puts are unimplemented")]
     Unimplemented,
@@ -186,6 +140,7 @@ mod test {
     use pretty_assertions::assert_matches;
 
     use crate::{
+        combinators,
         directoryservice::{self, DirectoryService, MockDirectoryService},
         fixtures::DIRECTORY_WITH_KEEP,
     };
@@ -283,7 +238,7 @@ mod test {
             .expect_err("to fail")
             .0;
         let err = err.downcast_ref::<Error>().unwrap();
-        assert_matches!(err, Error::Backend(0, _))
+        assert_matches!(err, Error::Racing(combinators::race::Error::Backend(0, _)))
     }
 
     // FUTUREWORK: ideally we'd be constructing mocks that take longer than others / never return,
