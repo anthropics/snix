@@ -37,7 +37,7 @@ let
       # The path to seed into the snix-store (and, by default, assert on).
       path,
 
-      # Whether to use nar-bridge to upload, rather than snix-store copy.
+      # Whether to use nar-bridge to upload, rather than snix-store upload.
       # using nar-bridge currently is "slower", as the `pkgs.mkBinaryCache` build
       # takes quite some time.
       useNarBridge ? false,
@@ -102,7 +102,7 @@ let
         ''
         + lib.optionalString (!useNarBridge) ''
           echo "Copying closure ${path}…"
-          jq .closure < $NIX_ATTRS_JSON_FILE | snix-store copy -qqq -
+          jq .closure < $NIX_ATTRS_JSON_FILE | snix-store upload reference-graph -qqq -
         ''
         + lib.optionalString useNarBridge ''
           echo "Starting nar-bridge…"

@@ -47,6 +47,14 @@ pub static PB_SPINNER_STYLE: LazyLock<ProgressStyle> = LazyLock::new(|| {
     .expect("invalid progress template")
 });
 
+/// PB_SPINNER, but for progress where there's neither a count nor a total.
+pub static PB_SPINNER_NO_POS_LEN_STYLE: LazyLock<ProgressStyle> = LazyLock::new(|| {
+    ProgressStyle::with_template(
+        "{span_child_prefix}{spinner} {wide_msg} ({elapsed})                ",
+    )
+    .expect("invalid progress template")
+});
+
 /// Used for long-running operations without a known total.
 /// Does not show the elapsed time either.
 pub static PB_SPINNER_LONG_STYLE: LazyLock<ProgressStyle> = LazyLock::new(|| {

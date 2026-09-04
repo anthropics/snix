@@ -1,4 +1,4 @@
-//! Parsing of the store path metadata JSON accepted by `snix-store copy`.
+//! Parsing of the store path metadata JSON accepted by `snix-store upload`.
 //!
 //! CppNix produced two different shapes of it over time, both of which are supported,
 //! see [parse_all] for details.
@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 /// It is less strict than [nix_compat::path_info::ExportedPathInfo] (no `closureSize`
 /// field), and carries no store path itself - that's provided next to it.
 #[serde_as]
-#[derive(Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Deserialize)]
 pub struct PathMetadata {
     #[serde(
         rename = "narHash",

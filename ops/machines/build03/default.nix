@@ -1,6 +1,5 @@
 {
   depot,
-  lib,
   pkgs,
   ...
 }: # readTree options
@@ -14,7 +13,7 @@ in
     (mod "snix-buildkite.nix")
     (mod "known-hosts.nix")
 
-    ./snix-copy.nix
+    ./snix-upload.nix
     ./watch-store.nix
 
     (depot.third_party.agenix.src + "/modules/age.nix")

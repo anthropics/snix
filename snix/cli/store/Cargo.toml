@@ -13,6 +13,7 @@ async-stream.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 data-encoding.workspace = true
 futures.workspace = true
+futures-dag.workspace = true
 mimalloc.workspace = true
 nix-compat = { path = "../../nix-compat", features = ["async", "serde"] }
 prost.workspace = true
@@ -27,6 +28,7 @@ snix-tracing = { path = "../../tracing", features = [
   "reqwest",
   "tonic",
 ] }
+thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "macros", "rt-multi-thread"] }
 tokio-listener = { workspace = true, features = [
   "clap",
@@ -37,6 +39,7 @@ tokio-listener = { workspace = true, features = [
 tonic.workspace = true
 tonic-health.workspace = true
 tonic-reflection = { workspace = true, optional = true }
+tokio-stream = { workspace = true, features = ["io-util"] }
 tonic-tracing-opentelemetry = { workspace = true, optional = true }
 tracing.workspace = true
 tracing-indicatif.workspace = true

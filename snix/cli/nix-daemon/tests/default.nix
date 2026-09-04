@@ -48,7 +48,7 @@ let
           export PATH_INFO_SERVICE_ADDR=grpc+unix:$PWD/snix-store.sock
 
           echo "Copying closure ${closure}…"
-          jq .closure < $NIX_ATTRS_JSON_FILE | snix store copy -qqq -
+          jq .closure < $NIX_ATTRS_JSON_FILE | snix store upload reference-graph -qqq -
 
           # Create mountpoints
           # For this test, we overlay a (treated read-only) snix-provided mountpoint

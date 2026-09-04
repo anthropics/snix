@@ -7,8 +7,8 @@
 
 let
   tls_client_cert_path = depot.ops.pki.host_certificates."build03.infra.snix.dev";
-  tls_client_key_path = "/run/credentials/snix-copy.service/mtls-private-key.pem";
-  binary_cache_key_path = "/run/credentials/snix-copy.service/binary-cache-key";
+  tls_client_key_path = "/run/credentials/snix-upload.service/mtls-private-key.pem";
+  binary_cache_key_path = "/run/credentials/snix-upload.service/binary-cache-key";
   store_url = "grpc+https://cache.snix.dev?tls-client-cert-path=${tls_client_cert_path}&tls-client-key-path=${tls_client_key_path}";
 
   storeCompositionFile = (pkgs.formats.toml { }).generate "store-composition.toml" {
@@ -44,16 +44,16 @@ in
 {
   age.secrets.binary-cache-key.file = depot.ops.secrets."binary-cache-key.age";
 
-  systemd.services.snix-copy = {
-    environment.OTEL_SERVICE_NAME = "snix.store.copy";
+  systemd.services.snix-upload = {
+    environment.OTEL_SERVICE_NAME = "snix.store.upload";
     environment.TRACER = "otlp";
     serviceConfig = {
       ExecStart =
-        "${depot.snix.cli.store.with-features-xp-store-composition-cli}/bin/snix-store copy"
+        "${depot.snix.cli.store.with-features-xp-store-composition-cli}/bin/snix-store upload"
         + " --experimental-store-composition ${storeCompositionFile}"
-        + " --jsonl /run/watch-store.sock";
+        + " jsonl /run/watch-store.sock";
       Type = "simple";
-      User = "snix-copy";
+      User = "snix-upload";
       DynamicUser = true;
       ProtectHome = true;
       ProtectSystem = true;

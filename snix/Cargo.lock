@@ -2080,6 +2080,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92d699e522242e69e3003b94ecc1f960f3a5e015aa7c5d7486e65ad01dd94f5e"
 
 [[package]]
+name = "futures-dag"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65cd15742248e6fcc0890029537cccba9369ab79aee633dae37fb5c290e6056a"
+dependencies = [
+ "futures",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "futures-executor"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5459,6 +5469,7 @@ dependencies = [
  "clap",
  "data-encoding",
  "futures",
+ "futures-dag",
  "mimalloc",
  "nix-compat",
  "prost",
@@ -5469,8 +5480,10 @@ dependencies = [
  "snix-cli",
  "snix-store",
  "snix-tracing",
+ "thiserror 2.0.20",
  "tokio",
  "tokio-listener",
+ "tokio-stream",
  "tonic",
  "tonic-health",
  "tonic-reflection",

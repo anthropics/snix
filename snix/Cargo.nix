@@ -8654,6 +8654,27 @@ rec {
           "std"
         ];
       };
+      "futures-dag" = rec {
+        crateName = "futures-dag";
+        version = "0.2.0";
+        edition = "2024";
+        sha256 = "0sh5ws8c5dbzwgd37rmfg6mnk4xsriy56a80i70grrj849s1bkb5";
+        libName = "futures_dag";
+        authors = [
+          "Pavel Kurdikov <riberk32@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "pin-project-lite";
+            packageId = "pin-project-lite";
+          }
+        ];
+
+      };
       "futures-executor" = rec {
         crateName = "futures-executor";
         version = "0.3.34";
@@ -24354,6 +24375,10 @@ rec {
             packageId = "futures";
           }
           {
+            name = "futures-dag";
+            packageId = "futures-dag";
+          }
+          {
             name = "mimalloc";
             packageId = "mimalloc";
           }
@@ -24411,6 +24436,10 @@ rec {
             ];
           }
           {
+            name = "thiserror";
+            packageId = "thiserror 2.0.20";
+          }
+          {
             name = "tokio";
             packageId = "tokio";
             features = [
@@ -24428,6 +24457,11 @@ rec {
               "sd_listen"
               "tonic014"
             ];
+          }
+          {
+            name = "tokio-stream";
+            packageId = "tokio-stream";
+            features = [ "io-util" ];
           }
           {
             name = "tonic";
@@ -27162,6 +27196,7 @@ rec {
         resolvedDefaultFeatures = [
           "default"
           "fs"
+          "io-util"
           "net"
           "sync"
           "time"

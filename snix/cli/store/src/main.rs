@@ -3,20 +3,22 @@ use clap::Subcommand;
 
 use futures::StreamExt;
 use futures::TryStreamExt;
-use nix_compat::nixbase32;
 use nix_compat::nixhash::{CAHash, NixHash};
 use nix_compat::store_path;
-use nix_compat::store_path::StorePath;
 use nix_compat::wire::de::Error;
 use snix_castore::directoryservice;
 use snix_castore::import::fs::ingest_path;
 use snix_cli::shutdown_signal;
-use snix_cli_store::path_metadata::{self, PathMetadata};
+use snix_cli_store::path_metadata;
+use snix_cli_store::upload_closure;
+use snix_cli_store::upload_closure::upload_closure;
 use snix_store::decompression::DecompressedReader;
 use snix_store::nar::NarCalculationService;
 use snix_store::utils::ServiceUrls;
 use std::path::PathBuf;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt};
+use tokio::io::AsyncBufReadExt;
+use tokio::io::AsyncReadExt;
+use tokio_stream::wrappers::LinesStream;
 use tonic::transport::Server;
 use tracing::{Instrument, Span, debug, info, info_span, warn};
 use tracing_indicatif::span_ext::IndicatifSpanExt;
@@ -106,32 +108,13 @@ enum Command {
         concurrency: usize,
     },
 
-    /// Copies store paths into snix-store by reading JSON metadata from a path or stdin.
-    Copy {
+    /// Uploads path into snix-[ca]store by retrieving metadata and ingesting from the filesystem.
+    Upload {
         #[clap(flatten)]
         service_addrs: snix_store::utils::ServiceUrlsGrpc,
 
-        /// A path pointing to a JSON file (or '-' for stdin) containing store path
-        /// metadata. Needs to provide `narHash`, `narSize`, `references` and optionally
-        /// `deriver`, `signatures` per store path, either as a list of objects with an
-        /// additional `path` field (as provided by the `exportReferencesGraph` feature,
-        /// Nix < 2.19 and Lix), or as an attrset keyed by store path (as provided by
-        /// CppNix >= 2.19).
-        ///
-        /// Both shapes are produced by the following command, depending on the
-        /// implementation and version:
-        ///
-        /// ```notrust
-        /// nix path-info --json --recursive <some-path>
-        /// ```
-        reference_graph_path: PathBuf,
-
-        #[arg(long, env, default_value_t = false)]
-        /// If enabled, accepts newline-delimited JSON, with the metadata for a single
-        /// store path per line, and reads it in a streaming fashion.
-        jsonl: bool,
-        // FUTUREWORK: add a flag to check for references to be valid
-        // (in the sent set, or in the PathInfoService)
+        #[command(subcommand)]
+        source: UploadSource,
     },
     /// Mounts a snix-store at the given mountpoint
     #[cfg(feature = "fuse")]
@@ -194,6 +177,54 @@ enum Command {
     Tools {
         #[command(subcommand)]
         command: ToolsCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum UploadSource {
+    /// Uploads a closure of store paths.
+    ///
+    /// PathInfos are only persisted once all references have been uploaded.
+    /// Contents are uploaded eagerly.
+    ReferenceGraph {
+        /// A path pointing to a JSON file/unix domain socket (or '-' for stdin)
+        /// containing store path metadata.
+        ///
+        /// Needs to provide `narHash`, `narSize`, `references` and optionally
+        /// `deriver`, `signatures` per store path, either as a list of objects
+        /// with an additional `path` field or as an attrset keyed by store path.
+        ///
+        /// Produced by the following command, depending on the implementation
+        /// and version:
+        ///
+        /// ```notrust
+        /// nix path-info --json --recursive <some-path>
+        /// ```
+        ///
+        /// The former format is provided by Nix < 2.19 and Lix), the latter by
+        /// CppNix >= 2.19.
+        reference_graph_path: PathBuf,
+
+        /// The number of paths to ingest concurrently.
+        #[arg(long, default_value_t = 10)]
+        concurrency: usize,
+    },
+
+    /// Uploads individual store paths.
+    ///
+    /// Elements are processed in a streaming fashion, without waiting/checking for
+    /// references to be uploaded.
+    Jsonl {
+        /// A path pointing to a JSONL file/unix domain socket (or '-' for stdin)
+        /// containing store path metadata.
+        ///
+        /// Each line needs to be a JSON object with `narHash`, `narSize`, `references`, 'path'
+        /// and optionally `deriver`, `signatures`.
+        metadata_lines_path: PathBuf,
+
+        /// The number of items to process concurrently.
+        #[arg(long, default_value_t = 10)]
+        concurrency: usize,
     },
 }
 
@@ -489,134 +520,78 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         }
 
-        Command::Copy {
+        Command::Upload {
             service_addrs,
-            reference_graph_path,
-            jsonl,
+            source,
         } => {
             let (blob_service, directory_service, path_info_service, _nar_calculation_service) =
                 snix_store::utils::construct_services(service_addrs).await?;
 
-            // The span tracking the entire operation
-            let copy_paths_span =
-                info_span!("copy_paths", "indicatif.pb_show" = tracing::field::Empty);
-            copy_paths_span.pb_set_style(if jsonl {
-                &snix_tracing::PB_SPINNER_LONG_STYLE
-            } else {
-                &snix_tracing::PB_SPINNER_STYLE
-            });
-            copy_paths_span.pb_set_message("Copying paths");
-            copy_paths_span.pb_start();
+            match source {
+                UploadSource::ReferenceGraph {
+                    reference_graph_path,
+                    concurrency,
+                } => {
+                    let reference_graph = {
+                        let mut source = snix_cli::reader_for_path(reference_graph_path).await?;
+                        // Read the entire file.
+                        let mut json_bytes: Vec<u8> = vec![];
+                        source.read_to_end(&mut json_bytes).await?;
 
-            // We need another one, as they are used inside various async closures.
-            let copy_paths_span2 = copy_paths_span.clone();
+                        path_metadata::parse_all(&json_bytes).map_err(std::io::Error::other)?
+                    };
 
-            let mut source = snix_cli::reader_for_path(reference_graph_path).await?;
-
-            // Create a stream producing io::Result<(StorePath, PathMetadata)>.
-            let elems = async_stream::try_stream! {
-                if jsonl {
-                    // read json lines from source, emit individually
-                    let mut lines = source.lines();
-                    while let Some(line) = lines.next_line().await? {
-                        yield path_metadata::parse_one(line.as_bytes()).map_err(std::io::Error::other)?
-                    }
-                } else {
-                    // Read the entire file.
-                    let mut json_bytes: Vec<u8> = vec![];
-                    source.read_to_end(&mut json_bytes).await?;
-
-                    let reference_graph = path_metadata::parse_all(&json_bytes).map_err(std::io::Error::other)?;
-
-                    copy_paths_span2.pb_set_length(reference_graph.len() as u64);
-
-                    for entry in reference_graph {
-                        yield entry;
-                    }
+                    upload_closure(
+                        reference_graph,
+                        blob_service,
+                        directory_service,
+                        path_info_service,
+                        concurrency,
+                    )
+                    .await?;
                 }
-            };
+                UploadSource::Jsonl {
+                    metadata_lines_path,
+                    concurrency,
+                } => {
+                    let span = tracing::info_span!(
+                        "upload_jsonl",
+                        "indicatif.pb_show" = tracing::field::Empty
+                    );
+                    span.pb_set_style(&snix_tracing::PB_SPINNER_LONG_STYLE);
+                    span.pb_set_message("Uploading paths");
 
-            elems
-                .map(|v: std::io::Result<(StorePath, PathMetadata)>| {
-                    {
+                    let source = snix_cli::reader_for_path(metadata_lines_path).await?;
+                    let s = LinesStream::new(source.lines()).map(|line| {
                         async {
-                            let (
-                                store_path,
-                                PathMetadata {
-                                    nar_sha256,
-                                    nar_size,
-                                    deriver,
-                                    references,
-                                    signatures,
-                                },
-                            ) = v.inspect_err(|err| {
-                                warn!(?err, "failed to read store path metadata");
-                            })?;
+                        let (
+                            store_path, path_metadata
+                        ) = path_metadata::parse_one(line?.as_bytes())?;
 
-                            let span = Span::current();
-                            span.record("path_info.name", store_path.name());
-                            span.record("path_info.digest", nixbase32::encode(store_path.digest()));
-                            span.pb_set_style(&snix_tracing::PB_SPINNER_STYLE);
-                            span.pb_set_message(&format!("Ingesting {store_path}"));
-                            span.pb_start();
-
-                            // skip if that path already exists
-                            if path_info_service
-                                .get(*store_path.digest())
-                                .await
-                                .map_err(std::io::Error::other)?
-                                .is_some()
-                            {
-                                debug!(path_info.store_path=%store_path, "skipped, already exists");
-                                return Ok(());
-                            }
-
-                            // Ingest the given path.
-                            let node = ingest_path::<_, _, _, &[u8]>(
-                                &blob_service,
-                                &directory_service,
-                                store_path.to_absolute_path(),
-                                None,
-                            )
-                            .instrument(span.clone())
+                        if path_info_service
+                            .has(*store_path.digest())
                             .await
-                            .map_err(std::io::Error::other)?;
+                            .map_err(std::io::Error::other)?
+                        {
+                            debug!(path_info.store_path = %store_path, "skipped, already exists");
+                            return Ok::<_, std::io::Error>(None);
+                        }
 
-                            // Insert into PathInfoService.
-                            let path_info = PathInfo {
-                                store_path,
-                                node,
-                                references,
-                                nar_size,
-                                nar_sha256,
-                                signatures,
-                                deriver,
-                                ca: None,
-                            };
+                        let path_info = upload_closure::ingest(store_path, path_metadata, &blob_service, &directory_service).await.map_err(std::io::Error::other)?;
 
-                            path_info_service
+                        Ok(Some(path_info_service
                                 .put(path_info)
                                 .await
-                                .map_err(std::io::Error::other)?;
-
-                            info!("uploaded path");
-
-                            Ok::<_, std::io::Error>(())
-                        }
-                    }
-                    .instrument(tracing::info_span!(
-                        parent: &copy_paths_span,
-                        "copy_path",
-                        "indicatif.pb_show" = tracing::field::Empty,
-                        path_info.name = tracing::field::Empty,
-                        path_info.digest = tracing::field::Empty,
-                    ))
-                })
-                .buffer_unordered(10)
-                // Increment total progress once we uploaded the PathInfo.
-                .inspect_ok(|_| copy_paths_span.pb_inc(1))
-                .try_collect::<Vec<_>>()
-                .await?;
+                                .map_err(std::io::Error::other)?))
+                    }.in_current_span()
+                    });
+                    s.buffer_unordered(concurrency)
+                        // filter out Ok(None).
+                        .filter_map(|result| async { result.transpose() })
+                        .try_collect::<Vec<PathInfo>>()
+                        .await?;
+                }
+            }
         }
         #[cfg(feature = "fuse")]
         Command::Mount {

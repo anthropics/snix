@@ -32,7 +32,7 @@ cargo build -p snix-cli-store --features virtiofs
 export PATH=$PATH:$PWD/target/debug
 ```
 
-Point snix at some (local) stores. Both `snix-store copy` and the `snix-store
+Point snix at some (local) stores. Both `snix-store upload` and the `snix-store
 virtiofs` daemon (used by `run-snix-vm`) read these env vars and open the
 services directly:
 
@@ -42,13 +42,13 @@ export DIRECTORY_SERVICE_ADDR=redb:$PWD/directories.redb
 export PATH_INFO_SERVICE_ADDR=redb:$PWD/pathinfo.redb
 ```
 
-Copy paths (and their closures) into the store with `snix-store copy`, which
-ingests the paths from a `nix path-info` reference graph. Define a helper:
+Copy paths (and their closures) into the store with `snix-store upload
+reference-graph`. Define a helper:
 
 ```
 copy() {
   nix --extra-experimental-features nix-command \
-    path-info --json --closure-size --recursive "$1" | snix-store copy -
+    path-info --json --recursive "$1" | snix-store upload reference-graph -
 }
 ```
 

@@ -189,12 +189,13 @@ $ ssh -L 8080:/run/nar-bridge.sock root@cache.example.com
 $ nix copy --to http://localhost:8080?compression=none&secret-key=/run/secrets/nix-signing.key /nix/store/xxxx-some-store-path
 ```
 
-#### Using `snix-store copy`
-Above is always sending the entire NAR to nar-bridge, letting deduplication happen on the host running `nar-bridge` and `snix-store daemon`. Data already present in the stores is not inserted multiple times, but we still send lots of unnecessary data.
+#### Using `snix-store upload`
+Above is always sending the entire NAR to nar-bridge, letting deduplication happen on the host running `nar-bridge` and `snix-store daemon`.
+While data already present in snix-castore is not persisted multiple times, we still send lots of unnecessary data.
 
-This obviously is suboptimal, so we will instead switch to the `snix-store copy` command and copy to the `gRPC` endpoint directly, which will avoid uploading data already present.
+This obviously is suboptimal, so we will instead switch to the `snix-store upload` command and copy to the `gRPC` endpoint directly, which will avoid uploading data already present.
 
-To use `snix-store copy`, we first write a composition config that implements signing:
+To use `snix-store upload`, we first write a composition config that implements signing:
 
 ```toml
 [blobservices.root]
@@ -218,14 +219,14 @@ type = "keyfile-signing"
 This uses mTLS to authenticate when connecting to the gRPC endpoint.
 If your server uses a custom CA, you might want to also set `tls-ca-cert-path`.
 
-You can then run `snix-store copy` pointed to this config. Instead of the store paths to upload, it takes a path to a json file usually produced by the `nix path-info --json` command.
+You can then run `snix-store upload reference-graph` pointed to this config. Instead of the store paths to upload, it takes a path to a json file usually produced by the `nix path-info --json` command.
 
 If set to `-`, it's read from stdin, so something like the following would work:
 
 ```console
-$ EXPERIMENTAL_STORE_COMPOSITION=/path/to/snix-copy.toml \
+$ EXPERIMENTAL_STORE_COMPOSITION=/path/to/snix-upload-config.toml \
   nix path-info --recursive --json /nix/store/xxxx-mypath | \
-  snix-store copy -
+  snix-store upload reference-graph -
 ```
 
 ## Caveats
