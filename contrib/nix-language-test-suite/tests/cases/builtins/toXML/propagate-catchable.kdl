@@ -1,0 +1,7 @@
+lang {
+  builtins "map" "throw" "toXML" "tryEval"
+}
+
+runtime-opts {
+  eval-strict
+}
