@@ -1,0 +1,7 @@
+lang {
+  features "curpos"
+}
+
+runtime-opts {
+  eval-strict
+}
