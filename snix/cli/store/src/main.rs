@@ -697,19 +697,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
             let work = path_info_service
                 .list()
-                .map(move |e| {
-                    let path_info_service = path_info_service.clone();
-                    let directory_service = directory_service.clone();
-                    async move {
-                        match e {
+                .map(|result| {
+                    async {
+                        match result {
                             Ok(path_info) => {
-                                use snix_cli_store::rewrite_directories;
-
-                                Ok(rewrite_directories::rewrite_pathinfo(
+                                Ok(snix_cli_store::rewrite_directories::rewrite_pathinfo(
                                     path_info,
                                     dry_run,
-                                    path_info_service,
-                                    directory_service,
+                                    &path_info_service,
+                                    &directory_service,
                                 )
                                 .await?)
                             }
