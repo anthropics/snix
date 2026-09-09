@@ -57,6 +57,10 @@ in
           "enp1s0"
           "lo"
         ];
+        querier.ring.instance_interface_names = [
+          "enp1s0"
+          "lo"
+        ];
         query_scheduler.ring.instance_interface_names = [
           "enp1s0"
           "lo"
