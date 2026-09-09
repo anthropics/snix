@@ -24,6 +24,11 @@ in
         };
         distributor.receivers.otlp.protocols.http.endpoint = "127.0.0.1:4138";
 
+        live_store = {
+          wal.path = "/var/lib/tempo/live-store/wal";
+          shutdown_marker_dir = "/var/lib/tempo/live-store/shutdown-marker";
+        };
+
         # TODO: S3
         storage.trace = {
           backend = "s3";
