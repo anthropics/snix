@@ -1,6 +1,7 @@
 //! Import from a real filesystem.
 
 use futures::StreamExt;
+use futures::TryStreamExt;
 use futures::stream::BoxStream;
 use std::fs::FileType;
 use std::os::unix::ffi::OsStringExt;
@@ -8,6 +9,7 @@ use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
 use tokio::io::BufReader;
 use tokio_util::io::InspectReader;
+use tracing::Span;
 use tracing::{Instrument, info_span, instrument, trace_span};
 use tracing_indicatif::span_ext::IndicatifSpanExt;
 use walkdir::DirEntry;
@@ -31,7 +33,7 @@ use super::ingest_entries;
 /// `O(#number of entries)` space.
 #[instrument(
     skip(blob_service, directory_service, reference_scanner),
-    fields(path),
+    fields(path, indicatif.pb_show = tracing::field::Empty),
     err
 )]
 pub async fn ingest_path<BS, DS, P, P2>(
@@ -46,6 +48,10 @@ where
     DS: DirectoryService,
     P2: AsRef<[u8]> + Send + Sync,
 {
+    let span = Span::current();
+    span.pb_set_style(&snix_tracing::PB_SPINNER_LONG_STYLE);
+    span.pb_set_message(&format!("Ingesting {}", path.as_ref().display()));
+
     let iter = WalkDir::new(path.as_ref())
         .follow_links(false)
         .follow_root_links(false)
@@ -54,7 +60,12 @@ where
 
     ingest_entries(
         directory_service,
-        dir_entries_to_ingestion_stream(blob_service, iter, path.as_ref(), reference_scanner),
+        dir_entries_to_ingestion_stream(blob_service, iter, path.as_ref(), reference_scanner)
+            .inspect_ok(|ingestion_entry| {
+                if matches!(ingestion_entry, IngestionEntry::Regular { .. }) {
+                    span.pb_inc(1);
+                }
+            }),
     )
     .await
 }

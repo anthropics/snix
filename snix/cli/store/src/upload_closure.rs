@@ -173,7 +173,7 @@ enum Error {
 ///
 /// The to-be-inserted PathInfo is returned, but not inserted anywhere,
 /// that's left for the callsite.
-#[tracing::instrument(skip_all, fields(path_info.store_path = %store_path, indicatif.pb_show = tracing::field::Empty), err)]
+#[tracing::instrument(skip_all, fields(path_info.store_path = %store_path), err)]
 pub async fn ingest<DS, BS>(
     store_path: StorePath,
     metadata: PathMetadata,
@@ -191,10 +191,6 @@ where
         references,
         signatures,
     } = metadata;
-
-    let span = Span::current();
-    span.pb_set_style(&snix_tracing::PB_SPINNER_NO_POS_LEN_STYLE);
-    span.pb_set_message(&format!("Ingesting {}", store_path.to_absolute_path()));
 
     let node = snix_castore::import::fs::ingest_path::<_, _, _, &[u8]>(
         &blob_service,

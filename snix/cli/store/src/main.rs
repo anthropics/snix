@@ -387,8 +387,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     async move {
                         let span = Span::current();
                         span.pb_set_style(&snix_tracing::PB_SPINNER_STYLE);
-                        span.pb_set_message(&format!("Ingesting {path:?}"));
-                        span.pb_start();
 
                         // Ingest the contents at the given path into castore.
                         let root_node = ingest_path::<_, _, _, &[u8]>(
