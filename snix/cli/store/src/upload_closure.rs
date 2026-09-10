@@ -18,8 +18,10 @@ use crate::path_metadata::PathMetadata;
 /// Takes a closure of store path metadata (keyed by StorePath),
 /// and uploads it to the passed services.
 ///
-/// A PathInfo is only written once all PathInfos of referenced store paths have
-/// been written (or already existed before), and its contents have been uploaded.
+/// A PathInfo is only uploaded after:
+///
+///  - the contents have been uploaded
+///  - all referenced paths have been fully uploaded (or already existed before)
 ///
 // FUTUREWORK: This does not re-calculate the NAR Hash/Size.
 // Should probably be configurable.
@@ -73,7 +75,7 @@ where
         // Else, create a task to upload the contents, not depending on anything,
         // and a task persisting metadata, depending on that task, and on all metadata from its references.
         // We use a oneshot channel to store the PathInfo returned from the ingestion task and pick it up from the metadata task.
-        let (tx_node, rx_node) = tokio::sync::oneshot::channel();
+        let (tx, rx) = tokio::sync::oneshot::channel();
 
         dag.insert(
             DagKey::Ingestion { store_path },
@@ -89,9 +91,7 @@ where
                 )
                 .await?;
 
-                tx_node
-                    .send(path_info)
-                    .expect("Snix bug: channel closed (tx)");
+                tx.send(path_info).expect("Snix bug: channel closed (tx)");
                 ingestion_span.pb_inc(1);
 
                 drop(p);
@@ -112,12 +112,14 @@ where
             DagKey::PathInfo { store_path },
             // have that task depend on all references (except self-references)
             HashSet::from_iter(
-                path_metadata.references.iter().filter_map(|r| {
-                    (r != store_path).then_some(DagKey::PathInfo { store_path: r })
-                }),
+                path_metadata
+                    .references
+                    .iter()
+                    .filter_map(|r| (r != store_path).then_some(DagKey::PathInfo { store_path: r }))
+                    .chain(std::iter::once(DagKey::Ingestion { store_path })),
             ),
             async {
-                let path_info = rx_node.await.expect("Snix bug: channel closed (rx)");
+                let path_info = rx.await.expect("Snix bug: channel closed (rx)");
 
                 let path_info = path_info_service.put(path_info).await?;
                 closure_span.pb_inc(1);
