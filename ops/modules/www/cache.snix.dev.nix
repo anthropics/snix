@@ -31,6 +31,12 @@ in
     ./base.nix
   ];
 
+  services.nginx.appendConfig = ''
+    worker_processes auto;
+  '';
+  services.nginx.eventsConfig = ''
+    worker_connections 4096;
+  '';
   services.nginx.virtualHosts."cache.snix.dev" = {
     forceSSL = true;
     enableACME = true;
