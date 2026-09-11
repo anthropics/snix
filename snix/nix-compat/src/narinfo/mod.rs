@@ -97,6 +97,9 @@ bitflags! {
 
         /// entirely missing References field, produced by harmonia
         const REFERENCES_MISSING = 1 << 5;
+
+        /// FileHash field using lowerhex for the digest, present in some cachix store paths.
+        const FILE_HASH_HEX = 1 << 6;
     }
 }
 
@@ -174,8 +177,22 @@ impl<'a> NarInfo<'a> {
                     let val = val
                         .strip_prefix("sha256:")
                         .ok_or(Error::MissingPrefixForHash(TAG_FILEHASH))?;
-                    let val = nixbase32::decode_fixed::<32>(val)
-                        .map_err(|e| Error::UnableToDecodeHash(TAG_FILEHASH, e))?;
+
+                    let val = if val.len() != HEXLOWER.encode_len(32) {
+                        nixbase32::decode_fixed::<32>(val)
+                    } else {
+                        flags |= Flags::FILE_HASH_HEX;
+
+                        let val = val.as_bytes();
+                        let mut buf = [0u8; 32];
+
+                        HEXLOWER
+                            .decode_mut(val, &mut buf)
+                            .map_err(|e| e.error)
+                            .map(|_| buf)
+                    };
+
+                    let val = val.map_err(|e| Error::UnableToDecodeHash(TAG_FILEHASH, e))?;
 
                     if file_hash.replace(val).is_some() {
                         return Err(Error::DuplicateField(TAG_FILEHASH));
@@ -363,7 +380,11 @@ impl Display for NarInfo<'_> {
         };
 
         if let Some(file_hash) = self.file_hash {
-            writeln!(w, "FileHash: sha256:{}", nixbase32::encode(&file_hash),)?;
+            if !self.flags.contains(Flags::FILE_HASH_HEX) {
+                writeln!(w, "FileHash: sha256:{}", nixbase32::encode(&file_hash))?;
+            } else {
+                writeln!(w, "FileHash: sha256:{}", HEXLOWER.encode(&file_hash))?;
+            }
         }
 
         if let Some(file_size) = self.file_size {
@@ -664,6 +685,29 @@ Sig: cache.nixos.org-1:WDvKIdxSnQ8p2w9SD0ffdibUSNMz6QQN6jpe+A8LLNHmZFsX+m8GZF0x9
 
         assert!(parsed.flags.contains(Flags::REFERENCES_MISSING));
         assert_eq!(parsed.references, vec![]);
+        assert_eq!(parsed.to_string(), input, "should roundtrip");
+    }
+
+    #[test]
+    fn file_hash_hex() {
+        let input = {
+            let input = r#"StorePath: /nix/store/qwiryv0pb8sifik5npsgn9hdngh21r62-scalals-native-0.1.10
+URL: nar/4a599968-09b5-4641-8b5a-1de6fb5e4b34.nar.zst
+Compression: zstd
+FileHash: sha256:89adb48876927a7d0f228749f10009a37787af99477470580e8dc225466247fc
+FileSize: 2182839
+NarHash: sha256:1n5chw2qf1vjc0r1n91jpm45p8ir18v9arj7n81b6vllmc0wzsq8
+NarSize: 8415576
+References:!!WSP!!
+Deriver: 2drfc3vjhjk1zkq40m99ba8abd261xwd-scalals-native-0.1.10.drv
+Sig: cbley.cachix.org-1:xPaA+lJEgJkCOAhDOET3PdytqL8jJjBcnNdG6SRasOYd6DPNBOnrdr30vS9dtjqNSRtYeWoN5acqmC6AuPlaAQ==
+"#;
+            input.replace("!!WSP!!", " ")
+        };
+
+        let parsed = NarInfo::parse(&input).expect("should parse");
+
+        assert!(parsed.flags.contains(Flags::FILE_HASH_HEX));
         assert_eq!(parsed.to_string(), input, "should roundtrip");
     }
 
