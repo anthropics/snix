@@ -1,6 +1,5 @@
 {
   depot,
-  lib,
   pkgs,
   ...
 }: # readTree options
@@ -16,6 +15,7 @@ in
 
     (mod "hetzner-cloud.nix")
     (mod "forgejo.nix")
+    (mod "iocaine.nix")
     (mod "restic.nix")
     # Automatically enable metric and log collection.
     (mod "o11y/alloy.nix")

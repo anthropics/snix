@@ -5,22 +5,39 @@
     ./base.nix
   ];
 
-  config = {
-    services.nginx.virtualHosts.forgejo = {
-      serverName = "git.snix.dev";
-      enableACME = true;
-      forceSSL = true;
-      locations."/" = {
-        proxyPass = "http://127.0.0.1:3000";
-        extraConfig = ''
-          proxy_ssl_server_name on;
-          proxy_pass_header Authorization;
+  config =
+    let
+      forgejoURI = "http://127.0.0.1:3000";
+      iocaineURI = "http://127.0.0.1:42069";
+    in
+    {
+      services.nginx.commonHttpConfig = ''
+        map $request_method $forgejo_location {
+          GET     ${iocaineURI};
+          HEAD    ${iocaineURI};
+          default ${forgejoURI};
+        }
+      '';
+      services.nginx.virtualHosts.forgejo = {
+        serverName = "git.snix.dev";
+        enableACME = true;
+        forceSSL = true;
+        extraConfig = "recursive_error_pages on;";
 
-          # This has to be sufficiently large for uploading layers of
-          # non-broken docker images.
-          client_max_body_size 1G;
-        '';
+        locations."/" = {
+          recommendedProxySettings = true;
+          proxyPass = "$forgejo_location";
+          extraConfig = ''
+            proxy_cache off;
+            proxy_intercept_errors on;
+            # proxy_pass $forgejo_location;
+            error_page 421 = @fallback;
+          '';
+        };
+        locations."@fallback" = {
+          recommendedProxySettings = true;
+          proxyPass = forgejoURI;
+        };
       };
     };
-  };
 }
