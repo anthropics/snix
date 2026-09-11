@@ -80,9 +80,9 @@ pub struct NarInfo<'a> {
 }
 
 bitflags! {
-    /// TODO(edef): be conscious of these when roundtripping
     #[derive(Debug, Copy, Clone)]
     pub struct Flags: u8 {
+        /// Another field was set. We don't round-trip this, but everything else we do.
         const UNKNOWN_FIELD = 1 << 0;
         const COMPRESSION_DEFAULT = 1 << 1;
         // Format quirks encountered in the cache.nixos.org dataset
@@ -370,7 +370,11 @@ impl Display for NarInfo<'_> {
             writeln!(w, "FileSize: {file_size}")?;
         }
 
-        writeln!(w, "NarHash: sha256:{}", nixbase32::encode(&self.nar_hash),)?;
+        if !self.flags.contains(Flags::NAR_HASH_HEX) {
+            writeln!(w, "NarHash: sha256:{}", nixbase32::encode(&self.nar_hash))?;
+        } else {
+            writeln!(w, "NarHash: sha256:{}", HEXLOWER.encode(&self.nar_hash))?;
+        }
         writeln!(w, "NarSize: {}", self.nar_size)?;
 
         if !self.flags.contains(Flags::REFERENCES_MISSING) {
@@ -493,8 +497,7 @@ mod test {
 
     #[test]
     fn references_out_of_order() {
-        let parsed = NarInfo::parse(
-            r#"StorePath: /nix/store/xi429w4ddvb1r77978hm7jfb2jsn559r-gcc-3.4.6
+        let input = r#"StorePath: /nix/store/xi429w4ddvb1r77978hm7jfb2jsn559r-gcc-3.4.6
 URL: nar/1hr09cgkyw1hcsfkv5qp5jlpmf2mqrkrqs3xj5zklq9c1h9544ff.nar.bz2
 Compression: bzip2
 FileHash: sha256:1hr09cgkyw1hcsfkv5qp5jlpmf2mqrkrqs3xj5zklq9c1h9544ff
@@ -504,7 +507,8 @@ NarSize: 21264
 References: a8922c0h87iilxzzvwn2hmv8x210aqb9-glibc-2.7 7w2acjgalb0cm7b3bg8yswza4l7iil9y-binutils-2.18 mm631h09mj964hm9q04l5fd8vw12j1mm-bash-3.2-p39 nx2zs2qd6snfcpzw4a0jnh26z9m0yihz-gcc-3.4.6 xi429w4ddvb1r77978hm7jfb2jsn559r-gcc-3.4.6
 Deriver: 2dzpn70c1hawczwhg9aavqk18zp9zsva-gcc-3.4.6.drv
 Sig: cache.nixos.org-1:o1DTsjCz0PofLJ216P2RBuSulI8BAb6zHxWE4N+tzlcELk5Uk/GO2SCxWTRN5wJutLZZ+cHTMdWqOHF88KGQDg==
-"#).expect("should parse");
+"#;
+        let parsed = NarInfo::parse(input).expect("should parse");
 
         assert!(parsed.flags.contains(Flags::REFERENCES_OUT_OF_ORDER));
         assert_eq!(
@@ -521,6 +525,7 @@ Sig: cache.nixos.org-1:o1DTsjCz0PofLJ216P2RBuSulI8BAb6zHxWE4N+tzlcELk5Uk/GO2SCxW
                 .map(StorePathRef::to_string)
                 .collect::<Vec<_>>(),
         );
+        assert_eq!(input, parsed.to_string(), "should roundtrip");
     }
 
     #[test]
@@ -569,7 +574,7 @@ Sig: cache.nixos.org-1:92fl0i5q7EyegCj5Yf4L0bENkWuVAtgveiRcTEEUH0P6HvCE1xFcPbz/0
 
         assert!(parsed.flags.contains(Flags::COMPRESSION_DEFAULT));
         assert_eq!(parsed.compression, Some("bzip2"));
-        assert_eq!(parsed.to_string(), input);
+        assert_eq!(parsed.to_string(), input, "should roundtrip");
     }
 
     #[test]
@@ -615,12 +620,12 @@ Sig: hydra.other.net-1:JXQ3Z/PXf0EZSFkFioa4FbyYpbbTbHlFBtZf4VqU0tuMTWzhMD7p9Q7ac
 
         assert!(parsed.flags.contains(Flags::EXPLICIT_UNKNOWN_DERIVER));
         assert!(parsed.deriver.is_none());
-        assert_eq!(parsed.to_string(), input);
+        assert_eq!(parsed.to_string(), input, "should roundtrip");
     }
 
     #[test]
     fn nar_hash_hex() {
-        let parsed = NarInfo::parse(r#"StorePath: /nix/store/0vpqfxbkx0ffrnhbws6g9qwhmliksz7f-perl-HTTP-Cookies-6.01
+        let input = r#"StorePath: /nix/store/0vpqfxbkx0ffrnhbws6g9qwhmliksz7f-perl-HTTP-Cookies-6.01
 URL: nar/1rv1m9inydm1r4krw8hmwg1hs86d0nxddd1pbhihx7l7fycjvfk3.nar.xz
 Compression: xz
 FileHash: sha256:1rv1m9inydm1r4krw8hmwg1hs86d0nxddd1pbhihx7l7fycjvfk3
@@ -630,13 +635,15 @@ NarSize: 45840
 References: 0vpqfxbkx0ffrnhbws6g9qwhmliksz7f-perl-HTTP-Cookies-6.01 9vrhbib2lxd9pjlg6fnl5b82gblidrcr-perl-HTTP-Message-6.06 wy20zslqxzxxfpzzk0rajh41d7a6mlnf-perl-HTTP-Date-6.02
 Deriver: fb4ihlq3psnsjq95mvvs49rwpplpc8zj-perl-HTTP-Cookies-6.01.drv
 Sig: cache.nixos.org-1:HhaiY36Uk3XV1JGe9d9xHnzAapqJXprU1YZZzSzxE97jCuO5RR7vlG2kF7MSC5thwRyxAtdghdSz3AqFi+QSCw==
-"#).expect("should parse");
+"#;
+        let parsed = NarInfo::parse(input).expect("should parse");
 
         assert!(parsed.flags.contains(Flags::NAR_HASH_HEX));
         assert_eq!(
             hex!("60adfd293a4d81ad7cd7e47263cbb3fc846309ef91b154a08ba672b558f94ff3"),
             parsed.nar_hash,
         );
+        assert_eq!(parsed.to_string(), input, "should roundtrip");
     }
 
     #[test]
@@ -657,7 +664,7 @@ Sig: cache.nixos.org-1:WDvKIdxSnQ8p2w9SD0ffdibUSNMz6QQN6jpe+A8LLNHmZFsX+m8GZF0x9
 
         assert!(parsed.flags.contains(Flags::REFERENCES_MISSING));
         assert_eq!(parsed.references, vec![]);
-        assert_eq!(parsed.to_string(), input);
+        assert_eq!(parsed.to_string(), input, "should roundtrip");
     }
 
     /// Adds a signature to a NARInfo, using key material parsed from DUMMY_KEYPAIR.
