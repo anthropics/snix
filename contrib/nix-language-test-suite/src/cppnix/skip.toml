@@ -26,6 +26,9 @@ paths = [
   # 2.3 returns the full /nix/store path
   "builtins/unsafeGetAttrPos/derivation",
 
+  # builtin's behaviour changed at https://github.com/NixOS/nix/commit/86a1121d1
+  "builtins/unsafeGetAttrPos/line-col-are-lazy",
+
   # Nix2.3 produces a path below:
   #   /nix/store/lc5bhdsagh8mrxkdbvdkmw9nv1vykavn-foo.drv
   "builtins/derivation/invalid-structured-attrs",
@@ -55,6 +58,10 @@ paths = [
 
   # Returns null instead of attrset
   "builtins/unsafeGetAttrPos/derivation",
+
+  # Lix's line and column are lazy but they use <PRIMOP-APP>
+  # instead of <CODE> as a placeholder
+  "builtins/unsafeGetAttrPos/line-col-are-lazy",
 
   # Lix produces a path below:
   #   /nix/store/lc5bhdsagh8mrxkdbvdkmw9nv1vykavn-foo.drv

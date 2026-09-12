@@ -28,6 +28,9 @@ paths = [
   "builtins/unsafeGetAttrPos/intersectAttrs",
   "builtins/unsafeGetAttrPos/eval-okay-inherit-attr-pos",
   "builtins/unsafeGetAttrPos/eval-okay-getattrpos-functionargs",
+
+  # Line and column are evaluated eagerly
+  "builtins/unsafeGetAttrPos/line-col-are-lazy",
 ]
 
 builtins = ["readFile", "__nixPath"]

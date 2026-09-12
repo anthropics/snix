@@ -1,0 +1,7 @@
+lang {
+    builtins "unsafeGetAttrPos"
+}
+
+environment {
+    work-dir "/pwd/lang"
+}
