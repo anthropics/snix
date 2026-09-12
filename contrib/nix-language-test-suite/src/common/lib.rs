@@ -70,6 +70,7 @@ pub struct RuntimeOpts {
 #[derive(Debug, PartialEq, Eq)]
 pub enum ErrorKind {
     Abort,
+    AssertionFailed,
     IO,
     NotCoercibleToString,
     TypeError,
@@ -89,6 +90,7 @@ impl std::str::FromStr for ErrorKind {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "Abort" => Ok(ErrorKind::Abort),
+            "AssertionFailed" => Ok(ErrorKind::AssertionFailed),
             "IO" => Ok(ErrorKind::IO),
             "NotCoercibleToString" => Ok(ErrorKind::NotCoercibleToString),
             "TypeError" => Ok(ErrorKind::TypeError),

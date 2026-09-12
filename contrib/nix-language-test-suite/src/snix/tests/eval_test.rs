@@ -231,6 +231,10 @@ fn matches_expected_error(result: &snix_eval::EvaluationResult, exp_kind: &Error
 
     match exp_kind {
         ErrorKind::Abort => matches!(snix_kind, snix_eval::ErrorKind::Abort(_)),
+        ErrorKind::AssertionFailed => matches!(
+            snix_kind,
+            snix_eval::ErrorKind::CatchableError(snix_eval::CatchableErrorKind::AssertionFailed)
+        ),
         ErrorKind::IO => matches!(snix_kind, snix_eval::ErrorKind::IO { .. }),
         ErrorKind::NotCoercibleToString => {
             matches!(snix_kind, snix_eval::ErrorKind::NotCoercibleToString { .. })

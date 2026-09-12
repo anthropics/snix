@@ -256,6 +256,11 @@ fn eval_test(
 fn matches_expected_error(version: NixVersion, error_string: &str, expected: &ErrorKind) -> bool {
     let must_contain = match expected {
         ErrorKind::Abort => &["evaluation aborted"][..],
+        ErrorKind::AssertionFailed => match version {
+            NixVersion::CppNixLatest => &["while evaluating the condition of the assertion"],
+            NixVersion::CppNix23 => &["error: assertion"],
+            NixVersion::LixLatest => &["assertion failed"],
+        },
         ErrorKind::NotCoercibleToString => &["cannot coerce"][..],
         ErrorKind::IO => match version {
             NixVersion::CppNixLatest => &["does not exist", "has an unsupported type"][..],
