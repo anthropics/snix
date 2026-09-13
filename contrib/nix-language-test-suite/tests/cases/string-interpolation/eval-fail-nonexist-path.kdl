@@ -1,0 +1,2 @@
+// NOTE: this case is equivalent to `eval-fail-bad-string-interpolation-2`, but we
+// keep it for Nix compatibility
