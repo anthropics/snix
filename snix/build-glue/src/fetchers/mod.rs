@@ -360,11 +360,7 @@ where
                 if let Some(exp_hash) = exp_hash
                     && exp_hash != actual_hash
                 {
-                    return Err(FetcherError::HashMismatch {
-                        url,
-                        wanted: exp_hash,
-                        got: actual_hash,
-                    });
+                    return Err(FetcherError::hash_mismatch(url, exp_hash, actual_hash));
                 }
 
                 // Construct and return the FileNode describing the downloaded contents.
@@ -413,11 +409,11 @@ where
                 if let Some(exp_nar_sha256) = exp_nar_sha256
                     && exp_nar_sha256 != actual_nar_sha256
                 {
-                    return Err(FetcherError::HashMismatch {
+                    return Err(FetcherError::hash_mismatch(
                         url,
-                        wanted: NixHash::Sha256(exp_nar_sha256),
-                        got: NixHash::Sha256(actual_nar_sha256),
-                    });
+                        NixHash::Sha256(exp_nar_sha256),
+                        NixHash::Sha256(actual_nar_sha256),
+                    ));
                 }
 
                 Ok((
@@ -447,11 +443,7 @@ where
                     .await
                     .map_err(|e| match e {
                         NarIngestionError::HashMismatch { expected, actual } => {
-                            FetcherError::HashMismatch {
-                                url,
-                                wanted: expected,
-                                got: actual,
-                            }
+                            FetcherError::hash_mismatch(url, expected, actual)
                         }
                         _ => FetcherError::Io(std::io::Error::other(e.to_string())),
                     })?;
@@ -508,11 +500,7 @@ where
                 let actual_hash = digester.finalize();
 
                 if exp_hash != actual_hash {
-                    return Err(FetcherError::HashMismatch {
-                        url,
-                        wanted: exp_hash,
-                        got: actual_hash,
-                    });
+                    return Err(FetcherError::hash_mismatch(url, exp_hash, actual_hash));
                 }
 
                 // Construct and return the FileNode describing the downloaded contents,
