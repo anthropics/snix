@@ -82,6 +82,7 @@ pub enum ErrorKind {
     DuplicateAttrsKey,
     VariableAlreadyDefined,
     UnexpectedContext,
+    InfiniteRecursion,
 }
 
 impl std::str::FromStr for ErrorKind {
@@ -102,6 +103,7 @@ impl std::str::FromStr for ErrorKind {
             "DuplicateAttrsKey" => Ok(ErrorKind::DuplicateAttrsKey),
             "VariableAlreadyDefined" => Ok(ErrorKind::VariableAlreadyDefined),
             "UnexpectedContext" => Ok(ErrorKind::UnexpectedContext),
+            "InfiniteRecursion" => Ok(ErrorKind::InfiniteRecursion),
             other => Err(format!("unknown error kind: {other}")),
         }
     }

@@ -277,10 +277,11 @@ fn matches_expected_error(result: &snix_eval::EvaluationResult, exp_kind: &Error
             }
             _ => false,
         },
-        ErrorKind::UnexpectedArgument => matches!(
-            snix_kind,
+        ErrorKind::UnexpectedArgument => match snix_kind {
             snix_eval::ErrorKind::UnexpectedArgumentBuiltin(_)
-        ),
+            | snix_eval::ErrorKind::UnexpectedArgumentFormals { .. } => true,
+            _ => false,
+        },
         ErrorKind::VariableAlreadyDefined => {
             matches!(snix_kind, snix_eval::ErrorKind::VariableAlreadyDefined(_))
         }
@@ -289,6 +290,9 @@ fn matches_expected_error(result: &snix_eval::EvaluationResult, exp_kind: &Error
         }
         ErrorKind::UnexpectedContext => {
             matches!(snix_kind, snix_eval::ErrorKind::UnexpectedContext)
+        }
+        ErrorKind::InfiniteRecursion => {
+            matches!(snix_kind, snix_eval::ErrorKind::InfiniteRecursion { .. })
         }
     }
 }
