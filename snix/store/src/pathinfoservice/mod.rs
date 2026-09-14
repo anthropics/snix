@@ -80,6 +80,7 @@ pub trait PathInfoService: Send + Sync {
 /// Registers the builtin PathInfoService implementations with the registry
 pub(crate) fn register_pathinfo_services(reg: &mut Registry) {
     reg.register::<Box<dyn ServiceBuilder<Output = dyn PathInfoService>>, combinators::CacheConfig>("cache");
+    reg.register::<Box<dyn ServiceBuilder<Output = dyn PathInfoService>>, combinators::PriorityConfig>("priority");
     reg.register::<Box<dyn ServiceBuilder<Output = dyn PathInfoService>>, GRPCPathInfoServiceConfig>("grpc");
     reg.register::<Box<dyn ServiceBuilder<Output = dyn PathInfoService>>, KeyFileSigningPathInfoServiceConfig>("keyfile-signing");
     reg.register::<Box<dyn ServiceBuilder<Output = dyn PathInfoService>>, LruPathInfoServiceConfig>("lru");
