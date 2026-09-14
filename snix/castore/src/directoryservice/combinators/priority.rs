@@ -1,8 +1,4 @@
-use std::{
-    collections::{BTreeMap, btree_map},
-    fmt::Display,
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use futures::{StreamExt, TryStreamExt, stream::BoxStream};
 use tonic::async_trait;
@@ -10,55 +6,26 @@ use tracing::instrument;
 
 use crate::{
     B3Digest, Directory,
-    composition::{CompositionContext, CompositionError, ServiceBuilder},
-    directoryservice::{self, DirectoryPutter, DirectoryService, FailingPutter, combinators::Race},
+    composition::{CompositionContext, ServiceBuilder},
+    directoryservice::{self, DirectoryPutter, DirectoryService, FailingPutter},
 };
 
-/// Holds references to many different directory services, each with an associated priority.
-/// Read requests try services sequentially, sorted by their priority, ascending.
+/// Holds references to many different directory services.
+/// Read requests try services sequentially.
 /// Any error in a service bubbles up.
 /// Write requests are not implemented.
 pub struct Priority<DS> {
     instance_name: String,
-    /// The services, keyed by their priority.
     // NOTE: Arc<dyn DS> implements DS too, so you can put different service types in here.
-    services: BTreeMap<Prio, Race<DS>>,
-}
-
-impl From<u64> for Prio {
-    fn from(value: u64) -> Self {
-        Self(value)
-    }
-}
-
-#[derive(Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Debug)]
-pub struct Prio(u64);
-
-impl Display for Prio {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
+    services: Vec<DS>,
 }
 
 impl<DS> Priority<DS> {
-    /// Construct from an iterator of priorities and services.
-    /// Services with the same priority are converted to a race combinator.
-    pub fn new<I: IntoIterator<Item = (Prio, DS)>>(instance_name: String, iter: I) -> Priority<DS> {
-        let mut services = BTreeMap::new();
-
-        for (prio, service) in iter {
-            match services.entry(prio) {
-                btree_map::Entry::Vacant(entry) => {
-                    // add a Race combinator with a single item
-                    entry.insert(Race::new(format!("{instance_name}-{prio}-race"), [service]));
-                }
-                btree_map::Entry::Occupied(mut entry) => entry.get_mut().add(service),
-            }
-        }
-
+    /// Construct from an iterator of services.
+    pub fn new<I: IntoIterator<Item = DS>>(instance_name: String, iter: I) -> Priority<DS> {
         Self {
             instance_name,
-            services,
+            services: Vec::from_iter(iter),
         }
     }
 }
@@ -70,13 +37,13 @@ where
 {
     #[instrument(skip(self, digest), fields(directory.digest = %digest, instance_name = %self.instance_name))]
     async fn get(&self, digest: &B3Digest) -> Result<Option<Directory>, directoryservice::Error> {
-        // traverse the list of services in priority order. If any service has it, return from there.
+        // traverse the list of services. If any service has it, return from there.
         // Errors cause the combinator to bail out early.
-        for (prio, service) in self.services.iter() {
+        for (idx, service) in self.services.iter().enumerate() {
             if let Some(directory) = service
                 .get(digest)
                 .await
-                .map_err(|err| Error::Backend(*prio, err))?
+                .map_err(|err| Error::Backend(idx, err))?
             {
                 return Ok(Some(directory));
             }
@@ -92,13 +59,13 @@ where
     ) -> BoxStream<'_, Result<Directory, directoryservice::Error>> {
         let digest = *root_directory_digest;
         async_stream::try_stream! {
-            for (prio, service) in self.services.iter() {
+            for (idx, service) in self.services.iter().enumerate() {
                 let mut directories_stream = service.get_recursive(&digest);
                 // Once a service said it has a closure (non-empty stream), we return everything from there, including errors.
-                if let Some(directory) = directories_stream.try_next().await.map_err(|err| { Error::Backend(*prio, err)})? {
+                if let Some(directory) = directories_stream.try_next().await.map_err(|err| { Error::Backend(idx, err)})? {
                     yield directory;
 
-                    while let Some(directory) = directories_stream.try_next().await.map_err(|err| { Error::Backend(*prio, err)})? {
+                    while let Some(directory) = directories_stream.try_next().await.map_err(|err| { Error::Backend(idx, err)})? {
                         yield directory;
                     }
                     // we're done
@@ -126,8 +93,8 @@ pub enum Error {
     #[error("wrong arguments: {0}")]
     WrongConfig(&'static str),
 
-    #[error("error from service with prio {0}")]
-    Backend(Prio, #[source] directoryservice::Error),
+    #[error("error from service with index {0}")]
+    Backend(usize, #[source] directoryservice::Error),
 
     #[error("puts are unimplemented")]
     Unimplemented,
@@ -142,7 +109,7 @@ impl From<Error> for directoryservice::Error {
 #[derive(serde::Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct PriorityConfig {
-    services: BTreeMap<u64, String>,
+    services: Vec<String>,
 }
 
 impl TryFrom<url::Url> for PriorityConfig {
@@ -163,15 +130,11 @@ impl ServiceBuilder for PriorityConfig {
         instance_name: &str,
         context: &CompositionContext,
     ) -> Result<Arc<Self::Output>, Box<dyn std::error::Error + Send + Sync>> {
-        let services = futures::future::try_join_all(self.services.iter().map(
-            |(prio, instance_ref)| async move {
-                Ok::<_, CompositionError>((
-                    Prio::from(*prio),
-                    context.resolve::<Self::Output>(instance_ref).await?,
-                ))
-            },
-        ))
-        .await?;
+        let services =
+            futures::future::try_join_all(self.services.iter().map(|instance_ref| async move {
+                context.resolve::<Self::Output>(instance_ref).await
+            }))
+            .await?;
 
         Ok(Arc::new(Priority::new(instance_name.to_string(), services)))
     }
@@ -202,7 +165,7 @@ mod test {
 
         last.expect_get().never();
 
-        let uut = Priority::new("uut".to_string(), [(0.into(), first), (1.into(), last)]);
+        let uut = Priority::new("uut".to_string(), [first, last]);
 
         assert_eq!(
             Some(DIRECTORY_WITH_KEEP.clone()),
@@ -232,7 +195,7 @@ mod test {
             .in_sequence(&mut seq)
             .returning(|_| Ok(Some(DIRECTORY_WITH_KEEP.clone())));
 
-        let uut = Priority::new("uut".to_string(), [(0.into(), first), (1.into(), last)]);
+        let uut = Priority::new("uut".to_string(), [first, last]);
 
         assert_eq!(
             Some(DIRECTORY_WITH_KEEP.clone()),
@@ -262,7 +225,7 @@ mod test {
             .in_sequence(&mut seq)
             .returning(|_| Ok(None));
 
-        let uut = Priority::new("uut".to_string(), [(0.into(), first), (1.into(), last)]);
+        let uut = Priority::new("uut".to_string(), [first, last]);
 
         assert_eq!(
             None,
@@ -287,7 +250,7 @@ mod test {
 
         last.expect_get().never();
 
-        let uut = Priority::new("uut".to_string(), [(0.into(), first), (1.into(), last)]);
+        let uut = Priority::new("uut".to_string(), [first, last]);
 
         let err = uut
             .get(&DIRECTORY_WITH_KEEP.digest())
@@ -296,7 +259,7 @@ mod test {
             .0;
 
         let err = err.downcast_ref::<Error>().unwrap();
-        assert_matches!(err, Error::Backend(Prio(0), _));
+        assert_matches!(err, Error::Backend(0, _));
     }
 
     /// If the first backend responds to get_recursive, we return from there.
@@ -314,7 +277,7 @@ mod test {
             });
         last.expect_get_recursive().never();
 
-        let uut = Priority::new("uut".to_string(), [(0.into(), first), (1.into(), last)]);
+        let uut = Priority::new("uut".to_string(), [first, last]);
 
         let directories = uut
             .get_recursive(&DIRECTORY_B.digest())
@@ -347,7 +310,7 @@ mod test {
                 futures::stream::iter([Ok(DIRECTORY_B.clone()), Ok(DIRECTORY_A.clone())]).boxed()
             });
 
-        let uut = Priority::new("uut".to_string(), [(0.into(), first), (1.into(), last)]);
+        let uut = Priority::new("uut".to_string(), [first, last]);
 
         let directories = uut
             .get_recursive(&DIRECTORY_B.digest())
@@ -374,7 +337,7 @@ mod test {
 
         last.expect_get_recursive().never();
 
-        let uut = Priority::new("uut".to_string(), [(0.into(), first), (1.into(), last)]);
+        let uut = Priority::new("uut".to_string(), [first, last]);
 
         let err = uut
             .get_recursive(&DIRECTORY_B.digest())
@@ -384,7 +347,7 @@ mod test {
             .0;
 
         let err = err.downcast_ref::<Error>().unwrap();
-        assert_matches!(err, Error::Backend(Prio(0), _));
+        assert_matches!(err, Error::Backend(0, _));
     }
 
     /// put is unsupported, and not sent to the backend
@@ -393,7 +356,7 @@ mod test {
         let mut first = MockDirectoryService::new();
         first.expect_put().never();
 
-        let uut = Priority::new("uut".to_string(), [(0.into(), first)]);
+        let uut = Priority::new("uut".to_string(), [first]);
 
         let err = uut
             .put(DIRECTORY_WITH_KEEP.clone())
@@ -411,7 +374,7 @@ mod test {
         let mut first = MockDirectoryService::new();
         first.expect_put().never();
 
-        let uut = Priority::new("uut".to_string(), [(0.into(), first)]);
+        let uut = Priority::new("uut".to_string(), [first]);
 
         let mut handle = uut.put_multiple_start();
         let err = handle
