@@ -69,7 +69,7 @@ where
     }
 
     fn nar_calculation_service(&self) -> Option<Arc<dyn NarCalculationService>> {
-        // We can't possibly know if this one has all contents to calculate.
+        // We can't possibly know which one has all contents to calculate.
         None
     }
 }
@@ -82,7 +82,7 @@ pub enum Error {
     #[error("error from racing")]
     Racing(combinators::race::Error<pathinfoservice::Error>),
 
-    #[error("puts are unimplemented")]
+    #[error("unimplemented")]
     Unimplemented,
 }
 
