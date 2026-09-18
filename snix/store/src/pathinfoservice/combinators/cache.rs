@@ -35,7 +35,7 @@ where
     PS1: PathInfoService,
     PS2: PathInfoService,
 {
-    #[instrument(level = "trace", skip_all, fields(path_info.digest = nixbase32::encode(&digest), instance_name = %self.instance_name))]
+    #[instrument(level = "trace", skip_all, err, fields(path_info.digest = nixbase32::encode(&digest), instance_name = %self.instance_name))]
     async fn get(&self, digest: [u8; 20]) -> Result<Option<PathInfo>, pathinfoservice::Error> {
         match self.near.get(digest).await.map_err(Error::NearGet)? {
             Some(path_info) => {
@@ -59,7 +59,7 @@ where
         }
     }
 
-    #[instrument(level = "trace", skip_all, fields(path_info.digest = nixbase32::encode(&digest), instance_name = %self.instance_name))]
+    #[instrument(level = "trace", skip_all, err, fields(path_info.digest = nixbase32::encode(&digest), instance_name = %self.instance_name))]
     async fn has(&self, digest: [u8; 20]) -> Result<bool, pathinfoservice::Error> {
         // FUTUREWORK: queue background tasks if ! self.near.has && self.far.has ? (configurable)
         Ok(self.near.has(digest).await.map_err(Error::NearGet)?
