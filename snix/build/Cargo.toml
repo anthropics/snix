@@ -5,6 +5,7 @@ edition = "2024"
 rust-version.workspace = true
 
 [dependencies]
+async-stream.workspace = true
 auto_impl.workspace = true
 bytes.workspace = true
 itertools.workspace = true
@@ -12,6 +13,7 @@ prost.workspace = true
 tonic-prost.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["process"] }
+tokio-util = { workspace = true, features = ["io"] }
 tonic.workspace = true
 # TODO: put the fuse dep behind a feature flag?
 snix-castore = { path = "../castore", features = ["fuse"] }

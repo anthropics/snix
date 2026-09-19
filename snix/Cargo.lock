@@ -5180,6 +5180,7 @@ name = "snix-build"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-stream",
  "auto_impl",
  "blake3",
  "bstr",
@@ -5197,6 +5198,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-util",
  "tonic",
  "tonic-prost",
  "tonic-prost-build",

@@ -2,12 +2,13 @@ use std::{
     ffi::OsString,
     fs,
     path::{Path, PathBuf},
-    process::{Output, Stdio},
+    process::Stdio,
 };
 
+use futures::stream::BoxStream;
 use tokio::process::Command;
 
-use crate::sandbox::{InputsProvider, SandboxSpec};
+use crate::sandbox::{InputsProvider, SandboxSpec, event::SandboxEvent, event::stream_process};
 
 const COMMON_BWRAP_ARGS: &[&str] = &[
     "--unshare-uts",
@@ -92,18 +93,13 @@ pub struct Bwrap {
     inputs_provider: InputsProvider,
 }
 
-/// The result of running the sandbox.
-pub struct SandboxOutcome {
-    output: Output,
+/// Allows finding outputs produced by the sandboxed command.
+#[derive(Debug, Clone)]
+pub struct SandboxOutputs {
     scratch_dir: PathBuf,
 }
 
-impl SandboxOutcome {
-    /// Status code, stderr, stdout, etc.
-    pub fn output(&self) -> &Output {
-        &self.output
-    }
-
+impl SandboxOutputs {
     /// Allows finding outputs produced by the sandboxed command.
     ///
     /// The command must write into one of the scratches.
@@ -113,7 +109,7 @@ impl SandboxOutcome {
         // allowed to produce broken symlinks as their $out...
         // i.e. `runCommand "test" {} "ln -s IdontExist $out"` is a valid nix build.
         //
-        // Additionally, SandboxOutcome values are handed out by builds **after** unmounting the
+        // Additionally, by the time find_path is called, the build has already unmonted the
         // fuse store, which means that even valid symlinks can be "broken" during ingestion.
         if path.is_symlink() || path.exists() {
             Some(path)
@@ -124,22 +120,28 @@ impl SandboxOutcome {
 }
 
 impl Bwrap {
-    // TODO(#132): support streaming std{err,out}
-    /// Run the sandbox and return the result.
-    pub async fn run(mut self) -> std::io::Result<SandboxOutcome> {
-        let _guard = self
+    /// Run the sandbox and return a stream of events alongside an outputs handle.
+    pub fn run(self) -> std::io::Result<(BoxStream<'static, SandboxEvent>, SandboxOutputs)> {
+        let outputs = SandboxOutputs {
+            scratch_dir: self.host_workdir.join("scratches"),
+        };
+
+        let guard = self
             .inputs_provider
             .provide_inputs(self.host_workdir.join("host_inputs_dir"))?;
 
-        Ok(SandboxOutcome {
-            output: Command::new("bwrap")
-                .args(self.args)
-                // Make sure we've closed stdin otherwise builds can hang forever blocked on std io.
-                .stdin(Stdio::null())
-                .output()
-                .await?,
-            scratch_dir: self.host_workdir.join("scratches"),
-        })
+        let child = Command::new("bwrap")
+            .args(self.args)
+            // Make sure we've closed stdin otherwise builds can hang forever blocked on std io.
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()?;
+
+        let stream = stream_process(child, guard)?;
+
+        Ok((stream, outputs))
     }
 
     /// Constructor.
@@ -268,5 +270,32 @@ impl Bwrap {
             args,
             inputs_provider: spec.into(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_find_path() {
+        let temp_dir = TempDir::new().expect("failed to create temp directory");
+        let scratch_dir = temp_dir.path();
+
+        let file_path = scratch_dir.join("file.txt");
+        std::fs::write(&file_path, b"hello").expect("failed to write test file");
+
+        let symlink_path = scratch_dir.join("link");
+        std::os::unix::fs::symlink("nonexistent", &symlink_path)
+            .expect("failed to create test symlink");
+
+        let outputs = SandboxOutputs {
+            scratch_dir: scratch_dir.to_path_buf(),
+        };
+
+        assert_eq!(outputs.find_path("file.txt"), Some(file_path));
+        assert_eq!(outputs.find_path("link"), Some(symlink_path));
+        assert_eq!(outputs.find_path("missing"), None);
     }
 }

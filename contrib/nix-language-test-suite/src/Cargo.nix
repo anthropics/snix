@@ -17861,6 +17861,10 @@ rec {
             packageId = "anyhow";
           }
           {
+            name = "async-stream";
+            packageId = "async-stream";
+          }
+          {
             name = "auto_impl";
             packageId = "auto_impl";
           }
@@ -17926,6 +17930,11 @@ rec {
             name = "tokio";
             packageId = "tokio";
             features = [ "process" ];
+          }
+          {
+            name = "tokio-util";
+            packageId = "tokio-util";
+            features = [ "io" ];
           }
           {
             name = "tonic";

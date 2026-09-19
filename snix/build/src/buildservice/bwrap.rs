@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use bstr::BStr;
+use futures::StreamExt;
 use snix_castore::{
     blobservice::BlobService,
     directoryservice::DirectoryService,
@@ -16,7 +17,7 @@ use super::BuildService;
 use crate::{
     buildservice::{BuildConstraints, BuildOutput, BuildRequest, BuildResult},
     bwrap::Bwrap,
-    sandbox::SandboxSpec,
+    sandbox::{SandboxSpec, event::SandboxEvent},
 };
 const SANDBOX_SHELL: &str = env!("SNIX_BUILD_SANDBOX_SHELL");
 
@@ -105,13 +106,27 @@ where
             )
             .build();
 
-        let outcome = Bwrap::initialize(spec)?.run().await?;
+        // TODO(#132): stream results to the client once new streaming RPCs are in place.
+        let (mut stream, finder) = Bwrap::initialize(spec)?.run()?;
 
-        if !outcome.output().status.success() {
-            let stdout = BStr::new(&outcome.output().stdout);
-            let stderr = BStr::new(&outcome.output().stderr);
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let mut exit_code = None;
 
-            warn!(stdout=%stdout, stderr=%stderr, exit_code=%outcome.output().status, "build failed");
+        while let Some(event) = stream.next().await {
+            match event {
+                SandboxEvent::Stdout(chunk) => stdout.extend(chunk),
+                SandboxEvent::Stderr(chunk) => stderr.extend(chunk),
+                SandboxEvent::ExitCode(code) => exit_code = Some(code),
+            }
+        }
+
+        let exit_code = exit_code.unwrap_or(1);
+        if exit_code != 0 {
+            let stdout = BStr::new(&stdout);
+            let stderr = BStr::new(&stderr);
+
+            warn!(stdout=%stdout, stderr=%stderr, exit_code=%exit_code, "build failed");
 
             return Err(std::io::Error::other("nonzero exit code".to_string()));
         }
@@ -119,7 +134,7 @@ where
         let outputs: Vec<_> = request
             .outputs
             .iter()
-            .filter_map(|o| outcome.find_path(o))
+            .filter_map(|o| finder.find_path(o))
             .collect();
         if outputs.len() != request.outputs.len() {
             warn!("Not all outputs produced");

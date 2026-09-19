@@ -4,6 +4,8 @@ use typed_builder::TypedBuilder;
 
 use crate::buildservice::{AdditionalFile, EnvVar};
 
+pub mod event;
+
 /// A sandbox builder.
 ///
 /// Its API is tailored to the needs of Snix builds, namely running sandboxed commands
@@ -145,12 +147,13 @@ impl InputsProvider {
         }
     }
 
-    /// This method signature artificially extends the mutable borrow of self to make sure that the method is not callable
-    /// until the returned InputsGuard is dropped.
-    pub fn provide_inputs<'a>(
-        &'a mut self,
+    /// Consumes the inputs provider and provides the inputs at `path`.
+    ///
+    /// The returned guard cleans up or unmounts inputs when dropped.
+    pub fn provide_inputs(
+        mut self,
         path: impl AsRef<Path>,
-    ) -> std::io::Result<Box<dyn InputsGuard + 'a>> {
+    ) -> std::io::Result<Box<dyn InputsGuard>> {
         (self.provider)(path.as_ref())
     }
 
@@ -209,7 +212,7 @@ type ProviderFn = Box<dyn FnMut(&Path) -> std::io::Result<Box<dyn InputsGuard>> 
 ///     .build();
 /// ```
 ///
-/// Can't call provide_inputs until the previous guard is dropped:
+/// Can't call provide_inputs twice:
 ///
 /// Compile fails
 /// ```compile_fail
@@ -217,18 +220,7 @@ type ProviderFn = Box<dyn FnMut(&Path) -> std::io::Result<Box<dyn InputsGuard>> 
 ///
 /// fn test_inputs_provider(p: InputsProvider) {
 ///   let guard1 = p.provide_inputs("/tmp");
-///
 ///   let guard2 = p.provide_inputs("/tmp");
 /// }
 /// ```
-/// Compile succeeds
-/// ```rust
-/// use snix_build::sandbox::InputsProvider;
-///
-/// fn test_inputs_provider(mut p: InputsProvider) {
-///   let guard1 = p.provide_inputs("/tmp");
-///   drop(guard1);
-///
-///   let guard2 = p.provide_inputs("/tmp");
-/// }
 fn _compile_tests() {}
