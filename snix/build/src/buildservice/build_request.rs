@@ -2,7 +2,10 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 
 use bytes::Bytes;
+use futures::StreamExt;
 use snix_castore::{Node, PathComponent};
+
+use crate::buildservice::BuildFailure;
 /// A BuildRequest describes the request of something to be run on the builder.
 /// It is distinct from an actual \[Build\] that has already happened, or might be
 /// currently ongoing.
@@ -136,6 +139,47 @@ pub struct BuildResult {
     /// The outputs that were produced after successfully building.
     // They are sorted by the order specified in the build request.
     pub outputs: Vec<BuildOutput>,
+}
+
+impl BuildResult {
+    // Constructs a BuildResult from a stream of BuildUpdate.
+    //
+    // Ignores produced stdout and stderr.
+    // Returns an error if there's any BuildFailure sent in the stream.
+    pub async fn try_from_build_updates(
+        mut build_updates: impl futures::Stream<Item = super::BuildUpdate> + Unpin,
+    ) -> Result<Self, BuildFailure> {
+        let mut build_outputs: Vec<(u64, BuildOutput)> = vec![];
+
+        while let Some(build_update) = build_updates.next().await {
+            match build_update {
+                super::BuildUpdate::ProducedOutput {
+                    node,
+                    idx,
+                    refscan_needles,
+                } => {
+                    build_outputs.push((
+                        idx,
+                        BuildOutput {
+                            node,
+                            output_needles: refscan_needles,
+                        },
+                    ));
+                }
+                super::BuildUpdate::ProducedStdout(_) | super::BuildUpdate::ProducedStderr(_) => {}
+                super::BuildUpdate::BuildFailure(err) => return Err(err),
+            }
+        }
+
+        build_outputs.sort_by_key(|(idx, _)| *idx);
+
+        Ok(Self {
+            outputs: build_outputs
+                .into_iter()
+                .map(|(_, build_output)| build_output)
+                .collect(),
+        })
+    }
 }
 
 /// Specific information about an individual output in [BuildResult].

@@ -5,7 +5,7 @@ use nix_compat::{
     nixhash::CAHash,
     store_path::{StorePath, StorePathRef},
 };
-use snix_build::buildservice::BuildService;
+use snix_build::buildservice::{BuildResult, BuildService};
 use snix_castore::{
     blobservice::BlobService,
     directoryservice::{DirectoryService, traversal::descend_to},
@@ -210,12 +210,11 @@ impl BuildState {
                 span.pb_set_message(&format!("🔨Building {}", store_path));
 
                 // create a build
-                let build_result = self
-                    .build_service
-                    .as_ref()
-                    .do_build(build_request)
-                    .await
-                    .map_err(std::io::Error::other)?;
+                let build_result = BuildResult::try_from_build_updates(
+                    self.build_service.do_build_streaming(build_request),
+                )
+                .await
+                .map_err(std::io::Error::other)?;
 
                 let mut out_path_info: Option<PathInfo> = None;
 

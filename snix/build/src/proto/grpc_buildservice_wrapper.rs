@@ -1,4 +1,4 @@
-use crate::buildservice::BuildService;
+use crate::buildservice::{BuildResult, BuildService};
 use tonic::async_trait;
 
 use super::{BuildRequest, BuildResponse};
@@ -28,7 +28,8 @@ where
     ) -> Result<tonic::Response<BuildResponse>, tonic::Status> {
         let request = TryInto::<crate::buildservice::BuildRequest>::try_into(request.into_inner())
             .map_err(|err| tonic::Status::new(tonic::Code::InvalidArgument, err.to_string()))?;
-        match self.inner.do_build(request).await {
+
+        match BuildResult::try_from_build_updates(self.inner.do_build_streaming(request)).await {
             Ok(resp) => Ok(tonic::Response::new(resp.into())),
             Err(e) => Err(tonic::Status::internal(e.to_string())),
         }
