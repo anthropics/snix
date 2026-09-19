@@ -1,7 +1,7 @@
-use crate::buildservice::{BuildResult, BuildService};
-use tonic::async_trait;
-
-use super::{BuildRequest, BuildResponse};
+use crate::{buildservice::BuildService, proto};
+use futures::StreamExt;
+use futures::stream::BoxStream;
+use tonic::{Response, async_trait};
 
 /// Implements the gRPC server trait ([crate::proto::build_service_server::BuildService]
 /// for anything implementing [BuildService].
@@ -20,18 +20,26 @@ impl<BUILD> GRPCBuildServiceWrapper<BUILD> {
 #[async_trait]
 impl<BUILD> crate::proto::build_service_server::BuildService for GRPCBuildServiceWrapper<BUILD>
 where
-    BUILD: BuildService + 'static,
+    BUILD: BuildService + Clone + 'static,
 {
+    type DoBuildStream = BoxStream<'static, tonic::Result<proto::BuildUpdate>>;
+
     async fn do_build(
         &self,
-        request: tonic::Request<BuildRequest>,
-    ) -> Result<tonic::Response<BuildResponse>, tonic::Status> {
-        let request = TryInto::<crate::buildservice::BuildRequest>::try_into(request.into_inner())
+        request: tonic::Request<proto::BuildRequest>,
+    ) -> tonic::Result<Response<Self::DoBuildStream>> {
+        let proto_build_request = request.into_inner();
+        let build_request = crate::buildservice::BuildRequest::try_from(proto_build_request)
             .map_err(|err| tonic::Status::new(tonic::Code::InvalidArgument, err.to_string()))?;
 
-        match BuildResult::try_from_build_updates(self.inner.do_build_streaming(request)).await {
-            Ok(resp) => Ok(tonic::Response::new(resp.into())),
-            Err(e) => Err(tonic::Status::internal(e.to_string())),
-        }
+        let build_service = self.inner.clone();
+        let stream = async_stream::try_stream! {
+            let mut build_updates = build_service.do_build(build_request);
+            while let Some(build_update) = build_updates.next().await {
+                yield proto::BuildUpdate::from(build_update);
+            }
+        };
+
+        Ok(Response::new(stream.boxed()))
     }
 }

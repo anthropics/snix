@@ -1,6 +1,5 @@
 use auto_impl::auto_impl;
-use futures::{StreamExt, stream::BoxStream};
-use tonic::async_trait;
+use futures::stream::BoxStream;
 
 pub mod build_request;
 pub use crate::buildservice::build_request::*;
@@ -41,12 +40,18 @@ pub enum BuildUpdate {
     BuildFailure(BuildFailure),
 }
 
+impl From<BuildFailure> for BuildUpdate {
+    fn from(value: BuildFailure) -> Self {
+        Self::BuildFailure(value)
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum BuildFailure {
     #[error("nonzero exit code")]
     NonzeroExitCode,
-    #[error("not all outputs produced")]
-    MissingOutputs,
+    #[error("not all outputs produced, missing: {}", .output)]
+    MissingOutput { output: String },
     #[error("other error: {}", .message)]
     Other { message: String },
 }
@@ -67,6 +72,14 @@ impl From<anyhow::Error> for BuildFailure {
     }
 }
 
+impl From<tonic::Status> for BuildFailure {
+    fn from(value: tonic::Status) -> Self {
+        Self::Other {
+            message: format!("Tonic status: {value}"),
+        }
+    }
+}
+
 impl From<tokio::sync::AcquireError> for BuildFailure {
     fn from(err: tokio::sync::AcquireError) -> Self {
         Self::Other {
@@ -83,47 +96,8 @@ impl<E: std::fmt::Display> From<snix_castore::import::IngestionError<E>> for Bui
     }
 }
 
-#[async_trait]
 #[auto_impl(&, &mut, Arc, Box)]
 pub trait BuildService: Send + Sync {
-    /// TODO: document
-    async fn do_build(&self, request: BuildRequest) -> std::io::Result<BuildResult>;
-
-    // TODO: call this do_build and drop default impl once everything is streaming
-    fn do_build_streaming(&self, request: BuildRequest) -> BoxStream<'_, BuildUpdate> {
-        async_stream::stream! {
-            let rq_num_outputs = request.outputs.len();
-
-            // NOTE: The unary do_build can't send stdout/stderr at all currently.
-
-            match self.do_build(request).await {
-                Ok(build_result) => {
-                    if build_result.outputs.len() != rq_num_outputs {
-                        yield BuildUpdate::BuildFailure(BuildFailure::MissingOutputs)
-                    }
-
-                    for (
-                        idx,
-                        BuildOutput {
-                            node,
-                            output_needles,
-                        },
-                    ) in build_result.outputs.into_iter().enumerate()
-                    {
-                        yield BuildUpdate::ProducedOutput {
-                            node,
-                            idx: idx as u64,
-                            refscan_needles: output_needles,
-                        };
-                    }
-                }
-                Err(err) => {
-                    yield BuildUpdate::BuildFailure(BuildFailure::Other {
-                        message: err.to_string(),
-                    });
-                }
-            }
-        }
-        .boxed()
-    }
+    // TODO: document
+    fn do_build(&self, request: BuildRequest) -> BoxStream<'_, BuildUpdate>;
 }

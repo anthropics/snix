@@ -10,5 +10,8 @@ import "snix/build/protos/build.proto";
 option go_package = "snix.dev/build/proto;buildv1";
 
 service BuildService {
-  rpc DoBuild(BuildRequest) returns (BuildResponse);
+  rpc DoBuild(BuildRequest) returns (stream BuildUpdate);
 }
+
+// FUTUREWORK: BuildRequest is some sort of spec by now,
+// wrap it into some outer type to support protocol level control messages and flags.

@@ -223,30 +223,34 @@ func (x *BuildRequest) GetRefscanNeedles() []string {
 	return nil
 }
 
-// A BuildResponse is (one possible) outcome of executing a [BuildRequest].
-type BuildResponse struct {
+// A BuildUpdate is sent whenever builds make progress.
+type BuildUpdate struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The outputs that were produced after successfully building.
-	// They are provided in the same order as specified in the [BuildRequest].
-	Outputs       []*BuildResponse_Output `protobuf:"bytes,1,rep,name=outputs,proto3" json:"outputs,omitempty"`
+	// Types that are valid to be assigned to Kind:
+	//
+	//	*BuildUpdate_ProducedOutput_
+	//	*BuildUpdate_ProducedStdout
+	//	*BuildUpdate_ProducedStderr
+	//	*BuildUpdate_BuildFailure_
+	Kind          isBuildUpdate_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *BuildResponse) Reset() {
-	*x = BuildResponse{}
+func (x *BuildUpdate) Reset() {
+	*x = BuildUpdate{}
 	mi := &file_snix_build_protos_build_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *BuildResponse) String() string {
+func (x *BuildUpdate) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*BuildResponse) ProtoMessage() {}
+func (*BuildUpdate) ProtoMessage() {}
 
-func (x *BuildResponse) ProtoReflect() protoreflect.Message {
+func (x *BuildUpdate) ProtoReflect() protoreflect.Message {
 	mi := &file_snix_build_protos_build_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -258,17 +262,85 @@ func (x *BuildResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use BuildResponse.ProtoReflect.Descriptor instead.
-func (*BuildResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use BuildUpdate.ProtoReflect.Descriptor instead.
+func (*BuildUpdate) Descriptor() ([]byte, []int) {
 	return file_snix_build_protos_build_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *BuildResponse) GetOutputs() []*BuildResponse_Output {
+func (x *BuildUpdate) GetKind() isBuildUpdate_Kind {
 	if x != nil {
-		return x.Outputs
+		return x.Kind
 	}
 	return nil
 }
+
+func (x *BuildUpdate) GetProducedOutput() *BuildUpdate_ProducedOutput {
+	if x != nil {
+		if x, ok := x.Kind.(*BuildUpdate_ProducedOutput_); ok {
+			return x.ProducedOutput
+		}
+	}
+	return nil
+}
+
+func (x *BuildUpdate) GetProducedStdout() *BuildUpdate_StdioChunk {
+	if x != nil {
+		if x, ok := x.Kind.(*BuildUpdate_ProducedStdout); ok {
+			return x.ProducedStdout
+		}
+	}
+	return nil
+}
+
+func (x *BuildUpdate) GetProducedStderr() *BuildUpdate_StdioChunk {
+	if x != nil {
+		if x, ok := x.Kind.(*BuildUpdate_ProducedStderr); ok {
+			return x.ProducedStderr
+		}
+	}
+	return nil
+}
+
+func (x *BuildUpdate) GetBuildFailure() *BuildUpdate_BuildFailure {
+	if x != nil {
+		if x, ok := x.Kind.(*BuildUpdate_BuildFailure_); ok {
+			return x.BuildFailure
+		}
+	}
+	return nil
+}
+
+type isBuildUpdate_Kind interface {
+	isBuildUpdate_Kind()
+}
+
+type BuildUpdate_ProducedOutput_ struct {
+	// An output was produced after successfully building.
+	ProducedOutput *BuildUpdate_ProducedOutput `protobuf:"bytes,1,opt,name=produced_output,json=producedOutput,proto3,oneof"`
+}
+
+type BuildUpdate_ProducedStdout struct {
+	// The build produced output on stdout.
+	ProducedStdout *BuildUpdate_StdioChunk `protobuf:"bytes,2,opt,name=produced_stdout,json=producedStdout,proto3,oneof"`
+}
+
+type BuildUpdate_ProducedStderr struct {
+	// The build produced output on stderr.
+	ProducedStderr *BuildUpdate_StdioChunk `protobuf:"bytes,3,opt,name=produced_stderr,json=producedStderr,proto3,oneof"`
+}
+
+type BuildUpdate_BuildFailure_ struct {
+	// The build failed
+	BuildFailure *BuildUpdate_BuildFailure `protobuf:"bytes,4,opt,name=build_failure,json=buildFailure,proto3,oneof"`
+}
+
+func (*BuildUpdate_ProducedOutput_) isBuildUpdate_Kind() {}
+
+func (*BuildUpdate_ProducedStdout) isBuildUpdate_Kind() {}
+
+func (*BuildUpdate_ProducedStderr) isBuildUpdate_Kind() {}
+
+func (*BuildUpdate_BuildFailure_) isBuildUpdate_Kind() {}
 
 type BuildRequest_EnvVar struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -468,32 +540,38 @@ func (x *BuildRequest_AdditionalFile) GetContents() []byte {
 	return nil
 }
 
-type BuildResponse_Output struct {
+// Describes a single output entry produced by the build.
+type BuildUpdate_ProducedOutput struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Output entry produced by the build. It may not contain a name,
-	// as not all OS paths can be represented as castore paths.
-	// The path this was ingested from can be looked up in the original build request.
-	Output *proto.Entry `protobuf:"bytes,1,opt,name=output,proto3" json:"output,omitempty"`
+	// Describes the contents of this output in the castore model.
+	// The name in the entry is left empty,
+	Entry *proto.Entry `protobuf:"bytes,1,opt,name=entry,proto3" json:"entry,omitempty"`
+	// Specifies which output is being sent, indexing into [BuildRequest::outputs]
+	// (starting from 0)
+	Idx uint64 `protobuf:"varint,2,opt,name=idx,proto3" json:"idx,omitempty"`
 	// Indexes into the found [BuildRequest::refscan_needles] in this output.
-	Needles       []uint64 `protobuf:"varint,2,rep,packed,name=needles,proto3" json:"needles,omitempty"`
+	// (starting from 0)
+	//
+	// FUTUREWORK: decide if this should be a separate update
+	Needles       []uint64 `protobuf:"varint,3,rep,packed,name=needles,proto3" json:"needles,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *BuildResponse_Output) Reset() {
-	*x = BuildResponse_Output{}
+func (x *BuildUpdate_ProducedOutput) Reset() {
+	*x = BuildUpdate_ProducedOutput{}
 	mi := &file_snix_build_protos_build_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *BuildResponse_Output) String() string {
+func (x *BuildUpdate_ProducedOutput) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*BuildResponse_Output) ProtoMessage() {}
+func (*BuildUpdate_ProducedOutput) ProtoMessage() {}
 
-func (x *BuildResponse_Output) ProtoReflect() protoreflect.Message {
+func (x *BuildUpdate_ProducedOutput) ProtoReflect() protoreflect.Message {
 	mi := &file_snix_build_protos_build_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -505,23 +583,292 @@ func (x *BuildResponse_Output) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use BuildResponse_Output.ProtoReflect.Descriptor instead.
-func (*BuildResponse_Output) Descriptor() ([]byte, []int) {
+// Deprecated: Use BuildUpdate_ProducedOutput.ProtoReflect.Descriptor instead.
+func (*BuildUpdate_ProducedOutput) Descriptor() ([]byte, []int) {
 	return file_snix_build_protos_build_proto_rawDescGZIP(), []int{1, 0}
 }
 
-func (x *BuildResponse_Output) GetOutput() *proto.Entry {
+func (x *BuildUpdate_ProducedOutput) GetEntry() *proto.Entry {
 	if x != nil {
-		return x.Output
+		return x.Entry
 	}
 	return nil
 }
 
-func (x *BuildResponse_Output) GetNeedles() []uint64 {
+func (x *BuildUpdate_ProducedOutput) GetIdx() uint64 {
+	if x != nil {
+		return x.Idx
+	}
+	return 0
+}
+
+func (x *BuildUpdate_ProducedOutput) GetNeedles() []uint64 {
 	if x != nil {
 		return x.Needles
 	}
 	return nil
+}
+
+type BuildUpdate_StdioChunk struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Chunk         []byte                 `protobuf:"bytes,1,opt,name=chunk,proto3" json:"chunk,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BuildUpdate_StdioChunk) Reset() {
+	*x = BuildUpdate_StdioChunk{}
+	mi := &file_snix_build_protos_build_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BuildUpdate_StdioChunk) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BuildUpdate_StdioChunk) ProtoMessage() {}
+
+func (x *BuildUpdate_StdioChunk) ProtoReflect() protoreflect.Message {
+	mi := &file_snix_build_protos_build_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BuildUpdate_StdioChunk.ProtoReflect.Descriptor instead.
+func (*BuildUpdate_StdioChunk) Descriptor() ([]byte, []int) {
+	return file_snix_build_protos_build_proto_rawDescGZIP(), []int{1, 1}
+}
+
+func (x *BuildUpdate_StdioChunk) GetChunk() []byte {
+	if x != nil {
+		return x.Chunk
+	}
+	return nil
+}
+
+type BuildUpdate_BuildFailure struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Kind:
+	//
+	//	*BuildUpdate_BuildFailure_NonzeroExitCode_
+	//	*BuildUpdate_BuildFailure_MissingOutputs_
+	//	*BuildUpdate_BuildFailure_Other_
+	Kind          isBuildUpdate_BuildFailure_Kind `protobuf_oneof:"kind"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BuildUpdate_BuildFailure) Reset() {
+	*x = BuildUpdate_BuildFailure{}
+	mi := &file_snix_build_protos_build_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BuildUpdate_BuildFailure) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BuildUpdate_BuildFailure) ProtoMessage() {}
+
+func (x *BuildUpdate_BuildFailure) ProtoReflect() protoreflect.Message {
+	mi := &file_snix_build_protos_build_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BuildUpdate_BuildFailure.ProtoReflect.Descriptor instead.
+func (*BuildUpdate_BuildFailure) Descriptor() ([]byte, []int) {
+	return file_snix_build_protos_build_proto_rawDescGZIP(), []int{1, 2}
+}
+
+func (x *BuildUpdate_BuildFailure) GetKind() isBuildUpdate_BuildFailure_Kind {
+	if x != nil {
+		return x.Kind
+	}
+	return nil
+}
+
+func (x *BuildUpdate_BuildFailure) GetNonzeroExitCode() *BuildUpdate_BuildFailure_NonzeroExitCode {
+	if x != nil {
+		if x, ok := x.Kind.(*BuildUpdate_BuildFailure_NonzeroExitCode_); ok {
+			return x.NonzeroExitCode
+		}
+	}
+	return nil
+}
+
+func (x *BuildUpdate_BuildFailure) GetMissingOutputs() *BuildUpdate_BuildFailure_MissingOutputs {
+	if x != nil {
+		if x, ok := x.Kind.(*BuildUpdate_BuildFailure_MissingOutputs_); ok {
+			return x.MissingOutputs
+		}
+	}
+	return nil
+}
+
+func (x *BuildUpdate_BuildFailure) GetOther() *BuildUpdate_BuildFailure_Other {
+	if x != nil {
+		if x, ok := x.Kind.(*BuildUpdate_BuildFailure_Other_); ok {
+			return x.Other
+		}
+	}
+	return nil
+}
+
+type isBuildUpdate_BuildFailure_Kind interface {
+	isBuildUpdate_BuildFailure_Kind()
+}
+
+type BuildUpdate_BuildFailure_NonzeroExitCode_ struct {
+	// The build returned a nonzero exit code
+	NonzeroExitCode *BuildUpdate_BuildFailure_NonzeroExitCode `protobuf:"bytes,1,opt,name=nonzero_exit_code,json=nonzeroExitCode,proto3,oneof"`
+}
+
+type BuildUpdate_BuildFailure_MissingOutputs_ struct {
+	// Some of the outputs were not produced
+	MissingOutputs *BuildUpdate_BuildFailure_MissingOutputs `protobuf:"bytes,2,opt,name=missing_outputs,json=missingOutputs,proto3,oneof"`
+}
+
+type BuildUpdate_BuildFailure_Other_ struct {
+	// Another error occured.
+	Other *BuildUpdate_BuildFailure_Other `protobuf:"bytes,3,opt,name=other,proto3,oneof"`
+}
+
+func (*BuildUpdate_BuildFailure_NonzeroExitCode_) isBuildUpdate_BuildFailure_Kind() {}
+
+func (*BuildUpdate_BuildFailure_MissingOutputs_) isBuildUpdate_BuildFailure_Kind() {}
+
+func (*BuildUpdate_BuildFailure_Other_) isBuildUpdate_BuildFailure_Kind() {}
+
+type BuildUpdate_BuildFailure_NonzeroExitCode struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BuildUpdate_BuildFailure_NonzeroExitCode) Reset() {
+	*x = BuildUpdate_BuildFailure_NonzeroExitCode{}
+	mi := &file_snix_build_protos_build_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BuildUpdate_BuildFailure_NonzeroExitCode) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BuildUpdate_BuildFailure_NonzeroExitCode) ProtoMessage() {}
+
+func (x *BuildUpdate_BuildFailure_NonzeroExitCode) ProtoReflect() protoreflect.Message {
+	mi := &file_snix_build_protos_build_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BuildUpdate_BuildFailure_NonzeroExitCode.ProtoReflect.Descriptor instead.
+func (*BuildUpdate_BuildFailure_NonzeroExitCode) Descriptor() ([]byte, []int) {
+	return file_snix_build_protos_build_proto_rawDescGZIP(), []int{1, 2, 0}
+}
+
+type BuildUpdate_BuildFailure_MissingOutputs struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BuildUpdate_BuildFailure_MissingOutputs) Reset() {
+	*x = BuildUpdate_BuildFailure_MissingOutputs{}
+	mi := &file_snix_build_protos_build_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BuildUpdate_BuildFailure_MissingOutputs) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BuildUpdate_BuildFailure_MissingOutputs) ProtoMessage() {}
+
+func (x *BuildUpdate_BuildFailure_MissingOutputs) ProtoReflect() protoreflect.Message {
+	mi := &file_snix_build_protos_build_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BuildUpdate_BuildFailure_MissingOutputs.ProtoReflect.Descriptor instead.
+func (*BuildUpdate_BuildFailure_MissingOutputs) Descriptor() ([]byte, []int) {
+	return file_snix_build_protos_build_proto_rawDescGZIP(), []int{1, 2, 1}
+}
+
+type BuildUpdate_BuildFailure_Other struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// An error message, explaining why the build failed.
+	Message       string `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BuildUpdate_BuildFailure_Other) Reset() {
+	*x = BuildUpdate_BuildFailure_Other{}
+	mi := &file_snix_build_protos_build_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BuildUpdate_BuildFailure_Other) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BuildUpdate_BuildFailure_Other) ProtoMessage() {}
+
+func (x *BuildUpdate_BuildFailure_Other) ProtoReflect() protoreflect.Message {
+	mi := &file_snix_build_protos_build_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BuildUpdate_BuildFailure_Other.ProtoReflect.Descriptor instead.
+func (*BuildUpdate_BuildFailure_Other) Descriptor() ([]byte, []int) {
+	return file_snix_build_protos_build_proto_rawDescGZIP(), []int{1, 2, 2}
+}
+
+func (x *BuildUpdate_BuildFailure_Other) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
 }
 
 var File_snix_build_protos_build_proto protoreflect.FileDescriptor
@@ -555,12 +902,29 @@ const file_snix_build_protos_build_proto_rawDesc = "" +
 	"\x0eprovide_bin_sh\x18\x05 \x01(\bR\fprovideBinSh\x1a@\n" +
 	"\x0eAdditionalFile\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x1a\n" +
-	"\bcontents\x18\x02 \x01(\fR\bcontents\"\xa2\x01\n" +
-	"\rBuildResponse\x12=\n" +
-	"\aoutputs\x18\x01 \x03(\v2#.snix.build.v1.BuildResponse.OutputR\aoutputs\x1aR\n" +
-	"\x06Output\x12.\n" +
-	"\x06output\x18\x01 \x01(\v2\x16.snix.castore.v1.EntryR\x06output\x12\x18\n" +
-	"\aneedles\x18\x02 \x03(\x04R\aneedlesB\x1eZ\x1csnix.dev/build/proto;buildv1b\x06proto3"
+	"\bcontents\x18\x02 \x01(\fR\bcontents\"\xe1\x06\n" +
+	"\vBuildUpdate\x12T\n" +
+	"\x0fproduced_output\x18\x01 \x01(\v2).snix.build.v1.BuildUpdate.ProducedOutputH\x00R\x0eproducedOutput\x12P\n" +
+	"\x0fproduced_stdout\x18\x02 \x01(\v2%.snix.build.v1.BuildUpdate.StdioChunkH\x00R\x0eproducedStdout\x12P\n" +
+	"\x0fproduced_stderr\x18\x03 \x01(\v2%.snix.build.v1.BuildUpdate.StdioChunkH\x00R\x0eproducedStderr\x12N\n" +
+	"\rbuild_failure\x18\x04 \x01(\v2'.snix.build.v1.BuildUpdate.BuildFailureH\x00R\fbuildFailure\x1aj\n" +
+	"\x0eProducedOutput\x12,\n" +
+	"\x05entry\x18\x01 \x01(\v2\x16.snix.castore.v1.EntryR\x05entry\x12\x10\n" +
+	"\x03idx\x18\x02 \x01(\x04R\x03idx\x12\x18\n" +
+	"\aneedles\x18\x03 \x03(\x04R\aneedles\x1a\"\n" +
+	"\n" +
+	"StdioChunk\x12\x14\n" +
+	"\x05chunk\x18\x01 \x01(\fR\x05chunk\x1a\xef\x02\n" +
+	"\fBuildFailure\x12e\n" +
+	"\x11nonzero_exit_code\x18\x01 \x01(\v27.snix.build.v1.BuildUpdate.BuildFailure.NonzeroExitCodeH\x00R\x0fnonzeroExitCode\x12a\n" +
+	"\x0fmissing_outputs\x18\x02 \x01(\v26.snix.build.v1.BuildUpdate.BuildFailure.MissingOutputsH\x00R\x0emissingOutputs\x12E\n" +
+	"\x05other\x18\x03 \x01(\v2-.snix.build.v1.BuildUpdate.BuildFailure.OtherH\x00R\x05other\x1a\x11\n" +
+	"\x0fNonzeroExitCode\x1a\x10\n" +
+	"\x0eMissingOutputs\x1a!\n" +
+	"\x05Other\x12\x18\n" +
+	"\amessage\x18\x01 \x01(\tR\amessageB\x06\n" +
+	"\x04kindB\x06\n" +
+	"\x04kindB\x1eZ\x1csnix.dev/build/proto;buildv1b\x06proto3"
 
 var (
 	file_snix_build_protos_build_proto_rawDescOnce sync.Once
@@ -574,28 +938,39 @@ func file_snix_build_protos_build_proto_rawDescGZIP() []byte {
 	return file_snix_build_protos_build_proto_rawDescData
 }
 
-var file_snix_build_protos_build_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_snix_build_protos_build_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_snix_build_protos_build_proto_goTypes = []any{
-	(*BuildRequest)(nil),                  // 0: snix.build.v1.BuildRequest
-	(*BuildResponse)(nil),                 // 1: snix.build.v1.BuildResponse
-	(*BuildRequest_EnvVar)(nil),           // 2: snix.build.v1.BuildRequest.EnvVar
-	(*BuildRequest_BuildConstraints)(nil), // 3: snix.build.v1.BuildRequest.BuildConstraints
-	(*BuildRequest_AdditionalFile)(nil),   // 4: snix.build.v1.BuildRequest.AdditionalFile
-	(*BuildResponse_Output)(nil),          // 5: snix.build.v1.BuildResponse.Output
-	(*proto.Entry)(nil),                   // 6: snix.castore.v1.Entry
+	(*BuildRequest)(nil),                             // 0: snix.build.v1.BuildRequest
+	(*BuildUpdate)(nil),                              // 1: snix.build.v1.BuildUpdate
+	(*BuildRequest_EnvVar)(nil),                      // 2: snix.build.v1.BuildRequest.EnvVar
+	(*BuildRequest_BuildConstraints)(nil),            // 3: snix.build.v1.BuildRequest.BuildConstraints
+	(*BuildRequest_AdditionalFile)(nil),              // 4: snix.build.v1.BuildRequest.AdditionalFile
+	(*BuildUpdate_ProducedOutput)(nil),               // 5: snix.build.v1.BuildUpdate.ProducedOutput
+	(*BuildUpdate_StdioChunk)(nil),                   // 6: snix.build.v1.BuildUpdate.StdioChunk
+	(*BuildUpdate_BuildFailure)(nil),                 // 7: snix.build.v1.BuildUpdate.BuildFailure
+	(*BuildUpdate_BuildFailure_NonzeroExitCode)(nil), // 8: snix.build.v1.BuildUpdate.BuildFailure.NonzeroExitCode
+	(*BuildUpdate_BuildFailure_MissingOutputs)(nil),  // 9: snix.build.v1.BuildUpdate.BuildFailure.MissingOutputs
+	(*BuildUpdate_BuildFailure_Other)(nil),           // 10: snix.build.v1.BuildUpdate.BuildFailure.Other
+	(*proto.Entry)(nil),                              // 11: snix.castore.v1.Entry
 }
 var file_snix_build_protos_build_proto_depIdxs = []int32{
-	6, // 0: snix.build.v1.BuildRequest.inputs:type_name -> snix.castore.v1.Entry
-	2, // 1: snix.build.v1.BuildRequest.environment_vars:type_name -> snix.build.v1.BuildRequest.EnvVar
-	3, // 2: snix.build.v1.BuildRequest.constraints:type_name -> snix.build.v1.BuildRequest.BuildConstraints
-	4, // 3: snix.build.v1.BuildRequest.additional_files:type_name -> snix.build.v1.BuildRequest.AdditionalFile
-	5, // 4: snix.build.v1.BuildResponse.outputs:type_name -> snix.build.v1.BuildResponse.Output
-	6, // 5: snix.build.v1.BuildResponse.Output.output:type_name -> snix.castore.v1.Entry
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	11, // 0: snix.build.v1.BuildRequest.inputs:type_name -> snix.castore.v1.Entry
+	2,  // 1: snix.build.v1.BuildRequest.environment_vars:type_name -> snix.build.v1.BuildRequest.EnvVar
+	3,  // 2: snix.build.v1.BuildRequest.constraints:type_name -> snix.build.v1.BuildRequest.BuildConstraints
+	4,  // 3: snix.build.v1.BuildRequest.additional_files:type_name -> snix.build.v1.BuildRequest.AdditionalFile
+	5,  // 4: snix.build.v1.BuildUpdate.produced_output:type_name -> snix.build.v1.BuildUpdate.ProducedOutput
+	6,  // 5: snix.build.v1.BuildUpdate.produced_stdout:type_name -> snix.build.v1.BuildUpdate.StdioChunk
+	6,  // 6: snix.build.v1.BuildUpdate.produced_stderr:type_name -> snix.build.v1.BuildUpdate.StdioChunk
+	7,  // 7: snix.build.v1.BuildUpdate.build_failure:type_name -> snix.build.v1.BuildUpdate.BuildFailure
+	11, // 8: snix.build.v1.BuildUpdate.ProducedOutput.entry:type_name -> snix.castore.v1.Entry
+	8,  // 9: snix.build.v1.BuildUpdate.BuildFailure.nonzero_exit_code:type_name -> snix.build.v1.BuildUpdate.BuildFailure.NonzeroExitCode
+	9,  // 10: snix.build.v1.BuildUpdate.BuildFailure.missing_outputs:type_name -> snix.build.v1.BuildUpdate.BuildFailure.MissingOutputs
+	10, // 11: snix.build.v1.BuildUpdate.BuildFailure.other:type_name -> snix.build.v1.BuildUpdate.BuildFailure.Other
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_snix_build_protos_build_proto_init() }
@@ -603,13 +978,24 @@ func file_snix_build_protos_build_proto_init() {
 	if File_snix_build_protos_build_proto != nil {
 		return
 	}
+	file_snix_build_protos_build_proto_msgTypes[1].OneofWrappers = []any{
+		(*BuildUpdate_ProducedOutput_)(nil),
+		(*BuildUpdate_ProducedStdout)(nil),
+		(*BuildUpdate_ProducedStderr)(nil),
+		(*BuildUpdate_BuildFailure_)(nil),
+	}
+	file_snix_build_protos_build_proto_msgTypes[7].OneofWrappers = []any{
+		(*BuildUpdate_BuildFailure_NonzeroExitCode_)(nil),
+		(*BuildUpdate_BuildFailure_MissingOutputs_)(nil),
+		(*BuildUpdate_BuildFailure_Other_)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_snix_build_protos_build_proto_rawDesc), len(file_snix_build_protos_build_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

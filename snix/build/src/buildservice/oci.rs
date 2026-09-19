@@ -10,11 +10,10 @@ use snix_castore::{
     blobservice::BlobService, directoryservice::DirectoryService, fs::fuse::FuseDaemon,
 };
 use tokio::process::{Child, Command};
-use tonic::async_trait;
 use tracing::{Span, debug, instrument};
 use uuid::Uuid;
 
-use super::{BuildFailure, BuildResult, BuildService, BuildUpdate};
+use super::{BuildFailure, BuildService, BuildUpdate};
 use crate::sandbox::event::{SandboxEvent, stream_process};
 use crate::{buildservice::BuildRequest, oci::OciOutputs};
 use crate::{
@@ -112,14 +111,13 @@ where
     }
 }
 
-#[async_trait]
 impl<BS, DS> BuildService for OCIBuildService<BS, DS>
 where
     BS: BlobService + Clone + 'static,
     DS: DirectoryService + Clone + 'static,
 {
     #[instrument(skip_all, fields(build.name=tracing::field::Empty))]
-    fn do_build_streaming(&self, request: BuildRequest) -> BoxStream<'_, BuildUpdate> {
+    fn do_build(&self, request: BuildRequest) -> BoxStream<'_, BuildUpdate> {
         let span = Span::current();
         let build_name = Uuid::new_v4();
         let bundle_path = self.bundle_root.join(build_name.to_string());
@@ -136,14 +134,6 @@ where
                     .await
             },
         )
-    }
-
-    #[instrument(skip_all, err, fields(build.name=tracing::field::Empty))]
-    async fn do_build(&self, request: BuildRequest) -> std::io::Result<BuildResult> {
-        let stream = self.do_build_streaming(request);
-        BuildResult::try_from_build_updates(stream)
-            .await
-            .map_err(std::io::Error::other)
     }
 }
 

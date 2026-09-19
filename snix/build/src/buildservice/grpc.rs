@@ -1,9 +1,11 @@
-use tonic::async_trait;
+use futures::stream::BoxStream;
+use futures::{StreamExt, TryStreamExt};
+use tracing::instrument;
 
-use crate::buildservice::BuildRequest;
-use crate::proto::{self, build_service_client::BuildServiceClient};
+use crate::buildservice::{BuildFailure, BuildRequest, BuildUpdate};
+use crate::proto::build_service_client::BuildServiceClient;
 
-use super::{BuildResult, BuildService};
+use super::BuildService;
 
 pub struct GRPCBuildService<T> {
     client: BuildServiceClient<T>,
@@ -16,7 +18,6 @@ impl<T> GRPCBuildService<T> {
     }
 }
 
-#[async_trait]
 impl<T> BuildService for GRPCBuildService<T>
 where
     T: tonic::client::GrpcService<tonic::body::Body> + Send + Sync + Clone + 'static,
@@ -24,14 +25,27 @@ where
     <T::ResponseBody as tonic::codegen::Body>::Error: Into<tonic::codegen::StdError> + Send,
     T::Future: Send,
 {
-    async fn do_build(&self, request: BuildRequest) -> std::io::Result<BuildResult> {
+    #[instrument(skip(self))]
+    fn do_build(&self, request: BuildRequest) -> BoxStream<'_, BuildUpdate> {
         let mut client = self.client.clone();
-        let resp = client
-            .do_build(Into::<proto::BuildRequest>::into(request))
-            .await
-            .map_err(std::io::Error::other)?
-            .into_inner();
 
-        Ok::<BuildResult, _>(resp.try_into().map_err(std::io::Error::other)?)
+        async_stream::try_stream! {
+            let mut stream = client
+                .do_build(tonic::Request::new(request.into()))
+                .await?
+                .into_inner();
+
+            while let Some(proto_build_update) = stream.try_next().await? {
+                yield match BuildUpdate::try_from(proto_build_update) {
+                    Ok(build_update) => build_update,
+                    Err(err) => Err::<_, BuildFailure>(err.into())?,
+                }
+            }
+        }
+        .map(|elem: Result<BuildUpdate, BuildFailure>| match elem {
+            Ok(build_update) => build_update,
+            Err(err) => err.into(),
+        })
+        .boxed()
     }
 }

@@ -8,7 +8,8 @@ mod grpc_buildservice_wrapper;
 
 pub use grpc_buildservice_wrapper::GRPCBuildServiceWrapper;
 
-use crate::buildservice::BuildResult;
+use crate::buildservice;
+use crate::proto::build_update::build_failure;
 
 tonic::include_proto!("snix.build.v1");
 
@@ -58,19 +59,6 @@ pub enum ValidateBuildRequestError {
 
     #[error("additional_files not sorted")]
     AdditionalFilesNotSorted,
-}
-
-/// Errors that occur during the validation of [BuildResult] messages.
-#[derive(Debug, thiserror::Error)]
-pub enum ValidateBuildResultError {
-    #[error("request field is unpopulated")]
-    MissingRequestField,
-    #[error("request is invalid")]
-    InvalidBuildRequest(ValidateBuildRequestError),
-    #[error("output entry {0} missing")]
-    MissingOutputEntry(usize),
-    #[error("output entry {0} invalid")]
-    InvalidOutputEntry(usize),
 }
 
 /// Checks a path to be without any '..' components, and clean (no superfluous
@@ -271,50 +259,6 @@ impl TryFrom<BuildRequest> for crate::buildservice::BuildRequest {
     }
 }
 
-impl From<BuildResult> for BuildResponse {
-    fn from(value: BuildResult) -> Self {
-        Self {
-            outputs: value
-                .outputs
-                .into_iter()
-                .map(|output| build_response::Output {
-                    output: Some(snix_castore::proto::Entry::from_name_and_node(
-                        "".into(),
-                        output.node,
-                    )),
-                    needles: output.output_needles.into_iter().collect(),
-                })
-                .collect(),
-        }
-    }
-}
-
-impl TryFrom<BuildResponse> for BuildResult {
-    type Error = ValidateBuildResultError;
-
-    fn try_from(value: BuildResponse) -> Result<Self, Self::Error> {
-        Ok(Self {
-            outputs: value
-                .outputs
-                .into_iter()
-                .enumerate()
-                .map(|(i, output)| {
-                    let node = output
-                        .output
-                        .ok_or(ValidateBuildResultError::MissingOutputEntry(i))?
-                        .try_into_anonymous_node()
-                        .map_err(|_| ValidateBuildResultError::InvalidOutputEntry(i))?;
-
-                    Ok::<_, ValidateBuildResultError>(crate::buildservice::BuildOutput {
-                        node,
-                        output_needles: BTreeSet::from_iter(output.needles),
-                    })
-                })
-                .try_collect()?,
-        })
-    }
-}
-
 /// Errors that occur during the validation of
 /// [build_request::BuildConstraints] messages.
 #[derive(Debug, thiserror::Error)]
@@ -404,6 +348,129 @@ impl TryFrom<build_request::BuildConstraints> for HashSet<crate::buildservice::B
         }
 
         Ok(build_constraints)
+    }
+}
+
+impl From<buildservice::BuildUpdate> for BuildUpdate {
+    fn from(value: buildservice::BuildUpdate) -> Self {
+        Self {
+            kind: Some(match value {
+                buildservice::BuildUpdate::ProducedOutput {
+                    node,
+                    idx,
+                    refscan_needles,
+                } => build_update::Kind::ProducedOutput(build_update::ProducedOutput {
+                    entry: Some(snix_castore::proto::Entry::from_name_and_node(
+                        "".into(),
+                        node,
+                    )),
+                    idx,
+                    needles: refscan_needles.into_iter().collect(),
+                }),
+                buildservice::BuildUpdate::ProducedStdout(items) => {
+                    build_update::Kind::ProducedStdout(build_update::StdioChunk {
+                        chunk: items.into(),
+                    })
+                }
+                buildservice::BuildUpdate::ProducedStderr(items) => {
+                    build_update::Kind::ProducedStderr(build_update::StdioChunk {
+                        chunk: items.into(),
+                    })
+                }
+                buildservice::BuildUpdate::BuildFailure(build_failure) => {
+                    build_update::Kind::BuildFailure(build_update::BuildFailure {
+                        kind: Some(match build_failure {
+                            buildservice::BuildFailure::NonzeroExitCode => {
+                                build_failure::Kind::NonzeroExitCode(
+                                    build_failure::NonzeroExitCode {},
+                                )
+                            }
+                            buildservice::BuildFailure::MissingOutput { output } => {
+                                build_failure::Kind::MissingOutput(build_failure::MissingOutput {
+                                    output,
+                                })
+                            }
+                            buildservice::BuildFailure::Other { message } => {
+                                build_failure::Kind::Other(build_failure::Other { message })
+                            }
+                        }),
+                    })
+                }
+            }),
+        }
+    }
+}
+
+impl TryFrom<BuildUpdate> for buildservice::BuildUpdate {
+    type Error = ValidateBuildUpdateError;
+
+    fn try_from(value: BuildUpdate) -> Result<Self, Self::Error> {
+        let kind = value
+            .kind
+            .ok_or(ValidateBuildUpdateError::UnexpectedBuildUpdateKind)?;
+
+        Ok(match kind {
+            build_update::Kind::ProducedOutput(build_update::ProducedOutput {
+                entry: None,
+                ..
+            }) => {
+                return Err(ValidateBuildUpdateError::InvalidProducedOutputEntry);
+            }
+            build_update::Kind::ProducedOutput(build_update::ProducedOutput {
+                entry: Some(entry),
+                idx,
+                needles,
+            }) => {
+                let node = entry
+                    .try_into_anonymous_node()
+                    .or(Err(ValidateBuildUpdateError::InvalidProducedOutputEntry))?;
+                Self::ProducedOutput {
+                    node,
+                    idx,
+                    refscan_needles: BTreeSet::from_iter(needles),
+                }
+            }
+            build_update::Kind::ProducedStdout(produced_stdout) => {
+                Self::ProducedStdout(produced_stdout.chunk.into())
+            }
+            build_update::Kind::ProducedStderr(produced_stderr) => {
+                Self::ProducedStderr(produced_stderr.chunk.into())
+            }
+            build_update::Kind::BuildFailure(build_failure) => {
+                let kind = build_failure
+                    .kind
+                    .ok_or(ValidateBuildUpdateError::UnexpectedBuildFailureKind)?;
+                Self::BuildFailure(match kind {
+                    build_failure::Kind::NonzeroExitCode(_) => {
+                        buildservice::BuildFailure::NonzeroExitCode
+                    }
+                    build_failure::Kind::MissingOutput(build_failure::MissingOutput { output }) => {
+                        buildservice::BuildFailure::MissingOutput { output }
+                    }
+                    build_failure::Kind::Other(other) => buildservice::BuildFailure::Other {
+                        message: other.message,
+                    },
+                })
+            }
+        })
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum ValidateBuildUpdateError {
+    #[error("unexpected BuildUpdate kind")]
+    UnexpectedBuildUpdateKind,
+    #[error("unexpected BuildFailure kind")]
+    UnexpectedBuildFailureKind,
+    #[error("invalid entry in ProducedOutput")]
+    InvalidProducedOutputEntry,
+}
+
+impl From<ValidateBuildUpdateError> for crate::buildservice::BuildFailure {
+    fn from(value: ValidateBuildUpdateError) -> Self {
+        Self::Other {
+            message: format!("failed to validate BuildUpdate: {value}"),
+        }
     }
 }
 

@@ -30,15 +30,15 @@ const file_snix_build_protos_rpc_build_proto_rawDesc = "" +
 	"\n" +
 	"!snix/build/protos/rpc_build.proto\x12\rsnix.build.v1\x1a\x1dsnix/build/protos/build.proto2T\n" +
 	"\fBuildService\x12D\n" +
-	"\aDoBuild\x12\x1b.snix.build.v1.BuildRequest\x1a\x1c.snix.build.v1.BuildResponseB\x1eZ\x1csnix.dev/build/proto;buildv1b\x06proto3"
+	"\aDoBuild\x12\x1b.snix.build.v1.BuildRequest\x1a\x1a.snix.build.v1.BuildUpdate0\x01B\x1eZ\x1csnix.dev/build/proto;buildv1b\x06proto3"
 
 var file_snix_build_protos_rpc_build_proto_goTypes = []any{
-	(*BuildRequest)(nil),  // 0: snix.build.v1.BuildRequest
-	(*BuildResponse)(nil), // 1: snix.build.v1.BuildResponse
+	(*BuildRequest)(nil), // 0: snix.build.v1.BuildRequest
+	(*BuildUpdate)(nil),  // 1: snix.build.v1.BuildUpdate
 }
 var file_snix_build_protos_rpc_build_proto_depIdxs = []int32{
 	0, // 0: snix.build.v1.BuildService.DoBuild:input_type -> snix.build.v1.BuildRequest
-	1, // 1: snix.build.v1.BuildService.DoBuild:output_type -> snix.build.v1.BuildResponse
+	1, // 1: snix.build.v1.BuildService.DoBuild:output_type -> snix.build.v1.BuildUpdate
 	1, // [1:2] is the sub-list for method output_type
 	0, // [0:1] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name

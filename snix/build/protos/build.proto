@@ -155,23 +155,65 @@ message BuildRequest {
   // TODO: allow describing something like "preferLocal", to influence composition?
 }
 
-// A BuildResponse is (one possible) outcome of executing a [BuildRequest].
-message BuildResponse {
-  // The outputs that were produced after successfully building.
-  // They are provided in the same order as specified in the [BuildRequest].
-  repeated Output outputs = 1;
+// A BuildUpdate is sent whenever builds make progress.
+message BuildUpdate {
+  oneof kind {
+    // An output was produced after successfully building.
+    ProducedOutput produced_output = 1;
 
-  message Output {
-    // Output entry produced by the build. It may not contain a name,
-    // as not all OS paths can be represented as castore paths.
-    // The path this was ingested from can be looked up in the original build request.
-    snix.castore.v1.Entry output = 1;
+    // The build produced output on stdout.
+    StdioChunk produced_stdout = 2;
 
-    // Indexes into the found [BuildRequest::refscan_needles] in this output.
-    repeated uint64 needles = 2;
+    // The build produced output on stderr.
+    StdioChunk produced_stderr = 3;
+
+    // The build failed
+    BuildFailure build_failure = 4;
+
+    // FUTUREWORK: resource usage updates etc.
   }
 
-  // TODO: where did this run, how long, logs, …
+  // Describes a single output entry produced by the build.
+  message ProducedOutput {
+    // Describes the contents of this output in the castore model.
+    // The name in the entry is left empty,
+    snix.castore.v1.Entry entry = 1;
+
+    // Specifies which output is being sent, indexing into [BuildRequest::outputs]
+    // (starting from 0)
+    uint64 idx = 2;
+
+    // Indexes into the found [BuildRequest::refscan_needles] in this output.
+    // (starting from 0)
+    //
+    // FUTUREWORK: decide if this should be a separate update
+    repeated uint64 needles = 3;
+  }
+
+  message StdioChunk {
+    bytes chunk = 1;
+  }
+
+  message BuildFailure {
+    oneof kind {
+      // The build returned a nonzero exit code
+      NonzeroExitCode nonzero_exit_code = 1;
+      // An output was not produced
+      MissingOutput missing_output = 2;
+      // Another error occured.
+      Other other = 3;
+    }
+
+    message NonzeroExitCode {}
+    message MissingOutput {
+      // Contains the output path that was missing after the build.
+      string output = 6;
+    }
+    message Other {
+      // An error message, explaining why the build failed.
+      string message = 1;
+    }
+  }
 }
 
 /// TODO: check remarkable notes on constraints again

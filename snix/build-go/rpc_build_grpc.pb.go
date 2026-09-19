@@ -30,7 +30,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type BuildServiceClient interface {
-	DoBuild(ctx context.Context, in *BuildRequest, opts ...grpc.CallOption) (*BuildResponse, error)
+	DoBuild(ctx context.Context, in *BuildRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[BuildUpdate], error)
 }
 
 type buildServiceClient struct {
@@ -41,21 +41,30 @@ func NewBuildServiceClient(cc grpc.ClientConnInterface) BuildServiceClient {
 	return &buildServiceClient{cc}
 }
 
-func (c *buildServiceClient) DoBuild(ctx context.Context, in *BuildRequest, opts ...grpc.CallOption) (*BuildResponse, error) {
+func (c *buildServiceClient) DoBuild(ctx context.Context, in *BuildRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[BuildUpdate], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(BuildResponse)
-	err := c.cc.Invoke(ctx, BuildService_DoBuild_FullMethodName, in, out, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &BuildService_ServiceDesc.Streams[0], BuildService_DoBuild_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &grpc.GenericClientStream[BuildRequest, BuildUpdate]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
 }
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type BuildService_DoBuildClient = grpc.ServerStreamingClient[BuildUpdate]
 
 // BuildServiceServer is the server API for BuildService service.
 // All implementations must embed UnimplementedBuildServiceServer
 // for forward compatibility.
 type BuildServiceServer interface {
-	DoBuild(context.Context, *BuildRequest) (*BuildResponse, error)
+	DoBuild(*BuildRequest, grpc.ServerStreamingServer[BuildUpdate]) error
 	mustEmbedUnimplementedBuildServiceServer()
 }
 
@@ -66,8 +75,8 @@ type BuildServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedBuildServiceServer struct{}
 
-func (UnimplementedBuildServiceServer) DoBuild(context.Context, *BuildRequest) (*BuildResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method DoBuild not implemented")
+func (UnimplementedBuildServiceServer) DoBuild(*BuildRequest, grpc.ServerStreamingServer[BuildUpdate]) error {
+	return status.Error(codes.Unimplemented, "method DoBuild not implemented")
 }
 func (UnimplementedBuildServiceServer) mustEmbedUnimplementedBuildServiceServer() {}
 func (UnimplementedBuildServiceServer) testEmbeddedByValue()                      {}
@@ -90,23 +99,16 @@ func RegisterBuildServiceServer(s grpc.ServiceRegistrar, srv BuildServiceServer)
 	s.RegisterService(&BuildService_ServiceDesc, srv)
 }
 
-func _BuildService_DoBuild_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(BuildRequest)
-	if err := dec(in); err != nil {
-		return nil, err
+func _BuildService_DoBuild_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(BuildRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
 	}
-	if interceptor == nil {
-		return srv.(BuildServiceServer).DoBuild(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: BuildService_DoBuild_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(BuildServiceServer).DoBuild(ctx, req.(*BuildRequest))
-	}
-	return interceptor(ctx, in, info, handler)
+	return srv.(BuildServiceServer).DoBuild(m, &grpc.GenericServerStream[BuildRequest, BuildUpdate]{ServerStream: stream})
 }
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type BuildService_DoBuildServer = grpc.ServerStreamingServer[BuildUpdate]
 
 // BuildService_ServiceDesc is the grpc.ServiceDesc for BuildService service.
 // It's only intended for direct use with grpc.RegisterService,
@@ -114,12 +116,13 @@ func _BuildService_DoBuild_Handler(srv interface{}, ctx context.Context, dec fun
 var BuildService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "snix.build.v1.BuildService",
 	HandlerType: (*BuildServiceServer)(nil),
-	Methods: []grpc.MethodDesc{
+	Methods:     []grpc.MethodDesc{},
+	Streams: []grpc.StreamDesc{
 		{
-			MethodName: "DoBuild",
-			Handler:    _BuildService_DoBuild_Handler,
+			StreamName:    "DoBuild",
+			Handler:       _BuildService_DoBuild_Handler,
+			ServerStreams: true,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
 	Metadata: "snix/build/protos/rpc_build.proto",
 }

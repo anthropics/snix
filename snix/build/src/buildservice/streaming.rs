@@ -60,7 +60,7 @@ where
             let output_resolver = &output_resolver;
             let scanner = ReferenceScanner::new(patterns.clone());
             async move {
-                let host_output_path = output_resolver.find_path(&o).await.ok_or(BuildFailure::MissingOutputs)?;
+                let host_output_path = output_resolver.find_path(&o).await.ok_or(BuildFailure::MissingOutput{output: o})?;
                 ingest_host_output(idx, &host_output_path, scanner, blob_service, directory_service).await.map_err(BuildFailure::from)
             }.in_current_span()
         })).collect();

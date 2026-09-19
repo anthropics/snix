@@ -4,15 +4,12 @@ use futures::stream::BoxStream;
 use snix_castore::{
     blobservice::BlobService, directoryservice::DirectoryService, fs::fuse::FuseDaemon,
 };
-use tonic::async_trait;
 use tracing::{Span, info, instrument};
 use uuid::Uuid;
 
 use super::BuildService;
 use crate::{
-    buildservice::{
-        BuildConstraints, BuildRequest, BuildResult, BuildUpdate, streaming::run_build_streaming,
-    },
+    buildservice::{BuildConstraints, BuildRequest, BuildUpdate, streaming::run_build_streaming},
     bwrap::Bwrap,
     sandbox::SandboxSpec,
 };
@@ -93,14 +90,13 @@ where
     }
 }
 
-#[async_trait]
 impl<BS, DS> BuildService for BubblewrapBuildService<BS, DS>
 where
     BS: BlobService + Clone + 'static,
     DS: DirectoryService + Clone + 'static,
 {
     #[instrument(skip_all, fields(build.name=tracing::field::Empty))]
-    fn do_build_streaming(&self, request: BuildRequest) -> BoxStream<'_, BuildUpdate> {
+    fn do_build(&self, request: BuildRequest) -> BoxStream<'_, BuildUpdate> {
         let span = Span::current();
         let build_name = Uuid::new_v4();
         let sandbox_path = self.workdir.join(build_name.to_string());
@@ -124,13 +120,5 @@ where
                 Ok((stream, finder))
             },
         )
-    }
-
-    #[instrument(skip_all, err, fields(build.name=tracing::field::Empty))]
-    async fn do_build(&self, request: BuildRequest) -> std::io::Result<BuildResult> {
-        let stream = self.do_build_streaming(request);
-        BuildResult::try_from_build_updates(stream)
-            .await
-            .map_err(std::io::Error::other)
     }
 }

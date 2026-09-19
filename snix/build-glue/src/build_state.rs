@@ -1,11 +1,11 @@
 use std::{cell::RefCell, io, sync::Arc};
 
-use futures::TryStreamExt as _;
+use futures::{StreamExt, TryStreamExt as _};
 use nix_compat::{
     nixhash::CAHash,
     store_path::{StorePath, StorePathRef},
 };
-use snix_build::buildservice::{BuildResult, BuildService};
+use snix_build::buildservice::{BuildService, BuildUpdate};
 use snix_castore::{
     blobservice::BlobService,
     directoryservice::{DirectoryService, traversal::descend_to},
@@ -208,44 +208,103 @@ impl BuildState {
 
                 span.pb_set_message(&format!("🔨Building {}", store_path));
 
-                // create a build
-                let build_result = BuildResult::try_from_build_updates(
-                    self.build_service.do_build_streaming(build_request),
-                )
-                .await
-                .map_err(std::io::Error::other)?;
+                // Create a build, await its completion and return a list of output data.
+                struct ProducedOutput<'s> {
+                    output_path: StorePathRef<'s>,
+                    node: snix_castore::Node,
+                    references: Vec<StorePath>,
+                }
+
+                let produced_outputs: Vec<ProducedOutput> = {
+                    let mut produced_outputs: Vec<ProducedOutput> =
+                        Vec::with_capacity(output_paths.len());
+                    let mut build_updates = self.build_service.do_build(build_request);
+
+                    while let Some(build_update) = build_updates.next().await {
+                        match build_update {
+                            BuildUpdate::ProducedOutput {
+                                node,
+                                idx,
+                                refscan_needles,
+                            } => {
+                                let output_path = if idx >= output_paths.len() as u64 {
+                                    return Err(std::io::Error::other("invalid idx"))?;
+                                } else {
+                                    output_paths[idx as usize].as_ref()
+                                };
+
+                                // ensure we only receive each ProducedOutput once.
+                                if produced_outputs
+                                    .iter()
+                                    .any(|e| e.output_path == output_path)
+                                {
+                                    return Err(std::io::Error::other(
+                                        "received output multiple times",
+                                    ));
+                                }
+
+                                produced_outputs.push(ProducedOutput {
+                                    output_path,
+                                    node,
+                                    references: {
+                                        let mut references =
+                                            Vec::with_capacity(refscan_needles.len());
+
+                                        // Map each output needle index back into a store path.
+                                        for needle_idx in refscan_needles {
+                                            let output = all_possible_refs
+                                                .get(needle_idx as usize)
+                                                .ok_or(std::io::Error::other("invalid needle_idx"))?
+                                                .clone();
+                                            references.push(output);
+                                        }
+
+                                        // Produce references sorted by name for consistency with nix narinfos
+                                        references.sort();
+                                        references
+                                    },
+                                })
+                            }
+                            BuildUpdate::ProducedStdout(_) | BuildUpdate::ProducedStderr(_) => {
+                                // no output printed for now
+                            }
+                            BuildUpdate::BuildFailure(build_failure) => {
+                                Err(std::io::Error::other(build_failure))?
+                            }
+                        }
+                    }
+
+                    // ensure all outputs have been produced.
+                    if produced_outputs.len() != output_paths.len() {
+                        return Err(std::io::Error::other("did not receive all outputs"));
+                    }
+
+                    produced_outputs
+                };
+                // FUTUREWORK: more validation?
 
                 let mut out_path_info: Option<PathInfo> = None;
 
-                // For each output, insert a PathInfo.
-                for (output, output_path) in build_result.outputs.into_iter().zip(output_paths) {
+                // For each produced output, insert a PathInfo.
+                // FUTUREWORK: check references for cycles and upload in the correct order.
+                for ProducedOutput {
+                    output_path,
+                    node,
+                    references,
+                } in produced_outputs
+                {
                     // calculate the nar representation
                     let (nar_size, nar_sha256) = self
                         .nar_calculation_service
-                        .calculate_nar(&output.node)
+                        .calculate_nar(&node)
                         .await
                         .map_err(std::io::Error::other)?;
 
                     // assemble the PathInfo to persist
                     let path_info = PathInfo {
-                        store_path: output_path.clone(),
-                        node: output.node,
-                        references: {
-                            let mut references = Vec::with_capacity(output.output_needles.len());
-
-                            // Map each output needle index back into a store path.
-                            for needle_idx in output.output_needles {
-                                let output = all_possible_refs
-                                    .get(needle_idx as usize)
-                                    .ok_or(std::io::Error::other("invalid needle_idx"))?
-                                    .clone();
-                                references.push(output);
-                            }
-
-                            // Produce references sorted by name for consistency with nix narinfos
-                            references.sort();
-                            references
-                        },
+                        store_path: output_path.to_owned(),
+                        node,
+                        references,
                         nar_size,
                         nar_sha256,
                         signatures: vec![],
@@ -268,7 +327,7 @@ impl BuildState {
                         .await
                         .map_err(std::io::Error::other)?;
 
-                    if *store_path == output_path.as_ref() {
+                    if *store_path == output_path {
                         out_path_info = Some(path_info);
                     }
                 }
