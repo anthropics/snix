@@ -1,5 +1,4 @@
 use crate::buildservice::BuildService;
-use std::ops::Deref;
 use tonic::async_trait;
 
 use super::{BuildRequest, BuildResponse};
@@ -21,7 +20,7 @@ impl<BUILD> GRPCBuildServiceWrapper<BUILD> {
 #[async_trait]
 impl<BUILD> crate::proto::build_service_server::BuildService for GRPCBuildServiceWrapper<BUILD>
 where
-    BUILD: Deref<Target = dyn BuildService> + Send + Sync + 'static,
+    BUILD: BuildService + 'static,
 {
     async fn do_build(
         &self,
