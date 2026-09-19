@@ -12,8 +12,11 @@ use tonic::async_trait;
 use tracing::{Span, debug, instrument, warn};
 use uuid::Uuid;
 
+use futures::StreamExt;
+
 use crate::buildservice::{BuildOutput, BuildRequest, BuildResult};
 use crate::oci::{get_host_output_paths, make_bundle, make_spec};
+use crate::sandbox::event::{SandboxEvent, stream_process};
 use std::{ffi::OsStr, path::PathBuf, process::Stdio};
 
 use super::BuildService;
@@ -121,20 +124,27 @@ where
         // start the bundle as another process.
         let child = spawn_bundle(bundle_path, &build_name.to_string())?;
 
-        // wait for the process to exit
-        // FUTUREWORK: change the trait to allow reporting progress / logs…
-        let child_output = child
-            .wait_with_output()
-            .await
-            .context("failed to run process")
-            .map_err(std::io::Error::other)?;
+        // TODO(#132): change the trait to allow reporting progress / logs…
+        let mut stream = stream_process(child, _fuse_daemon)?;
 
-        // Check the exit code
-        if !child_output.status.success() {
-            let stdout = BStr::new(&child_output.stdout);
-            let stderr = BStr::new(&child_output.stderr);
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let mut exit_code = None;
 
-            warn!(stdout=%stdout, stderr=%stderr, exit_code=%child_output.status, "build failed");
+        while let Some(event) = stream.next().await {
+            match event {
+                SandboxEvent::Stdout(chunk) => stdout.extend(chunk),
+                SandboxEvent::Stderr(chunk) => stderr.extend(chunk),
+                SandboxEvent::ExitCode(code) => exit_code = Some(code),
+            }
+        }
+
+        let exit_code = exit_code.unwrap_or(1);
+        if exit_code != 0 {
+            let stdout = BStr::new(&stdout);
+            let stderr = BStr::new(&stderr);
+
+            warn!(stdout=%stdout, stderr=%stderr, exit_code=%exit_code, "build failed");
 
             return Err(std::io::Error::other("nonzero exit code".to_string()));
         }
@@ -201,7 +211,8 @@ fn spawn_bundle(
         ])
         .stderr(Stdio::piped())
         .stdout(Stdio::piped())
-        .stdin(Stdio::null());
+        .stdin(Stdio::null())
+        .kill_on_drop(true);
 
     command.spawn()
 }
