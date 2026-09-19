@@ -56,15 +56,15 @@ where
     BS: BlobService + Clone + 'static,
     DS: DirectoryService + Clone + 'static,
 {
-    #[instrument(skip_all, err)]
+    #[instrument(skip_all, err, fields(build.name=tracing::field::Empty))]
     async fn do_build(&self, request: BuildRequest) -> std::io::Result<BuildResult> {
         let _permit = self.concurrent_builds.acquire().await.unwrap();
 
-        let bundle_name = Uuid::new_v4();
-        let bundle_path = self.bundle_root.join(bundle_name.to_string());
+        let build_name = Uuid::new_v4();
+        let bundle_path = self.bundle_root.join(build_name.to_string());
 
         let span = Span::current();
-        span.record("bundle_name", bundle_name.to_string());
+        span.record("build.name", build_name.to_string());
 
         let mut runtime_spec = make_spec(&request, true, SANDBOX_SHELL)
             .context("failed to create spec")
@@ -116,10 +116,10 @@ where
         .context("mounting")
         .map_err(std::io::Error::other)?;
 
-        debug!(bundle.path=?bundle_path, bundle.name=%bundle_name, "about to spawn bundle");
+        debug!(bundle.path=?bundle_path, "about to spawn bundle");
 
         // start the bundle as another process.
-        let child = spawn_bundle(bundle_path, &bundle_name.to_string())?;
+        let child = spawn_bundle(bundle_path, &build_name.to_string())?;
 
         // wait for the process to exit
         // FUTUREWORK: change the trait to allow reporting progress / logs…

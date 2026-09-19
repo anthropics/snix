@@ -54,19 +54,20 @@ where
     BS: BlobService + Clone + 'static,
     DS: DirectoryService + Clone + 'static,
 {
-    #[instrument(skip_all, err)]
+    #[instrument(skip_all, err, fields(build.name=tracing::field::Empty))]
     async fn do_build(&self, request: BuildRequest) -> std::io::Result<BuildResult> {
         let _permit = self.concurrent_builds.acquire().await.unwrap();
 
         let build_name = Uuid::new_v4();
         let sandbox_path = self.workdir.join(build_name.to_string());
-        info!(%build_name, "Starting bwrap build");
 
         let span = Span::current();
-        span.record("build_name", build_name.to_string());
+        span.record("build.name", build_name.to_string());
 
         let blob_service = self.blob_service.clone();
         let directory_service = self.directory_service.clone();
+
+        info!("Starting bwrap build");
 
         let spec = SandboxSpec::builder()
             .host_workdir(sandbox_path)
