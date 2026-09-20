@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use bstr::BStr;
-use futures::StreamExt;
+use futures::{StreamExt, stream::FuturesOrdered};
 use snix_castore::{
     blobservice::BlobService,
     directoryservice::DirectoryService,
@@ -131,19 +131,25 @@ where
             return Err(std::io::Error::other("nonzero exit code".to_string()));
         }
 
-        let outputs: Vec<_> = request
+        let output_paths = request
             .outputs
             .iter()
-            .filter_map(|o| finder.find_path(o))
-            .collect();
-        if outputs.len() != request.outputs.len() {
+            .map(|o| finder.find_path(o))
+            .collect::<FuturesOrdered<_>>()
+            .filter_map(|e| async { e })
+            .collect::<Vec<_>>()
+            .await;
+
+        if output_paths.len() != request.outputs.len() {
             warn!("Not all outputs produced");
             return Err(std::io::Error::other(
                 "Not all outputs produced".to_string(),
             ));
         }
+
         let patterns = ReferencePattern::new(request.refscan_needles);
-        let outputs = futures::future::try_join_all(outputs.into_iter().enumerate().map(
+
+        let outputs = futures::future::try_join_all(output_paths.into_iter().enumerate().map(
             |(i, host_output_path)| {
                 let output_path = &request.outputs[i];
                 debug!(host.path=?host_output_path, output.path=?output_path, "ingesting path");

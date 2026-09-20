@@ -103,7 +103,7 @@ impl SandboxOutputs {
     /// Allows finding outputs produced by the sandboxed command.
     ///
     /// The command must write into one of the scratches.
-    pub fn find_path(&self, path: impl AsRef<Path>) -> Option<PathBuf> {
+    pub async fn find_path(&self, path: impl AsRef<Path>) -> Option<PathBuf> {
         let path = self.scratch_dir.join(path);
         // Exists follows symlinks so may return false incorrectly, as nix builds are apparently
         // allowed to produce broken symlinks as their $out...
@@ -111,11 +111,12 @@ impl SandboxOutputs {
         //
         // Additionally, by the time find_path is called, the build has already unmonted the
         // fuse store, which means that even valid symlinks can be "broken" during ingestion.
-        if path.is_symlink() || path.exists() {
-            Some(path)
+        if let Ok(metadata) = tokio::fs::symlink_metadata(&path).await {
+            metadata.is_symlink() || metadata.is_dir() || metadata.is_file()
         } else {
-            None
+            false
         }
+        .then_some(path)
     }
 }
 
@@ -278,8 +279,8 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    #[test]
-    fn test_find_path() {
+    #[tokio::test]
+    async fn test_find_path() {
         let temp_dir = TempDir::new().expect("failed to create temp directory");
         let scratch_dir = temp_dir.path();
 
@@ -294,8 +295,8 @@ mod tests {
             scratch_dir: scratch_dir.to_path_buf(),
         };
 
-        assert_eq!(outputs.find_path("file.txt"), Some(file_path));
-        assert_eq!(outputs.find_path("link"), Some(symlink_path));
-        assert_eq!(outputs.find_path("missing"), None);
+        assert_eq!(outputs.find_path("file.txt").await, Some(file_path));
+        assert_eq!(outputs.find_path("link").await, Some(symlink_path));
+        assert_eq!(outputs.find_path("missing").await, None);
     }
 }
