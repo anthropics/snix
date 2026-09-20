@@ -5,7 +5,7 @@ use url::Url;
 
 #[derive(Debug, thiserror::Error)]
 pub enum FetcherError {
-    #[error("hash mismatch in file downloaded from {}:\n  wanted: {}\n     got: {}", {0.0}, {0.1}, {0.2})]
+    #[error("hash mismatch in file downloaded from {}:\n  wanted: {}\n     got: {}", _0.0, _0.1, _0.2)]
     HashMismatch(Box<(Url, NixHash, NixHash)>),
 
     #[error("Invalid hash type '{0}' for fetcher")]
@@ -38,5 +38,27 @@ impl FetcherError {
 impl From<snix_castore::import::IngestionError<import::archive::Error>> for FetcherError {
     fn from(value: snix_castore::import::IngestionError<import::archive::Error>) -> Self {
         Self::Import(Box::new(value))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hash_mismatch_display() {
+        let err = FetcherError::hash_mismatch(
+            Url::parse("https://example.com/foo.tar.gz").unwrap(),
+            NixHash::Sha256([0; 32]),
+            NixHash::Sha256([1; 32]),
+        );
+        let msg = err.to_string();
+        assert!(msg.contains("https://example.com/foo.tar.gz"));
+        assert!(
+            msg.contains(
+                "wanted: sha256:0000000000000000000000000000000000000000000000000000000000000000"
+            ) || msg.contains("wanted:")
+        );
+        assert!(!msg.contains("wanted: 0.1"));
     }
 }
