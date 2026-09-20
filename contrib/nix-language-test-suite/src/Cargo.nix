@@ -6523,6 +6523,7 @@ rec {
         };
         resolvedDefaultFeatures = [
           "alloc"
+          "default"
           "std"
         ];
       };
@@ -17953,6 +17954,15 @@ rec {
             packageId = "tracing";
           }
           {
+            name = "tracing-futures";
+            packageId = "tracing-futures";
+            usesDefaultFeatures = false;
+            features = [
+              "futures-03"
+              "std-future"
+            ];
+          }
+          {
             name = "typed-builder";
             packageId = "typed-builder";
           }
@@ -22135,6 +22145,16 @@ rec {
         ];
         dependencies = [
           {
+            name = "futures";
+            packageId = "futures";
+            optional = true;
+          }
+          {
+            name = "futures-task";
+            packageId = "futures-task";
+            optional = true;
+          }
+          {
             name = "pin-project";
             packageId = "pin-project";
             optional = true;
@@ -22171,6 +22191,9 @@ rec {
         };
         resolvedDefaultFeatures = [
           "default"
+          "futures"
+          "futures-03"
+          "futures-task"
           "pin-project"
           "std"
           "std-future"

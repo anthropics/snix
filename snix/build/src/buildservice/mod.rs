@@ -14,8 +14,11 @@ mod oci;
 #[cfg(target_os = "linux")]
 mod bwrap;
 
+pub mod streaming;
+
 pub use dummy::DummyBuildService;
 pub use from_addr::from_addr;
+pub use streaming::run_build_streaming;
 
 pub enum BuildUpdate {
     ProducedOutput {
@@ -47,6 +50,38 @@ pub enum BuildFailure {
     MissingOutputs,
     #[error("other error: {}", .message)]
     Other { message: String },
+}
+
+impl From<std::io::Error> for BuildFailure {
+    fn from(err: std::io::Error) -> Self {
+        Self::Other {
+            message: err.to_string(),
+        }
+    }
+}
+
+impl From<anyhow::Error> for BuildFailure {
+    fn from(err: anyhow::Error) -> Self {
+        Self::Other {
+            message: err.to_string(),
+        }
+    }
+}
+
+impl From<tokio::sync::AcquireError> for BuildFailure {
+    fn from(err: tokio::sync::AcquireError) -> Self {
+        Self::Other {
+            message: format!("failed to acquire semaphore: {err}"),
+        }
+    }
+}
+
+impl<E: std::fmt::Display> From<snix_castore::import::IngestionError<E>> for BuildFailure {
+    fn from(err: snix_castore::import::IngestionError<E>) -> Self {
+        Self::Other {
+            message: format!("Unable to ingest output: {err}"),
+        }
+    }
 }
 
 #[async_trait]

@@ -8,7 +8,10 @@ use std::{
 use futures::stream::BoxStream;
 use tokio::process::Command;
 
-use crate::sandbox::{InputsProvider, SandboxSpec, event::SandboxEvent, event::stream_process};
+use crate::sandbox::{
+    InputsProvider, SandboxOutputs, SandboxSpec,
+    event::{SandboxEvent, stream_process},
+};
 
 const COMMON_BWRAP_ARGS: &[&str] = &[
     "--unshare-uts",
@@ -95,15 +98,15 @@ pub struct Bwrap {
 
 /// Allows finding outputs produced by the sandboxed command.
 #[derive(Debug, Clone)]
-pub struct SandboxOutputs {
+pub struct BwrapOutputs {
     scratch_dir: PathBuf,
 }
 
-impl SandboxOutputs {
+impl SandboxOutputs for BwrapOutputs {
     /// Allows finding outputs produced by the sandboxed command.
     ///
     /// The command must write into one of the scratches.
-    pub async fn find_path(&self, path: impl AsRef<Path>) -> Option<PathBuf> {
+    fn find_path(&self, path: impl AsRef<Path>) -> Option<PathBuf> {
         let path = self.scratch_dir.join(path);
         // Exists follows symlinks so may return false incorrectly, as nix builds are apparently
         // allowed to produce broken symlinks as their $out...
@@ -111,7 +114,7 @@ impl SandboxOutputs {
         //
         // Additionally, by the time find_path is called, the build has already unmonted the
         // fuse store, which means that even valid symlinks can be "broken" during ingestion.
-        if let Ok(metadata) = tokio::fs::symlink_metadata(&path).await {
+        if let Ok(metadata) = fs::symlink_metadata(&path) {
             metadata.is_symlink() || metadata.is_dir() || metadata.is_file()
         } else {
             false
@@ -122,8 +125,8 @@ impl SandboxOutputs {
 
 impl Bwrap {
     /// Run the sandbox and return a stream of events alongside an outputs handle.
-    pub fn run(self) -> std::io::Result<(BoxStream<'static, SandboxEvent>, SandboxOutputs)> {
-        let outputs = SandboxOutputs {
+    pub fn run(self) -> std::io::Result<(BoxStream<'static, SandboxEvent>, BwrapOutputs)> {
+        let outputs = BwrapOutputs {
             scratch_dir: self.host_workdir.join("scratches"),
         };
 
@@ -291,12 +294,12 @@ mod tests {
         std::os::unix::fs::symlink("nonexistent", &symlink_path)
             .expect("failed to create test symlink");
 
-        let outputs = SandboxOutputs {
+        let outputs = BwrapOutputs {
             scratch_dir: scratch_dir.to_path_buf(),
         };
 
-        assert_eq!(outputs.find_path("file.txt").await, Some(file_path));
-        assert_eq!(outputs.find_path("link").await, Some(symlink_path));
-        assert_eq!(outputs.find_path("missing").await, None);
+        assert_eq!(outputs.find_path("file.txt"), Some(file_path));
+        assert_eq!(outputs.find_path("link"), Some(symlink_path));
+        assert_eq!(outputs.find_path("missing"), None);
     }
 }

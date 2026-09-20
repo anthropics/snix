@@ -1,25 +1,23 @@
+use std::{
+    ffi::OsStr,
+    path::{Path, PathBuf},
+    process::Stdio,
+};
+
 use anyhow::Context;
-use bstr::BStr;
+use futures::stream::BoxStream;
 use snix_castore::{
-    blobservice::BlobService,
-    directoryservice::DirectoryService,
-    fs::fuse::FuseDaemon,
-    import::fs::ingest_path,
-    refscan::{ReferencePattern, ReferenceScanner},
+    blobservice::BlobService, directoryservice::DirectoryService, fs::fuse::FuseDaemon,
 };
 use tokio::process::{Child, Command};
 use tonic::async_trait;
-use tracing::{Span, debug, instrument, warn};
+use tracing::{Span, debug, instrument};
 use uuid::Uuid;
 
-use futures::StreamExt;
-
-use crate::buildservice::{BuildOutput, BuildRequest, BuildResult};
-use crate::oci::{get_host_output_paths, make_bundle, make_spec};
+use super::{BuildFailure, BuildResult, BuildService, BuildUpdate, run_build_streaming};
+use crate::oci::{make_bundle, make_spec};
 use crate::sandbox::event::{SandboxEvent, stream_process};
-use std::{ffi::OsStr, path::PathBuf, process::Stdio};
-
-use super::BuildService;
+use crate::{buildservice::BuildRequest, oci::OciOutputs};
 
 const SANDBOX_SHELL: &str = env!("SNIX_BUILD_SANDBOX_SHELL");
 const MAX_CONCURRENT_BUILDS: usize = 2; // TODO: make configurable
@@ -53,143 +51,96 @@ impl<BS, DS> OCIBuildService<BS, DS> {
     }
 }
 
+impl<BS, DS> OCIBuildService<BS, DS>
+where
+    BS: BlobService + Clone + 'static,
+    DS: DirectoryService + Clone + 'static,
+{
+    /// Assembles an OCI container environment and prepares its execution
+    ///
+    /// Returns a stream which emits events as the build progresses and a SandboxOutputs handle
+    /// which can be used by callers to access build output paths relative to the logical root of
+    /// the sandbox. SandboxOutputs.find_paths are only guaranteed to succeed after the build has
+    /// finished, in other words the stream has ended.
+    async fn spawn_bundle_process(
+        &self,
+        request: &BuildRequest,
+        bundle_path: &Path,
+        build_name: &str,
+    ) -> Result<(BoxStream<'static, SandboxEvent>, OciOutputs), BuildFailure> {
+        let outputs = OciOutputs::new(bundle_path, &request.scratch_paths)?;
+        let mut runtime_spec =
+            make_spec(request, true, SANDBOX_SHELL).context("failed to create spec")?;
+
+        let linux = runtime_spec.linux().clone().unwrap();
+        runtime_spec.set_linux(Some(linux));
+
+        make_bundle(request, &runtime_spec, bundle_path).context("failed to produce bundle")?;
+
+        let blob_service = self.blob_service.clone();
+        let directory_service = self.directory_service.clone();
+        let dest = bundle_path.join("inputs");
+        let root_nodes = Box::new(request.inputs.clone());
+
+        let fuse_daemon = tokio::task::spawn_blocking(move || {
+            let fs = snix_castore::fs::SnixStoreFs::new(
+                blob_service,
+                directory_service,
+                root_nodes,
+                snix_castore::fs::FSSettings {
+                    list_root: true,
+                    uid_gid_override: None,
+                    show_xattr: false,
+                },
+                tokio::runtime::Handle::current(),
+            );
+            FuseDaemon::new(fs, dest, 4, true).context("failed to start fuse daemon")
+        })
+        .await
+        .map_err(|e| BuildFailure::Other {
+            message: e.to_string(),
+        })??;
+
+        debug!(bundle.path=?bundle_path, "about to spawn bundle");
+
+        let child = spawn_bundle(bundle_path, build_name)?;
+        let stream = stream_process(child, fuse_daemon)?;
+        Ok((stream, outputs))
+    }
+}
+
 #[async_trait]
 impl<BS, DS> BuildService for OCIBuildService<BS, DS>
 where
     BS: BlobService + Clone + 'static,
     DS: DirectoryService + Clone + 'static,
 {
-    #[instrument(skip_all, err, fields(build.name=tracing::field::Empty))]
-    async fn do_build(&self, request: BuildRequest) -> std::io::Result<BuildResult> {
-        let _permit = self.concurrent_builds.acquire().await.unwrap();
-
+    #[instrument(skip_all, fields(build.name=tracing::field::Empty))]
+    fn do_build_streaming(&self, request: BuildRequest) -> BoxStream<'_, BuildUpdate> {
+        let span = Span::current();
         let build_name = Uuid::new_v4();
         let bundle_path = self.bundle_root.join(build_name.to_string());
-
-        let span = Span::current();
         span.record("build.name", build_name.to_string());
 
-        let mut runtime_spec = make_spec(&request, true, SANDBOX_SHELL)
-            .context("failed to create spec")
-            .map_err(std::io::Error::other)?;
-
-        let linux = runtime_spec.linux().clone().unwrap();
-
-        runtime_spec.set_linux(Some(linux));
-
-        make_bundle(&request, &runtime_spec, &bundle_path)
-            .context("failed to produce bundle")
-            .map_err(std::io::Error::other)?;
-
-        // pre-calculate the locations we want to later ingest, in the order of
-        // the original outputs.
-        // If we can't find calculate that path, don't start the build in first place.
-        let host_output_paths = get_host_output_paths(&request, &bundle_path)
-            .context("failed to calculate host output paths")
-            .map_err(std::io::Error::other)?;
-
-        // assemble a BTreeMap of Nodes to pass into SnixStoreFs.
-        let patterns = ReferencePattern::new(request.refscan_needles);
-        // NOTE: impl Drop for FuseDaemon unmounts, so if the call is cancelled, umount.
-        let _fuse_daemon = tokio::task::spawn_blocking({
-            let blob_service = self.blob_service.clone();
-            let directory_service = self.directory_service.clone();
-
-            let dest = bundle_path.join("inputs");
-
-            let root_nodes = Box::new(request.inputs);
-            move || {
-                let fs = snix_castore::fs::SnixStoreFs::new(
-                    blob_service,
-                    directory_service,
-                    root_nodes,
-                    snix_castore::fs::FSSettings {
-                        list_root: true,
-                        uid_gid_override: None,
-                        show_xattr: false,
-                    },
-                    tokio::runtime::Handle::current(),
-                );
-                // mount the filesystem and wait for it to be unmounted.
-                // FUTUREWORK: make fuse daemon threads configurable?
-                FuseDaemon::new(fs, dest, 4, true).context("failed to start fuse daemon")
-            }
-        })
-        .await?
-        .context("mounting")
-        .map_err(std::io::Error::other)?;
-
-        debug!(bundle.path=?bundle_path, "about to spawn bundle");
-
-        // start the bundle as another process.
-        let child = spawn_bundle(bundle_path, &build_name.to_string())?;
-
-        // TODO(#132): change the trait to allow reporting progress / logs…
-        let mut stream = stream_process(child, _fuse_daemon)?;
-
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-        let mut exit_code = None;
-
-        while let Some(event) = stream.next().await {
-            match event {
-                SandboxEvent::Stdout(chunk) => stdout.extend(chunk),
-                SandboxEvent::Stderr(chunk) => stderr.extend(chunk),
-                SandboxEvent::ExitCode(code) => exit_code = Some(code),
-            }
-        }
-
-        let exit_code = exit_code.unwrap_or(1);
-        if exit_code != 0 {
-            let stdout = BStr::new(&stdout);
-            let stderr = BStr::new(&stderr);
-
-            warn!(stdout=%stdout, stderr=%stderr, exit_code=%exit_code, "build failed");
-
-            return Err(std::io::Error::other("nonzero exit code".to_string()));
-        }
-
-        // Ingest build outputs into the castore.
-        // We use try_join_all here. No need to spawn new tasks, as this is
-        // mostly IO bound.
-        let outputs = futures::future::try_join_all(host_output_paths.into_iter().enumerate().map(
-            |(i, host_output_path)| {
-                let output_path = &request.outputs[i];
-                let patterns = patterns.clone();
-                async move {
-                    debug!(host.path=?host_output_path, output.path=?output_path, "ingesting path");
-
-                    let scanner = ReferenceScanner::new(patterns);
-
-                    Ok::<_, std::io::Error>(BuildOutput {
-                        node: ingest_path(
-                            self.blob_service.clone(),
-                            &self.directory_service,
-                            host_output_path,
-                            Some(&scanner),
-                        )
-                        .await
-                        .map_err(|e| {
-                            std::io::Error::new(
-                                std::io::ErrorKind::InvalidData,
-                                format!("Unable to ingest output: {e}"),
-                            )
-                        })?,
-
-                        output_needles: scanner
-                            .matches()
-                            .into_iter()
-                            .enumerate()
-                            .filter(|(_, val)| *val)
-                            .map(|(idx, _)| idx as u64)
-                            .collect(),
-                    })
-                }
+        run_build_streaming(
+            &self.concurrent_builds,
+            self.blob_service.clone(),
+            self.directory_service.clone(),
+            request.outputs.clone(),
+            request.refscan_needles.clone(),
+            move || async move {
+                self.spawn_bundle_process(&request, &bundle_path, &build_name.to_string())
+                    .await
             },
-        ))
-        .await?;
+        )
+    }
 
-        Ok(BuildResult { outputs })
+    #[instrument(skip_all, err, fields(build.name=tracing::field::Empty))]
+    async fn do_build(&self, request: BuildRequest) -> std::io::Result<BuildResult> {
+        let stream = self.do_build_streaming(request);
+        BuildResult::try_from_build_updates(stream)
+            .await
+            .map_err(std::io::Error::other)
     }
 }
 

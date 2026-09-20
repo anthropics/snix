@@ -1,23 +1,18 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use bstr::BStr;
-use futures::{StreamExt, stream::FuturesOrdered};
+use futures::stream::BoxStream;
 use snix_castore::{
-    blobservice::BlobService,
-    directoryservice::DirectoryService,
-    fs::fuse::FuseDaemon,
-    import::fs::ingest_path,
-    refscan::{ReferencePattern, ReferenceScanner},
+    blobservice::BlobService, directoryservice::DirectoryService, fs::fuse::FuseDaemon,
 };
 use tonic::async_trait;
-use tracing::{Span, debug, info, instrument, warn};
+use tracing::{Span, info, instrument};
 use uuid::Uuid;
 
-use super::BuildService;
+use super::{BuildService, run_build_streaming};
 use crate::{
-    buildservice::{BuildConstraints, BuildOutput, BuildRequest, BuildResult},
+    buildservice::{BuildConstraints, BuildRequest, BuildResult, BuildUpdate},
     bwrap::Bwrap,
-    sandbox::{SandboxSpec, event::SandboxEvent},
+    sandbox::SandboxSpec,
 };
 const SANDBOX_SHELL: &str = env!("SNIX_BUILD_SANDBOX_SHELL");
 
@@ -49,29 +44,17 @@ impl<BS, DS> BubblewrapBuildService<BS, DS> {
     }
 }
 
-#[async_trait]
-impl<BS, DS> BuildService for BubblewrapBuildService<BS, DS>
+impl<BS, DS> BubblewrapBuildService<BS, DS>
 where
     BS: BlobService + Clone + 'static,
     DS: DirectoryService + Clone + 'static,
 {
-    #[instrument(skip_all, err, fields(build.name=tracing::field::Empty))]
-    async fn do_build(&self, request: BuildRequest) -> std::io::Result<BuildResult> {
-        let _permit = self.concurrent_builds.acquire().await.unwrap();
-
-        let build_name = Uuid::new_v4();
-        let sandbox_path = self.workdir.join(build_name.to_string());
-
-        let span = Span::current();
-        span.record("build.name", build_name.to_string());
-
+    fn make_spec(&self, request: BuildRequest, sandbox_path: &Path) -> SandboxSpec {
         let blob_service = self.blob_service.clone();
         let directory_service = self.directory_service.clone();
 
-        info!("Starting bwrap build");
-
-        let spec = SandboxSpec::builder()
-            .host_workdir(sandbox_path)
+        SandboxSpec::builder()
+            .host_workdir(sandbox_path.to_path_buf())
             .sandbox_workdir(request.working_dir)
             .scratches(request.scratch_paths)
             .command(request.command_args)
@@ -104,85 +87,48 @@ where
                     .contains(&BuildConstraints::ProvideBinSh)
                     .then_some(SANDBOX_SHELL.into()),
             )
-            .build();
+            .build()
+    }
+}
 
-        // TODO(#132): stream results to the client once new streaming RPCs are in place.
-        let (mut stream, finder) = Bwrap::initialize(spec)?.run()?;
+#[async_trait]
+impl<BS, DS> BuildService for BubblewrapBuildService<BS, DS>
+where
+    BS: BlobService + Clone + 'static,
+    DS: DirectoryService + Clone + 'static,
+{
+    #[instrument(skip_all, fields(build.name=tracing::field::Empty))]
+    fn do_build_streaming(&self, request: BuildRequest) -> BoxStream<'_, BuildUpdate> {
+        let span = Span::current();
+        let build_name = Uuid::new_v4();
+        let sandbox_path = self.workdir.join(build_name.to_string());
+        span.record("build.name", build_name.to_string());
 
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-        let mut exit_code = None;
+        let outputs = request.outputs.clone();
+        let needles = request.refscan_needles.clone();
 
-        while let Some(event) = stream.next().await {
-            match event {
-                SandboxEvent::Stdout(chunk) => stdout.extend(chunk),
-                SandboxEvent::Stderr(chunk) => stderr.extend(chunk),
-                SandboxEvent::ExitCode(code) => exit_code = Some(code),
-            }
-        }
+        let spec = self.make_spec(request, &sandbox_path);
 
-        let exit_code = exit_code.unwrap_or(1);
-        if exit_code != 0 {
-            let stdout = BStr::new(&stdout);
-            let stderr = BStr::new(&stderr);
+        run_build_streaming(
+            &self.concurrent_builds,
+            self.blob_service.clone(),
+            self.directory_service.clone(),
+            outputs,
+            needles,
+            move || async move {
+                info!("Starting bwrap build");
 
-            warn!(stdout=%stdout, stderr=%stderr, exit_code=%exit_code, "build failed");
-
-            return Err(std::io::Error::other("nonzero exit code".to_string()));
-        }
-
-        let output_paths = request
-            .outputs
-            .iter()
-            .map(|o| finder.find_path(o))
-            .collect::<FuturesOrdered<_>>()
-            .filter_map(|e| async { e })
-            .collect::<Vec<_>>()
-            .await;
-
-        if output_paths.len() != request.outputs.len() {
-            warn!("Not all outputs produced");
-            return Err(std::io::Error::other(
-                "Not all outputs produced".to_string(),
-            ));
-        }
-
-        let patterns = ReferencePattern::new(request.refscan_needles);
-
-        let outputs = futures::future::try_join_all(output_paths.into_iter().enumerate().map(
-            |(i, host_output_path)| {
-                let output_path = &request.outputs[i];
-                debug!(host.path=?host_output_path, output.path=?output_path, "ingesting path");
-                let patterns = patterns.clone();
-                async move {
-                    let scanner = ReferenceScanner::new(patterns);
-                    Ok::<_, std::io::Error>(BuildOutput {
-                        node: ingest_path(
-                            &self.blob_service,
-                            &self.directory_service,
-                            host_output_path,
-                            Some(&scanner),
-                        )
-                        .await
-                        .map_err(|e| {
-                            std::io::Error::new(
-                                std::io::ErrorKind::InvalidData,
-                                format!("Unable to ingest output: {e}"),
-                            )
-                        })?,
-
-                        output_needles: scanner
-                            .matches()
-                            .into_iter()
-                            .enumerate()
-                            .filter(|(_, val)| *val)
-                            .map(|(idx, _)| idx as u64)
-                            .collect(),
-                    })
-                }
+                let (stream, finder) = Bwrap::initialize(spec)?.run()?;
+                Ok((stream, finder))
             },
-        ))
-        .await?;
-        Ok(BuildResult { outputs })
+        )
+    }
+
+    #[instrument(skip_all, err, fields(build.name=tracing::field::Empty))]
+    async fn do_build(&self, request: BuildRequest) -> std::io::Result<BuildResult> {
+        let stream = self.do_build_streaming(request);
+        BuildResult::try_from_build_updates(stream)
+            .await
+            .map_err(std::io::Error::other)
     }
 }
