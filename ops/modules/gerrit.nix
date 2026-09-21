@@ -87,6 +87,11 @@ in
         "pull"
       ];
 
+      gc = {
+        startTime = "6:00";
+        interval = "1 day";
+      };
+
       # Configure for cgit.
       # gitweb = {
       #   type = "custom";
