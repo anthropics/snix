@@ -1,10 +1,13 @@
 use std::{future::Future, path::PathBuf};
 
-use futures::{StreamExt, stream::BoxStream};
+use futures::{
+    StreamExt,
+    stream::{BoxStream, FuturesUnordered},
+};
 use snix_castore::{
     blobservice::BlobService,
     directoryservice::DirectoryService,
-    import::fs::ingest_path,
+    import::{IngestionError, fs::ingest_path},
     refscan::{ReferencePattern, ReferenceScanner},
 };
 use tracing::{debug, warn};
@@ -29,7 +32,7 @@ where
     SpawnFut:
         Future<Output = Result<(BoxStream<'static, SandboxEvent>, R), BuildFailure>> + Send + 'a,
 {
-    let stream = async_stream::try_stream! {
+    async_stream::try_stream! {
         let _permit = semaphore.acquire().await?;
 
         let (mut event_stream, output_resolver) = spawn().await?;
@@ -49,46 +52,65 @@ where
             Err(BuildFailure::NonzeroExitCode)?;
         }
 
-        let host_output_paths = futures::future::try_join_all(expected_outputs.into_iter().map(|o| {
-            let output_resolver = &output_resolver;
-            async move {
-                output_resolver.find_path(&o).await.ok_or(BuildFailure::MissingOutputs)
-            }
-        })).await?;
-
         let patterns = ReferencePattern::new(refscan_needles);
-        for (idx, host_output_path) in host_output_paths.into_iter().enumerate() {
-            debug!(host.path=?host_output_path, idx, "ingesting path");
+
+        let mut tasks : FuturesUnordered<_> = (expected_outputs.into_iter().enumerate().map(|(idx, o)| {
+            let blob_service = &blob_service;
+            let directory_service = &directory_service;
+            let output_resolver = &output_resolver;
             let scanner = ReferenceScanner::new(patterns.clone());
-            let node = ingest_path(
-                &blob_service,
-                &directory_service,
-                host_output_path,
-                Some(&scanner),
-            )
-            .await?;
+            async move {
+                let host_output_path = output_resolver.find_path(&o).await.ok_or(BuildFailure::MissingOutputs)?;
+                ingest_host_output(idx, &host_output_path, scanner, blob_service, directory_service).await.map_err(BuildFailure::from)
+            }.in_current_span()
+        })).collect();
 
-            let refscan_needles = scanner
-                .matches()
-                .into_iter()
-                .enumerate()
-                .filter(|(_, val)| *val)
-                .map(|(idx, _)| idx as u64)
-                .collect();
-
-            yield BuildUpdate::ProducedOutput {
-                node,
-                idx: idx as u64,
-                refscan_needles,
-            };
+        while let Some(elem) = tasks.next().await {
+            yield elem?;
         }
-    };
+    }
+    .map(|res| match res {
+        Ok(update) => update,
+        Err(failure) => BuildUpdate::BuildFailure(failure),
+    })
+    .in_current_span()
+    .boxed()
+}
 
-    stream
-        .map(|res| match res {
-            Ok(update) => update,
-            Err(failure) => BuildUpdate::BuildFailure(failure),
-        })
-        .instrument(tracing::Span::current())
-        .boxed()
+/// Ingests the given host output path, while running reference scanning.
+/// Returns either a [BuildUpdate::ProducedOutput], or a [BuildFailure]
+#[tracing::instrument(skip_all, err, fields(host.path = ?host_output_path))]
+async fn ingest_host_output<BS, DS>(
+    idx: usize,
+    host_output_path: &std::path::Path,
+    scanner: ReferenceScanner<String>,
+    blob_service: BS,
+    directory_service: DS,
+) -> Result<BuildUpdate, IngestionError<snix_castore::import::fs::Error>>
+where
+    BS: BlobService,
+    DS: DirectoryService,
+{
+    debug!("ingesting path");
+    let node = ingest_path(
+        &blob_service,
+        &directory_service,
+        host_output_path,
+        Some(&scanner),
+    )
+    .await?;
+
+    let refscan_needles = scanner
+        .matches()
+        .into_iter()
+        .enumerate()
+        .filter(|(_, val)| *val)
+        .map(|(idx, _)| idx as u64)
+        .collect();
+
+    Ok(BuildUpdate::ProducedOutput {
+        node,
+        idx: idx as u64,
+        refscan_needles,
+    })
 }
