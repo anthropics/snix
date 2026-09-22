@@ -10,9 +10,12 @@ pub mod event;
 ///
 /// Since different build sandboxes have their own internal directory layout, this trait
 /// encapsulates those implementation details and allows callers to query paths in a consistent way.
-pub trait SandboxOutputs {
+pub(crate) trait SandboxOutputs {
     /// Resolves to an absolute filesystem host path that corresponds to `path`.
-    fn find_path(&self, path: impl AsRef<Path>) -> Option<PathBuf>;
+    fn find_path(
+        &self,
+        path: impl AsRef<Path> + Send,
+    ) -> impl Future<Output = Option<PathBuf>> + Send;
 }
 
 /// A sandbox builder.

@@ -5,7 +5,6 @@ pub(crate) mod subuid;
 pub(crate) use bundle::make_bundle;
 pub(crate) use spec::make_spec;
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::sandbox::SandboxOutputs;
@@ -48,12 +47,12 @@ impl OciOutputs {
 }
 
 impl SandboxOutputs for OciOutputs {
-    fn find_path(&self, path: impl AsRef<Path>) -> Option<PathBuf> {
+    async fn find_path(&self, path: impl AsRef<Path>) -> Option<PathBuf> {
         let path = path.as_ref();
         for (mp, host_dir) in &self.scratches {
             if let Ok(relpath) = path.strip_prefix(mp) {
                 let host_path = host_dir.join(relpath);
-                if let Ok(metadata) = fs::symlink_metadata(&host_path)
+                if let Ok(metadata) = tokio::fs::symlink_metadata(&host_path).await
                     && (metadata.is_symlink() || metadata.is_dir() || metadata.is_file())
                 {
                     return Some(host_path);
@@ -77,10 +76,11 @@ mod tests {
     use crate::sandbox::SandboxOutputs;
 
     #[rstest]
+    #[tokio::test]
     #[case::simple("nix/store/aaaa", &["nix/store".into()], Some(("nix/store", "aaaa")))]
     #[case::prefix_no_sep("nix/store/aaaa", &["nix/sto".into()], None)]
     #[case::not_found("nix/store/aaaa", &["build".into()], None)]
-    fn test_find_path_in_scratches(
+    async fn test_find_path_in_scratches(
         #[case] search_path: &str,
         #[case] mountpoints: &[String],
         #[case] expected: Option<(&str, &str)>,
@@ -101,11 +101,11 @@ mod tests {
         let mountpoints: Vec<PathBuf> = mountpoints.iter().map(PathBuf::from).collect();
         let outputs = OciOutputs::new(bundle_path, &mountpoints).expect("must succeed");
 
-        assert_eq!(outputs.find_path(search_path), expected_path);
+        assert_eq!(outputs.find_path(search_path).await, expected_path);
     }
 
-    #[test]
-    fn test_get_host_output_paths_simple() {
+    #[tokio::test]
+    async fn test_get_host_output_paths_simple() {
         let temp_dir = TempDir::new().unwrap();
         let bundle_path = temp_dir.path();
         let scratch_paths = vec![PathBuf::from("build"), PathBuf::from("nix/store")];
@@ -123,7 +123,9 @@ mod tests {
 
         assert_eq!(
             Some(expected_path),
-            outputs.find_path("nix/store/fhaj6gmwns62s6ypkcldbaj2ybvkhx3p-foo")
+            outputs
+                .find_path("nix/store/fhaj6gmwns62s6ypkcldbaj2ybvkhx3p-foo")
+                .await
         );
     }
 

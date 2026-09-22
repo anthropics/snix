@@ -18,7 +18,6 @@ pub mod streaming;
 
 pub use dummy::DummyBuildService;
 pub use from_addr::from_addr;
-pub use streaming::run_build_streaming;
 
 pub enum BuildUpdate {
     ProducedOutput {

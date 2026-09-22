@@ -14,7 +14,7 @@ use super::{BuildFailure, BuildUpdate};
 use crate::sandbox::{SandboxOutputs, event::SandboxEvent};
 
 /// Executes a sandboxed build and streams its progress and outputs.
-pub fn run_build_streaming<'a, BS, DS, R, SpawnFut>(
+pub(crate) fn run_build_streaming<'a, BS, DS, R, SpawnFut>(
     semaphore: &'a tokio::sync::Semaphore,
     blob_service: BS,
     directory_service: DS,
@@ -49,17 +49,12 @@ where
             Err(BuildFailure::NonzeroExitCode)?;
         }
 
-        // find_path does synchronous disk io, so we run it in an io thread pool.
-        let host_output_paths = tokio::task::spawn_blocking(move || {
-            expected_outputs
-                .into_iter()
-                .map(|o| output_resolver.find_path(&o).ok_or(BuildFailure::MissingOutputs))
-                .collect::<Result<Vec<_>, _>>()
-        })
-        .await
-        .map_err(|e| BuildFailure::Other {
-            message: e.to_string(),
-        })??;
+        let host_output_paths = futures::future::try_join_all(expected_outputs.into_iter().map(|o| {
+            let output_resolver = &output_resolver;
+            async move {
+                output_resolver.find_path(&o).await.ok_or(BuildFailure::MissingOutputs)
+            }
+        })).await?;
 
         let patterns = ReferencePattern::new(refscan_needles);
         for (idx, host_output_path) in host_output_paths.into_iter().enumerate() {

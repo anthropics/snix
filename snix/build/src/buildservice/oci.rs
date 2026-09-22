@@ -14,10 +14,13 @@ use tonic::async_trait;
 use tracing::{Span, debug, instrument};
 use uuid::Uuid;
 
-use super::{BuildFailure, BuildResult, BuildService, BuildUpdate, run_build_streaming};
-use crate::oci::{make_bundle, make_spec};
+use super::{BuildFailure, BuildResult, BuildService, BuildUpdate};
 use crate::sandbox::event::{SandboxEvent, stream_process};
 use crate::{buildservice::BuildRequest, oci::OciOutputs};
+use crate::{
+    buildservice::streaming::run_build_streaming,
+    oci::{make_bundle, make_spec},
+};
 
 const SANDBOX_SHELL: &str = env!("SNIX_BUILD_SANDBOX_SHELL");
 const MAX_CONCURRENT_BUILDS: usize = 2; // TODO: make configurable

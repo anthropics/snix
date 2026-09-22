@@ -8,9 +8,11 @@ use tonic::async_trait;
 use tracing::{Span, info, instrument};
 use uuid::Uuid;
 
-use super::{BuildService, run_build_streaming};
+use super::BuildService;
 use crate::{
-    buildservice::{BuildConstraints, BuildRequest, BuildResult, BuildUpdate},
+    buildservice::{
+        BuildConstraints, BuildRequest, BuildResult, BuildUpdate, streaming::run_build_streaming,
+    },
     bwrap::Bwrap,
     sandbox::SandboxSpec,
 };
