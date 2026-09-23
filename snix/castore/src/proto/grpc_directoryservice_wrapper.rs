@@ -21,7 +21,7 @@ impl<T> proto::directory_service_server::DirectoryService for GRPCDirectoryServi
 where
     T: DirectoryService + Clone + Send + Sync + 'static,
 {
-    type GetStream = BoxStream<'static, tonic::Result<proto::Directory, Status>>;
+    type GetStream = BoxStream<'static, tonic::Result<proto::Directory>>;
 
     #[instrument(skip_all)]
     async fn get(

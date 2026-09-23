@@ -28,7 +28,7 @@ where
     PS: Deref<Target = dyn PathInfoService> + Send + Sync + 'static,
     NS: NarCalculationService + Send + Sync + 'static,
 {
-    type ListStream = BoxStream<'static, tonic::Result<proto::PathInfo, Status>>;
+    type ListStream = BoxStream<'static, tonic::Result<proto::PathInfo>>;
 
     #[instrument(skip_all)]
     async fn get(
