@@ -132,12 +132,6 @@ where
     data.tuple_windows().all(|(a, b)| a <= b)
 }
 
-fn path_to_string(path: &Path) -> String {
-    path.to_str()
-        .expect("Snix Bug: unable to convert Path to String")
-        .to_string()
-}
-
 impl From<crate::buildservice::BuildRequest> for BuildRequest {
     fn from(value: crate::buildservice::BuildRequest) -> Self {
         let constraints = if value.constraints.is_empty() {
@@ -150,7 +144,7 @@ impl From<crate::buildservice::BuildRequest> for BuildRequest {
                     BuildConstraints::System(system) => constraints.system = system,
                     BuildConstraints::MinMemory(min_memory) => constraints.min_memory = min_memory,
                     BuildConstraints::AvailableReadOnlyPath(path) => {
-                        constraints.available_ro_paths.push(path_to_string(&path))
+                        constraints.available_ro_paths.push(path)
                     }
                     BuildConstraints::ProvideBinSh => constraints.provide_bin_sh = true,
                     BuildConstraints::NetworkAccess => constraints.network_access = true,
@@ -167,14 +161,10 @@ impl From<crate::buildservice::BuildRequest> for BuildRequest {
                 })
                 .collect(),
             command_args: value.command_args,
-            working_dir: path_to_string(&value.working_dir),
-            scratch_paths: value
-                .scratch_paths
-                .iter()
-                .map(|p| path_to_string(p))
-                .collect(),
-            inputs_dir: path_to_string(&value.inputs_dir),
-            outputs: value.outputs.iter().map(|p| path_to_string(p)).collect(),
+            working_dir: value.working_dir,
+            scratch_paths: value.scratch_paths,
+            inputs_dir: value.inputs_dir,
+            outputs: value.outputs,
             environment_vars: value.environment_vars.into_iter().map(Into::into).collect(),
             constraints,
             additional_files: value.additional_files.into_iter().map(Into::into).collect(),
@@ -269,10 +259,10 @@ impl TryFrom<BuildRequest> for crate::buildservice::BuildRequest {
         Ok(Self {
             inputs,
             command_args: value.command_args,
-            working_dir: PathBuf::from(value.working_dir),
-            scratch_paths: value.scratch_paths.iter().map(PathBuf::from).collect(),
-            inputs_dir: PathBuf::from(value.inputs_dir),
-            outputs: value.outputs.iter().map(PathBuf::from).collect(),
+            working_dir: value.working_dir,
+            scratch_paths: value.scratch_paths,
+            inputs_dir: value.inputs_dir,
+            outputs: value.outputs,
             environment_vars: value.environment_vars.into_iter().map(Into::into).collect(),
             constraints,
             additional_files: value.additional_files.into_iter().map(Into::into).collect(),
@@ -395,15 +385,15 @@ impl TryFrom<build_request::BuildConstraints> for HashSet<crate::buildservice::B
         ]);
 
         // validate available_ro_paths
-        for (i, p) in value.available_ro_paths.iter().enumerate() {
-            if !is_clean_absolute_path(p) {
+        if !is_sorted(value.available_ro_paths.iter()) {
+            Err(ValidateBuildConstraintsError::AvailableRoPathsNotSorted)?;
+        }
+        for (i, p) in value.available_ro_paths.into_iter().enumerate() {
+            if !is_clean_absolute_path(&p) {
                 Err(ValidateBuildConstraintsError::InvalidAvailableRoPaths(i))?
             } else {
-                build_constraints.insert(BuildConstraints::AvailableReadOnlyPath(PathBuf::from(p)));
+                build_constraints.insert(BuildConstraints::AvailableReadOnlyPath(p));
             }
-        }
-        if !is_sorted(value.available_ro_paths.iter().map(|e| e.as_bytes())) {
-            Err(ValidateBuildConstraintsError::AvailableRoPathsNotSorted)?;
         }
 
         if value.network_access {

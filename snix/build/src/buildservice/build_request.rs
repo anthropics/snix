@@ -53,25 +53,25 @@ pub struct BuildRequest {
     /// "build", in the case of Nix.
     /// This MUST be a clean relative path, without any ".", "..", or superfluous
     /// slashes.
-    pub working_dir: PathBuf,
+    pub working_dir: String,
     /// A list of "scratch" paths, relative to the build root.
     /// These will be write-able during the build.
     /// \[build, nix/store\] in the case of Nix.
     /// These MUST be clean relative paths, without any ".", "..", or superfluous
     /// slashes, and sorted.
-    pub scratch_paths: Vec<PathBuf>,
+    pub scratch_paths: Vec<String>,
     /// The path where the castore input nodes will be located at,
     /// "nix/store" in case of Nix.
     /// Builds might also write into here (Nix builds do that).
     /// This MUST be a clean relative path, without any ".", "..", or superfluous
     /// slashes.
-    pub inputs_dir: PathBuf,
+    pub inputs_dir: String,
     /// The list of output paths the build is expected to produce,
     /// relative to the root.
     /// If the path is not produced, the build is considered to have failed.
     /// These MUST be clean relative paths, without any ".", "..", or superfluous
     /// slashes, and sorted.
-    pub outputs: Vec<PathBuf>,
+    pub outputs: Vec<String>,
     /// The list of environment variables and their values that should be set
     /// inside the build environment.
     /// This includes both environment vars set inside the derivation, as well as
@@ -120,7 +120,7 @@ pub enum BuildConstraints {
     /// This is distinct from the castore nodes in inputs.
     /// These MUST be clean absolute paths, without any ".", "..", or superfluous
     /// slashes, and sorted.
-    AvailableReadOnlyPath(PathBuf),
+    AvailableReadOnlyPath(String),
     /// Whether the build should be able to access the network.
     NetworkAccess,
     /// Whether to provide a /bin/sh inside the build environment, usually a static bash.

@@ -1,4 +1,4 @@
-use std::{cell::RefCell, io, os::unix::ffi::OsStrExt as _, sync::Arc};
+use std::{cell::RefCell, io, sync::Arc};
 
 use futures::TryStreamExt as _;
 use nix_compat::{
@@ -194,9 +194,8 @@ impl BuildState {
                     .iter()
                     .map(|p| {
                         let sp = StorePath::from_bytes(
-                            p.strip_prefix(&nix_compat::store_path::STORE_DIR[1..])
+                            p.strip_prefix(&nix_compat::store_path::STORE_DIR_WITH_SLASH[1..])
                                 .expect("output doesn't have expected store_dir prefix")
-                                .as_os_str()
                                 .as_bytes(),
                         )
                         .expect("Snix bug: cannot parse output as StorePath");

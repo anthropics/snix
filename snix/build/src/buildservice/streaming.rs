@@ -1,4 +1,4 @@
-use std::{future::Future, path::PathBuf};
+use std::future::Future;
 
 use futures::{
     StreamExt,
@@ -21,7 +21,7 @@ pub(crate) fn run_build_streaming<'a, BS, DS, R, SpawnFut>(
     semaphore: &'a tokio::sync::Semaphore,
     blob_service: BS,
     directory_service: DS,
-    expected_outputs: Vec<PathBuf>,
+    expected_outputs: Vec<String>,
     refscan_needles: Vec<String>,
     spawn: impl FnOnce() -> SpawnFut + Send + 'a,
 ) -> BoxStream<'a, BuildUpdate>

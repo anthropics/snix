@@ -12,44 +12,46 @@ use crate::sandbox::SandboxOutputs;
 /// For a given scratch path, return the scratch_name that's allocated.
 // We currently use use lower hex encoding of the b3 digest of the scratch
 // path, so we don't need to globally allocate and pass down some uuids.
-pub(crate) fn scratch_name(scratch_path: &Path) -> String {
-    data_encoding::BASE32
-        .encode(blake3::hash(scratch_path.as_os_str().as_encoded_bytes()).as_bytes())
+pub(crate) fn scratch_name(scratch_path: impl AsRef<[u8]>) -> String {
+    data_encoding::BASE32.encode(blake3::hash(scratch_path.as_ref()).as_bytes())
 }
 
 #[derive(Debug, Clone)]
 pub struct OciOutputs {
     /// Pre-sorted scratch mappings: `(guest_mountpoint, host_scratch_dir)`
     /// Sorted descending by component count so longer, more specific prefixes match first.
-    scratches: Vec<(PathBuf, PathBuf)>,
+    scratch_mappings: Vec<(String, PathBuf)>,
 }
 
 impl OciOutputs {
-    pub fn new(bundle_path: &Path, scratches: &[PathBuf]) -> anyhow::Result<Self> {
+    pub fn new<S>(bundle_path: &Path, scratches: &[S]) -> anyhow::Result<Self>
+    where
+        S: AsRef<str>,
+    {
         let scratch_root = bundle_path.join("scratch");
 
-        let mut scratch_mappings: Vec<(PathBuf, PathBuf)> = Vec::with_capacity(scratches.len());
+        let mut scratch_mappings: Vec<(String, PathBuf)> = Vec::with_capacity(scratches.len());
         for mp in scratches {
-            if !mp.is_relative() || mp.as_os_str().is_empty() {
+            let mp = mp.as_ref();
+            if !Path::new(mp).is_relative() || mp.is_empty() {
                 anyhow::bail!("scratch path must be relative and non-empty: {mp:?}");
             }
             let host_dir = scratch_root.join(scratch_name(mp));
-            scratch_mappings.push((mp.clone(), host_dir));
+            scratch_mappings.push((mp.to_owned(), host_dir));
         }
 
         // Sort descending by number of path components so more specific prefixes match first
-        scratch_mappings.sort_by_key(|a| std::cmp::Reverse(a.0.components().count()));
+        scratch_mappings
+            .sort_by_key(|a| std::cmp::Reverse(std::path::Path::new(&a.0).components().count()));
 
-        Ok(Self {
-            scratches: scratch_mappings,
-        })
+        Ok(Self { scratch_mappings })
     }
 }
 
 impl SandboxOutputs for OciOutputs {
     async fn find_path(&self, path: impl AsRef<Path>) -> Option<PathBuf> {
         let path = path.as_ref();
-        for (mp, host_dir) in &self.scratches {
+        for (mp, host_dir) in &self.scratch_mappings {
             if let Ok(relpath) = path.strip_prefix(mp) {
                 let host_path = host_dir.join(relpath);
                 if let Ok(metadata) = tokio::fs::symlink_metadata(&host_path).await
@@ -67,7 +69,7 @@ impl SandboxOutputs for OciOutputs {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
 
     use rstest::rstest;
     use tempfile::TempDir;
@@ -89,17 +91,13 @@ mod tests {
         let bundle_path = temp_dir.path();
 
         let expected_path = expected.map(|(mp, rel)| {
-            let p = bundle_path
-                .join("scratch")
-                .join(scratch_name(Path::new(mp)))
-                .join(rel);
+            let p = bundle_path.join("scratch").join(scratch_name(mp)).join(rel);
             fs::create_dir_all(p.parent().unwrap()).unwrap();
             fs::write(&p, b"").unwrap();
             p
         });
 
-        let mountpoints: Vec<PathBuf> = mountpoints.iter().map(PathBuf::from).collect();
-        let outputs = OciOutputs::new(bundle_path, &mountpoints).expect("must succeed");
+        let outputs = OciOutputs::new(bundle_path, mountpoints).expect("must succeed");
 
         assert_eq!(outputs.find_path(search_path).await, expected_path);
     }
@@ -108,12 +106,12 @@ mod tests {
     async fn test_get_host_output_paths_simple() {
         let temp_dir = TempDir::new().unwrap();
         let bundle_path = temp_dir.path();
-        let scratch_paths = vec![PathBuf::from("build"), PathBuf::from("nix/store")];
+        let scratch_paths = vec!["build", "nix/store"];
 
         let mut expected_path = PathBuf::new();
         expected_path.push(bundle_path);
         expected_path.push("scratch");
-        expected_path.push(scratch_name(Path::new("nix/store")));
+        expected_path.push(scratch_name("nix/store"));
         expected_path.push("fhaj6gmwns62s6ypkcldbaj2ybvkhx3p-foo");
 
         fs::create_dir_all(expected_path.parent().unwrap()).unwrap();
@@ -134,10 +132,10 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let bundle_path = temp_dir.path();
 
-        let err = OciOutputs::new(bundle_path, &[PathBuf::from("/absolute")]).unwrap_err();
+        let err = OciOutputs::new(bundle_path, &["/absolute"]).unwrap_err();
         assert!(err.to_string().contains("scratch path must be relative"));
 
-        let err = OciOutputs::new(bundle_path, &[PathBuf::from("")]).unwrap_err();
+        let err = OciOutputs::new(bundle_path, &[""]).unwrap_err();
         assert!(err.to_string().contains("scratch path must be relative"));
     }
 }

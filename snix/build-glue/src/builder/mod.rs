@@ -168,10 +168,7 @@ pub(crate) fn derivation_into_build_request<D: Into<UnverifiedDerivation>>(
         outputs: derivation
             .outputs()
             .store_paths()
-            .map(|path| {
-                let s = path.to_absolute_path();
-                PathBuf::from(s[1..].to_owned())
-            })
+            .map(|path| path.to_absolute_path()[1..].to_owned())
             .collect(),
 
         // Turn this into a sorted-by-key Vec<EnvVar>.

@@ -54,7 +54,9 @@ pub(crate) fn make_spec(
         .constraints
         .iter()
         .filter_map(|constraint| match constraint {
-            BuildConstraints::AvailableReadOnlyPath(path) => Some((path.as_path(), path.as_path())),
+            BuildConstraints::AvailableReadOnlyPath(path) => {
+                Some((Path::new(path), Path::new(path)))
+            }
             _ => None,
         })
         .collect();
@@ -71,7 +73,7 @@ pub(crate) fn make_spec(
         .process(
             configure_process(
                 &request.command_args,
-                &request.working_dir,
+                Path::new(&request.working_dir),
                 request
                     .environment_vars
                     .iter()
@@ -100,9 +102,9 @@ pub(crate) fn make_spec(
             configure_mounts(
                 rootless,
                 allow_network,
-                request.scratch_paths.iter().map(|e| e.as_path()),
+                &request.scratch_paths,
                 request.inputs.iter(),
-                &request.inputs_dir,
+                Path::new(&request.inputs_dir),
                 ro_host_mounts,
             )
             .map_err(SpecError::OciError)?,
@@ -273,15 +275,18 @@ fn configure_linux(
 /// Return the Mounts part of the OCI Runtime spec.
 /// It first sets up the standard mounts, then scratch paths, bind mounts for
 /// all inputs, and finally read-only paths from the hosts.
-fn configure_mounts<'a>(
+fn configure_mounts<'a, S>(
     rootless: bool,
     allow_network: bool,
-    scratch_paths: impl IntoIterator<Item = &'a Path>,
+    scratch_paths: impl IntoIterator<Item = S>,
     inputs: impl Iterator<Item = (&'a snix_castore::PathComponent, &'a snix_castore::Node)>,
 
     inputs_dir: &Path,
     ro_host_mounts: impl IntoIterator<Item = (&'a Path, &'a Path)>,
-) -> Result<Vec<oci_spec::runtime::Mount>, oci_spec::OciSpecError> {
+) -> Result<Vec<oci_spec::runtime::Mount>, oci_spec::OciSpecError>
+where
+    S: AsRef<str> + 'a,
+{
     let mut mounts: Vec<_> = if rootless {
         oci_spec::runtime::get_rootless_mounts()
     } else {
@@ -297,7 +302,8 @@ fn configure_mounts<'a>(
 
     // For each scratch path, create a bind mount entry.
     let scratch_root = Path::new("scratch"); // relative path
-    for scratch_path in scratch_paths.into_iter() {
+    for scratch_path in scratch_paths {
+        let scratch_path = scratch_path.as_ref();
         let src = scratch_root.join(scratch_name(scratch_path));
         mounts.push(configure_mount(
             &src,
