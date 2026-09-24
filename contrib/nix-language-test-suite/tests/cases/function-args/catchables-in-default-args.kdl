@@ -1,0 +1,7 @@
+lang {
+    builtins "tryEval"
+}
+
+runtime-opts {
+    eval-strict
+}
