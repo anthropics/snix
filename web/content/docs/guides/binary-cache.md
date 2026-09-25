@@ -92,6 +92,8 @@ services.nar-bridge = {
 };
 ```
 
+Note even though the rendered `.narinfo` files say `Compression: none`, nar-bridge uses HTTP Content-Encoding to negotiate zstd compression on the HTTP Layer if the clients supports it (and libcurl used by Nix/Lix does).
+
 ### nginx
 Both of these services listen on local unix domain sockets.
 
