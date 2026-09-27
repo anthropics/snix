@@ -36,6 +36,8 @@ in
   nix.nrBuildUsers = 256;
   nix.gc.automatic = true;
   nix.package = pkgs.lix;
+  # The default is 64, which is way too little.
+  systemd.sockets.nix-daemon.socketConfig.MaxConnections = 512;
 
   networking = {
     useNetworkd = true;
