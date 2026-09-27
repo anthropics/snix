@@ -3,10 +3,12 @@ use tonic::async_trait;
 
 mod blob_meta;
 mod blob_reader;
+mod blob_writer;
 
 use crate::B3Digest;
 pub use blob_meta::{BlobMeta, ChunkMeta};
 pub use blob_reader::BlobReader;
+pub use blob_writer::BlobWriter;
 
 #[cfg_attr(test, mockall::automock)]
 #[async_trait]
