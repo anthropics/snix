@@ -1,0 +1,10 @@
+lang {
+  builtins "filter" "concatLists"
+}
+
+environment {
+  fixtures {
+    file "lib.nix" ref="../../../nixlib/lib.nix"
+  }
+}
+

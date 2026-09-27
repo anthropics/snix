@@ -1,0 +1,7 @@
+lang {
+  builtins "filter" "length"
+}
+
+runtime-opts {
+  eval-strict
+}
