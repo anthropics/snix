@@ -1,6 +1,8 @@
 use auto_impl::auto_impl;
 use tonic::async_trait;
 
+pub mod memory;
+
 use crate::B3Digest;
 
 mod chunk;
