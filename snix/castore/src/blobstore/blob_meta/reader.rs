@@ -1,0 +1,162 @@
+use futures::StreamExt;
+use std::io::{self, Cursor};
+
+use tokio::io::AsyncBufRead;
+use tokio_util::io::StreamReader;
+
+use crate::{B3Digest, blobstore::BlobMeta, chunkstore::ChunkStore};
+
+impl BlobMeta {
+    /// Returns a AsyncBufRead impl for the actual blob bytes.
+    /// Queries the passed ChunkStore, with configurable concurrency.
+    /// A offset to start seeking from can be specified. Chunks before this are then skipped.
+    ///
+    /// NOTE: This does not implement AsyncSeek, on a seek this should be called again
+    /// with the new offset to seek into.
+    pub fn reader_for_offset<'cs>(
+        &self,
+        offset: u64,
+        fetch_concurrency: usize,
+        chunk_store: &'cs (impl ChunkStore + 'cs),
+    ) -> impl AsyncBufRead + Unpin + 'cs {
+        let mut bytes_to_skip = offset;
+
+        let chunk_digests = self
+            .chunks()
+            // Skip all chunk_meta that are irrelevant.
+            // skip_while skips up until we return false.
+            .skip_while(|chunk_meta| {
+                bytes_to_skip
+                    .checked_sub(chunk_meta.size)
+                    .map(|new_bytes_to_skip| bytes_to_skip = new_bytes_to_skip)
+                    .is_some()
+            })
+            .map(|chunk_meta| chunk_meta.digest.to_owned())
+            .collect::<Vec<_>>();
+
+        // produce a stream of byte chunks
+        let bytes_stream = tokio_stream::iter(
+            // We might need to skip something from the first chunk.
+            // Turn the iterator of digests to fetch into bytes to skip at the beginning and the digest itself.
+            chunk_digests
+                .into_iter()
+                .zip(std::iter::once(bytes_to_skip).chain(std::iter::repeat(0))),
+        )
+        .map(move |(chunk_digest, skip_in_chunk)| {
+            chunk_digest_to_buf(chunk_digest, skip_in_chunk, chunk_store)
+        })
+        .buffered(fetch_concurrency);
+
+        StreamReader::new(bytes_stream)
+    }
+}
+
+/// For a given chunk digest, offset to skip and ChunkStore, return a impl Buf.
+async fn chunk_digest_to_buf(
+    chunk_digest: B3Digest,
+    skip_in_chunk: u64,
+    chunk_store: &impl ChunkStore,
+) -> io::Result<impl bytes::Buf> {
+    let chunk = chunk_store
+        .get(&chunk_digest)
+        .await
+        .map_err(io::Error::other)?
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                format!("chunk {0} not found", chunk_digest),
+            )
+        })?
+        .into_vec();
+
+    let chunk_len = chunk.len();
+    let mut cursor = Cursor::new(chunk);
+
+    // skip the first few bytes if we're told to.
+    if skip_in_chunk > 0 {
+        debug_assert!(
+            chunk_len as u64 > skip_in_chunk,
+            "Snix bug: chunk size is smaller than bytes to skip"
+        );
+        cursor.set_position(skip_in_chunk);
+    }
+
+    Ok::<_, io::Error>(cursor)
+}
+
+#[cfg(test)]
+mod test {
+    use std::sync::LazyLock;
+
+    use mockall::predicate;
+    use tokio::io::AsyncReadExt;
+
+    use crate::{
+        B3Digest,
+        blobstore::{BlobMeta, ChunkMeta},
+        chunkstore::{Chunk, MockChunkStore},
+    };
+
+    static CHUNK_1: LazyLock<Chunk> = LazyLock::new(|| b"ab".as_slice().into());
+    static CHUNK_2: LazyLock<Chunk> = LazyLock::new(|| b"c".as_slice().into());
+    static CHUNK_1_DIGEST: LazyLock<B3Digest> =
+        LazyLock::new(|| blake3::hash(CHUNK_1.as_ref()).into());
+    static CHUNK_2_DIGEST: LazyLock<B3Digest> =
+        LazyLock::new(|| blake3::hash(CHUNK_2.as_ref()).into());
+    static BLOB_1_META: LazyLock<BlobMeta> = LazyLock::new(|| {
+        BlobMeta::from_iter([
+            ChunkMeta::new(*CHUNK_1_DIGEST, CHUNK_1.len() as u64),
+            ChunkMeta::new(*CHUNK_2_DIGEST, CHUNK_2.len() as u64),
+        ])
+    });
+
+    /// Reads to the beginning of the second chunk, ensures the first chunk is not fetched.
+    #[tokio::test]
+    async fn chunked_get_skip() {
+        let mut chunk_service = MockChunkStore::new();
+        chunk_service
+            .expect_get()
+            .with(predicate::eq(*CHUNK_2_DIGEST))
+            .return_once(|_| Ok(Some(CHUNK_2.to_owned())));
+
+        let mut rd = (*BLOB_1_META).reader_for_offset(2, 10, &chunk_service);
+        let mut buf = Vec::new();
+        rd.read_to_end(&mut buf).await.expect("to succeed");
+        assert_eq!(b"c".to_vec(), buf);
+    }
+
+    /// Skip the first byte in the first chunk
+    #[tokio::test]
+    async fn chunked_skip_one_byte() {
+        let mut chunk_service = MockChunkStore::new();
+        chunk_service
+            .expect_get()
+            .returning(|digest| {
+                if *digest == *CHUNK_1_DIGEST {
+                    Ok(Some(CHUNK_1.to_owned()))
+                } else if *digest == *CHUNK_2_DIGEST {
+                    Ok(Some(CHUNK_2.to_owned()))
+                } else {
+                    panic!("called with unexpected digest")
+                }
+            })
+            .times(2);
+
+        let mut rd = (*BLOB_1_META).reader_for_offset(1, 10, &chunk_service);
+        let mut buf = Vec::new();
+        rd.read_to_end(&mut buf).await.expect("to succeed");
+        assert_eq!(b"bc".to_vec(), buf, "data to match");
+    }
+
+    /// Skip to the end
+    #[tokio::test]
+    async fn chunked_skip_end() {
+        let mut chunk_service = MockChunkStore::new();
+        chunk_service.expect_get().never();
+
+        let mut rd = (*BLOB_1_META).reader_for_offset(3, 10, &chunk_service);
+        let mut buf = Vec::new();
+        rd.read_to_end(&mut buf).await.expect("to succeed");
+        assert_eq!(b"".to_vec(), buf, "data to match");
+    }
+}

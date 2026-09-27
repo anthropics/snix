@@ -4,7 +4,7 @@ use tonic::async_trait;
 mod blob_meta;
 
 use crate::B3Digest;
-pub use blob_meta::BlobMeta;
+pub use blob_meta::{BlobMeta, ChunkMeta};
 
 #[cfg_attr(test, mockall::automock)]
 #[async_trait]

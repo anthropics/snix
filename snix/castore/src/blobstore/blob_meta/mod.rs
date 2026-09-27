@@ -1,5 +1,7 @@
 use crate::B3Digest;
 
+mod reader;
+
 /// Describes information to assemble a Blob.
 ///
 /// Currently stores only a list of [ChunkMeta],
@@ -13,6 +15,11 @@ impl BlobMeta {
     /// Returns the length of the blob, by summing up the sizes for each individual chunk.
     pub fn blob_len(&self) -> u64 {
         self.0.iter().map(|chunk| chunk.size).sum()
+    }
+
+    /// Iterates over all Chunks, returning [ChunkMeta].
+    fn chunks(&self) -> impl Iterator<Item = &ChunkMeta> {
+        self.0.iter()
     }
 }
 
