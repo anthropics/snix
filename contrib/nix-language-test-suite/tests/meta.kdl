@@ -34,6 +34,7 @@ lang {
     "isFunction" \
     "length" \
     "parseFlakeRef" \
+    "readDir" \
     "readFile" \
     "readFileType" \
     "__nixPath" \

@@ -1,0 +1,15 @@
+lang {
+  builtins "readDir"
+}
+
+environment {
+  fixtures {
+    dir "readDir" {
+      file "bar" content=""
+      dir "foo"
+      symlink "ldir" target="foo"
+      symlink "linked" target="foo/git-hates-directories"
+    }
+  }
+}
+
