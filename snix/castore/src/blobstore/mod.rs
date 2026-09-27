@@ -2,9 +2,11 @@ use auto_impl::auto_impl;
 use tonic::async_trait;
 
 mod blob_meta;
+mod blob_reader;
 
 use crate::B3Digest;
 pub use blob_meta::{BlobMeta, ChunkMeta};
+pub use blob_reader::BlobReader;
 
 #[cfg_attr(test, mockall::automock)]
 #[async_trait]
