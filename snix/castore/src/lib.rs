@@ -4,6 +4,7 @@ mod digests;
 mod errors;
 
 pub mod blobservice;
+pub mod blobstore;
 pub mod chunkstore;
 pub mod combinators;
 pub mod composition;
