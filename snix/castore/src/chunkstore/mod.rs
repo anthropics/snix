@@ -2,6 +2,7 @@ use auto_impl::auto_impl;
 use tonic::async_trait;
 
 pub mod memory;
+pub mod object_store;
 
 use crate::B3Digest;
 
