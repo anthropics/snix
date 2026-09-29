@@ -4,7 +4,7 @@ mod reader;
 
 /// Describes information to assemble a Blob.
 ///
-/// Currently stores only a list of [ChunkMeta],
+/// Currently stores only a list of non-empty chunk digests and offsets,
 /// but might gain bao support and other fields in the future.
 ///
 /// (See <https://snix.dev/docs/components/castore/blobstore-chunking-verified-streaming>)
@@ -14,16 +14,19 @@ pub struct BlobMeta {
 }
 
 impl BlobMeta {
-    /// Returns the length of the blob
+    /// Returns the length of the blob.
     pub fn blob_len(&self) -> u64 {
         self.chunk_metas.last().map(|cm| cm.end).unwrap_or_default()
     }
 
-    /// Constructs from an iterator of digests and chunk sizes
+    /// Constructs from an iterator of digests and chunk sizes.
+    ///
+    /// NOTE: The empty chunk is skipped silently, as there's no point fetching it.
     pub fn from_digests_and_sizes<T: IntoIterator<Item = (B3Digest, u64)>>(iter: T) -> Self {
         let mut blob_len: u64 = 0;
         let chunk_metas = iter
             .into_iter()
+            .filter(|(_, chunk_size)| *chunk_size != 0)
             .map(|(chunk_digest, chunk_size)| {
                 blob_len += chunk_size;
                 ChunkMeta {
