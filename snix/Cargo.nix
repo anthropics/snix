@@ -23537,6 +23537,16 @@ rec {
             features = [ "unstable" ];
           }
           {
+            name = "proptest";
+            packageId = "proptest";
+            usesDefaultFeatures = false;
+            features = [
+              "std"
+              "fork"
+              "timeout"
+            ];
+          }
+          {
             name = "rstest";
             packageId = "rstest";
             usesDefaultFeatures = false;

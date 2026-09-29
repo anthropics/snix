@@ -229,13 +229,17 @@ where
                 current_chunk,
                 mut stream,
             } => {
-                // Empty current_chunk, and construct a new stream from the new position.
-                *current_chunk = Cursor::new(vec![]);
-                stream.set(
-                    blob_meta
-                        .bytes_stream_for_offset(new_pos, *fetch_concurrency, *chunk_store)
-                        .boxed(),
-                );
+                // if the new position is still covered by our current buffer, we can simply update our position in there.
+                // else, empty current_chunk, and construct a new stream from the new position.
+                if !seek_in_current_chunk(*pos, new_pos, current_chunk)? {
+                    *current_chunk = Cursor::new(vec![]);
+                    stream.set(
+                        blob_meta
+                            .bytes_stream_for_offset(new_pos, *fetch_concurrency, *chunk_store)
+                            .boxed(),
+                    );
+                }
+
                 *pos = new_pos;
 
                 Ok(())
@@ -275,18 +279,98 @@ fn calc_position(cur_pos: u64, blob_len: u64, seek_from: SeekFrom) -> std::io::R
     }
 }
 
+/// Seeks the cursor to the new blob position if contained in the chunk.
+///
+/// Returns true if the new position is contained in the current chunk.
+/// It is permissible to seek to the end of the chunk, (with no more bytes remaining)
+fn seek_in_current_chunk(
+    cur_blob_pos: u64,
+    new_blob_pos: u64,
+    current_chunk: &mut Cursor<impl AsRef<[u8]>>,
+) -> io::Result<bool> {
+    // Determine current_chunks blob offsets
+    let chunk_len = current_chunk.get_ref().as_ref().len();
+    let chunk_start_offset = cur_blob_pos - current_chunk.position();
+    let chunk_end_pos =
+        chunk_start_offset
+            .checked_add(chunk_len as u64)
+            .ok_or(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "chunk_end > u64::MAX",
+            ))?;
+
+    if (chunk_start_offset..=chunk_end_pos).contains(&new_blob_pos) {
+        let new_chunk_pos = new_blob_pos - chunk_start_offset;
+        debug_assert!(
+            new_chunk_pos <= chunk_len as u64,
+            "Snix bug: tried seeking past chunk boundary"
+        );
+        current_chunk.set_position(new_chunk_pos);
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use std::{io::SeekFrom, sync::LazyLock};
-    use tokio::io::AsyncSeekExt;
+    use mockall::predicate;
+    use std::{
+        io::{Cursor, SeekFrom},
+        sync::LazyLock,
+    };
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
     use crate::{
         B3Digest,
         blobstore::BlobMeta,
-        chunkstore::{Chunk, ChunkStore, memory::MemoryChunkStore},
+        chunkstore::{Chunk, ChunkStore, MockChunkStore, memory::MemoryChunkStore},
     };
 
-    use super::BlobReader;
+    use super::{BlobReader, seek_in_current_chunk};
+    use proptest::prelude::*;
+    proptest! {
+        #[test]
+        fn seek_correctly_seeks(
+            // chunk data
+            chunk_data in prop::collection::vec(any::<u8>(), 0..256),
+            // position inside the chunk
+            chunk_pos in 0..=256usize,
+            // the chunk must not necessarily be at the start
+            chunk_start_offset in 0..256u64,
+            // where we want to seek to
+            seek_relative in -128..128i64,
+        ) {
+            // clamp chunk_pos to not fall outside chunk_data.
+            let chunk_pos = chunk_data.len().min(chunk_pos) as u64;
+
+            let cur_blob_pos = chunk_start_offset.checked_add(chunk_pos).expect("to not overflow");
+
+            let chunk_end_pos = chunk_start_offset.checked_add(chunk_data.len() as u64).expect("to not overflow");
+            let mut current_chunk = {
+                let mut c = Cursor::new(chunk_data);
+                c.set_position(chunk_pos);
+                c
+            };
+
+            // bail out early if we're trying to seek to a negative position
+            let new_blob_pos = match cur_blob_pos.checked_add_signed(seek_relative) {
+                None => return Ok(()),
+                Some(v) => v,
+            };
+            let success = seek_in_current_chunk(cur_blob_pos, new_blob_pos, &mut current_chunk).expect("to not error");
+
+            let target_is_inside_chunk = new_blob_pos >= chunk_start_offset && new_blob_pos <= chunk_end_pos;
+            if target_is_inside_chunk {
+                assert!(success, "seek should have been successful");
+                let new_chunk_pos = chunk_pos.checked_add_signed(seek_relative).expect("to not over/underflow");
+                assert_eq!(new_chunk_pos, current_chunk.position(), "seek should be to the new position");
+            } else {
+                assert!(!success, "seek should be unsuccessful, from {cur_blob_pos} to {new_blob_pos}, {chunk_start_offset}..={chunk_end_pos}");
+                assert_eq!(chunk_pos, current_chunk.position(), "no seek should have happened")
+            }
+        }
+    }
 
     #[tokio::test]
     async fn single_chunk() {
@@ -394,5 +478,45 @@ mod test {
                 assert_eq!(b"c"[..].to_vec(), buf.as_slice(), "data to match");
             }
         }
+
+        // seek to the front
+        let pos = rd.seek(SeekFrom::Start(0)).await.expect("seek to succeed");
+        assert_eq!(0, pos, "position to be correct");
+    }
+
+    #[tokio::test]
+    async fn test_seek_same_chunk() {
+        // This chunk store will only ever respond with CHUNK_1 once.
+        let mut chunk_store = MockChunkStore::new();
+        chunk_store
+            .expect_get()
+            .with(predicate::eq(*CHUNK_1_DIGEST))
+            .return_once(|_| Ok(Some(CHUNK_1.to_owned())));
+
+        // construct BlobReader
+        let mut rd = BlobReader::from_blob_meta(
+            &BLOB_1_META,
+            &chunk_store,
+            // we explicitly set the concurrency to 1, so BLOB2 will only get fetched if would poll the stream a second time
+            // (which we don't).
+            1,
+        );
+
+        let first = rd.read_u8().await.expect("to read first byte");
+        assert_eq!(b'a', first, "expect first byte to match");
+
+        // seek backwards to start, read again
+        rd.seek(SeekFrom::Start(0)).await.expect("seek to succeed");
+        let first = rd.read_u8().await.expect("to read first byte");
+        assert_eq!(b'a', first, "expect first byte to match");
+
+        // seek to the end of this chunk
+        rd.seek(SeekFrom::Start(2)).await.expect("seek to succeed");
+        // we now don't read, so we won't poll the stream and cause the chunkservice to panic
+        // seek back to the middle of the first chunk
+        rd.seek(SeekFrom::Start(1)).await.expect("seek to succeed");
+        // and read a bit more
+        let second = rd.read_u8().await.expect("to read second byte");
+        assert_eq!(b'b', second, "expect second byte to match");
     }
 }

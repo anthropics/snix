@@ -5290,6 +5290,7 @@ dependencies = [
  "petgraph",
  "pin-project-lite",
  "pretty_assertions",
+ "proptest",
  "prost",
  "redb",
  "rstest",
