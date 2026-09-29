@@ -52,7 +52,7 @@ pub enum ValidateBuildRequestError {
     EnvVarNotSorted,
 
     #[error("invalid build constraints: {0}")]
-    InvalidBuildConstraints(ValidateBuildConstraintsError),
+    InvalidBuildConstraints(#[from] ValidateBuildConstraintsError),
 
     #[error("invalid additional file path at position: {0}")]
     InvalidAdditionalFilePath(usize),
@@ -225,15 +225,6 @@ impl TryFrom<BuildRequest> for crate::buildservice::BuildRequest {
             Err(ValidateBuildRequestError::EnvVarNotSorted)?;
         }
 
-        // validate build constraints
-        let constraints = value
-            .constraints
-            .map_or(Ok(HashSet::new()), |constraints| {
-                constraints
-                    .try_into()
-                    .map_err(ValidateBuildRequestError::InvalidBuildConstraints)
-            })?;
-
         // validate additional_files
         for (i, additional_file) in value.additional_files.iter().enumerate() {
             if !is_clean_relative_path(&additional_file.path) {
@@ -252,7 +243,12 @@ impl TryFrom<BuildRequest> for crate::buildservice::BuildRequest {
             inputs_dir: value.inputs_dir,
             outputs: value.outputs,
             environment_vars: value.environment_vars.into_iter().map(Into::into).collect(),
-            constraints,
+            constraints: value
+                .constraints
+                .map(HashSet::<crate::buildservice::BuildConstraints>::try_from)
+                .transpose()?
+                .unwrap_or_default(),
+
             additional_files: value.additional_files.into_iter().map(Into::into).collect(),
             refscan_needles: value.refscan_needles,
         })
@@ -271,6 +267,9 @@ pub enum ValidateBuildConstraintsError {
 
     #[error("available_ro_paths not sorted")]
     AvailableRoPathsNotSorted,
+
+    #[error("duplicate path {0} in available_ro_paths")]
+    DuplicateRoPaths(String),
 }
 
 impl From<build_request::EnvVar> for crate::buildservice::EnvVar {
@@ -318,36 +317,49 @@ impl TryFrom<build_request::BuildConstraints> for HashSet<crate::buildservice::B
     fn try_from(value: build_request::BuildConstraints) -> Result<Self, Self::Error> {
         use crate::buildservice::BuildConstraints;
 
+        let build_request::BuildConstraints {
+            system,
+            min_memory,
+            available_ro_paths,
+            network_access,
+            provide_bin_sh,
+        } = value;
+
+        let mut constraints = HashSet::new();
+
         // validate system
-        if value.system.is_empty() {
+        if system.is_empty() {
             Err(ValidateBuildConstraintsError::InvalidSystem)?;
         }
 
-        let mut build_constraints = HashSet::from([
-            BuildConstraints::System(value.system),
-            BuildConstraints::MinMemory(value.min_memory),
-        ]);
+        constraints.insert(BuildConstraints::System(system));
+        if min_memory != 0 {
+            constraints.insert(BuildConstraints::MinMemory(min_memory));
+        }
 
         // validate available_ro_paths
-        if !is_sorted(value.available_ro_paths.iter()) {
+        if !is_sorted(available_ro_paths.iter()) {
             Err(ValidateBuildConstraintsError::AvailableRoPathsNotSorted)?;
         }
-        for (i, p) in value.available_ro_paths.into_iter().enumerate() {
+        for (i, p) in available_ro_paths.into_iter().enumerate() {
             if !is_clean_absolute_path(&p) {
                 Err(ValidateBuildConstraintsError::InvalidAvailableRoPaths(i))?
             } else {
-                build_constraints.insert(BuildConstraints::AvailableReadOnlyPath(p));
+                let v = BuildConstraints::AvailableReadOnlyPath(p);
+                if let Some(BuildConstraints::AvailableReadOnlyPath(p)) = constraints.replace(v) {
+                    Err(ValidateBuildConstraintsError::DuplicateRoPaths(p))?;
+                }
             }
         }
 
-        if value.network_access {
-            build_constraints.insert(BuildConstraints::NetworkAccess);
+        if network_access {
+            constraints.insert(BuildConstraints::NetworkAccess);
         }
-        if value.provide_bin_sh {
-            build_constraints.insert(BuildConstraints::ProvideBinSh);
+        if provide_bin_sh {
+            constraints.insert(BuildConstraints::ProvideBinSh);
         }
 
-        Ok(build_constraints)
+        Ok(constraints)
     }
 }
 
