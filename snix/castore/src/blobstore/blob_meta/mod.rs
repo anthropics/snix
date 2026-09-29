@@ -7,7 +7,7 @@ mod reader;
 /// Currently stores only a list of [ChunkMeta],
 /// but might gain bao support and other fields in the future.
 ///
-/// (See https://snix.dev/docs/components/castore/blobstore-chunking-verified-streaming)
+/// (See <https://snix.dev/docs/components/castore/blobstore-chunking-verified-streaming>)
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlobMeta(Vec<ChunkMeta>);
 
