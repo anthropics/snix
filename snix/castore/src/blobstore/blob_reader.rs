@@ -3,7 +3,8 @@ use std::{
     task::Poll,
 };
 
-use futures::ready;
+use bytes::Buf;
+use futures::{StreamExt, ready, stream::BoxStream};
 use pin_project_lite::pin_project;
 use tokio::io::AsyncBufRead;
 
@@ -44,8 +45,11 @@ pin_project! {
             // The position of the reader in the entire blob
             pos: u64,
 
-            // A reader that would read the remaining bytes from pos to end.
-            #[pin] rd: Box<dyn AsyncBufRead + Unpin + 'a>,
+            // The current chunk.
+            current_chunk: Cursor<Vec<u8>>,
+
+            // A stream providing the remaining bytes from pos + current_chunk.remaining() till the end.
+            #[pin] stream: BoxStream<'a, std::io::Result<Cursor<Vec<u8>>>>,
         },
     }
 }
@@ -68,14 +72,17 @@ where
         chunk_store: &'a CS,
         fetch_concurrency: usize,
     ) -> BlobReader<'a, CS> {
-        let rd = Box::new(blob_meta.reader_for_offset(0, fetch_concurrency, chunk_store));
+        let stream = blob_meta
+            .bytes_stream_for_offset(0, fetch_concurrency, chunk_store)
+            .boxed();
 
         Self::ChunkedBlob {
             blob_meta,
             chunk_store,
             fetch_concurrency,
             pos: 0,
-            rd,
+            current_chunk: Cursor::new(vec![]),
+            stream,
         }
     }
 
@@ -109,18 +116,44 @@ where
     ) -> Poll<io::Result<()>> {
         match self.project() {
             BlobReaderProj::SingleChunk { cursor } => cursor.poll_read(cx, buf),
-            BlobReaderProj::ChunkedBlob { pos, rd, .. } => {
-                // call poll_read, updating our position depending on how much got filled.
-                let bytes_read = {
-                    let filled = buf.filled().len();
-                    ready!(rd.poll_read(cx, buf))?;
-                    buf.filled().len() - filled
-                };
-                pos.checked_add(bytes_read as u64)
-                    .ok_or(std::io::Error::new(
-                        std::io::ErrorKind::OutOfMemory,
-                        "position > u64::MAX bytes",
-                    ))?;
+            BlobReaderProj::ChunkedBlob {
+                pos,
+                current_chunk,
+                mut stream,
+                ..
+            } => {
+                // If the buffer we write to is full, we can't do anything
+                if buf.remaining() == 0 {
+                    return Poll::Ready(Ok(()));
+                }
+
+                // If we have no more bytes to read in current_chunk, poll for the next one
+                if current_chunk.remaining() == 0 {
+                    if let Some(res) = ready!(stream.poll_next_unpin(cx)) {
+                        *current_chunk = res?;
+                        debug_assert!(
+                            current_chunk.remaining() > 0,
+                            "fetched chunk should have some data"
+                        );
+                    } else {
+                        // end of stream, EOF
+                        return Poll::Ready(Ok(()));
+                    }
+                }
+
+                let b = &current_chunk.get_ref()[current_chunk.position() as usize..];
+                let to_fill = std::cmp::min(buf.remaining(), b.len());
+                let dst = buf.initialize_unfilled_to(to_fill);
+                dst.copy_from_slice(&b[..to_fill]);
+
+                buf.advance(to_fill);
+                current_chunk.advance(to_fill);
+
+                *pos = pos.checked_add(to_fill as u64).ok_or(std::io::Error::new(
+                    std::io::ErrorKind::OutOfMemory,
+                    "position > u64::MAX bytes",
+                ))?;
+
                 Poll::Ready(Ok(()))
             }
         }
@@ -137,15 +170,37 @@ where
     ) -> Poll<io::Result<&[u8]>> {
         match self.project() {
             BlobReaderProj::SingleChunk { cursor } => cursor.poll_fill_buf(cx),
-            BlobReaderProj::ChunkedBlob { rd, .. } => rd.poll_fill_buf(cx),
+            BlobReaderProj::ChunkedBlob {
+                current_chunk,
+                mut stream,
+                ..
+            } => {
+                if current_chunk.remaining() == 0 {
+                    if let Some(res) = ready!(stream.poll_next_unpin(cx)) {
+                        *current_chunk = res?;
+                        debug_assert!(
+                            current_chunk.remaining() > 0,
+                            "fetched chunk should have some data"
+                        );
+                    } else {
+                        // end of stream, EOF
+                        return Poll::Ready(Ok(&[]));
+                    }
+                }
+                let p = current_chunk.position();
+
+                Poll::Ready(Ok(&current_chunk.get_ref()[(p as usize)..]))
+            }
         }
     }
 
     fn consume(self: std::pin::Pin<&mut Self>, amt: usize) {
         match self.project() {
             BlobReaderProj::SingleChunk { cursor } => cursor.consume(amt),
-            BlobReaderProj::ChunkedBlob { rd, pos, .. } => {
-                rd.consume(amt);
+            BlobReaderProj::ChunkedBlob {
+                current_chunk, pos, ..
+            } => {
+                current_chunk.advance(amt);
                 *pos = pos
                     .checked_add(amt as u64)
                     .expect("consume would increase pos > u64::MAX bytes");
@@ -169,18 +224,18 @@ where
             BlobReaderProj::ChunkedBlob {
                 blob_meta,
                 chunk_store,
-                pos,
-                mut rd,
                 fetch_concurrency,
+                pos,
+                current_chunk,
+                mut stream,
             } => {
-                // Construct a new reader from that position
-                // FUTUREWORK: if we can seek forward, avoid re-assembling.
-                // At least if it's still in the same chunk?
-                rd.set(Box::new(blob_meta.reader_for_offset(
-                    new_pos,
-                    *fetch_concurrency,
-                    *chunk_store,
-                )));
+                // Empty current_chunk, and construct a new stream from the new position.
+                *current_chunk = Cursor::new(vec![]);
+                stream.set(
+                    blob_meta
+                        .bytes_stream_for_offset(new_pos, *fetch_concurrency, *chunk_store)
+                        .boxed(),
+                );
                 *pos = new_pos;
 
                 Ok(())
@@ -294,7 +349,7 @@ mod test {
             tokio::io::copy(&mut rd, &mut buf)
                 .await
                 .expect("to succeed");
-            assert_eq!(b"abc"[..].to_vec(), buf.as_slice(), "data to much");
+            assert_eq!(b"abc"[..].to_vec(), buf.as_slice(), "data to match");
         }
 
         let pos = rd.seek(SeekFrom::Start(1)).await.expect("seek to succeed");
@@ -305,7 +360,7 @@ mod test {
             tokio::io::copy_buf(&mut rd, &mut buf)
                 .await
                 .expect("to succeed");
-            assert_eq!(b"bc"[..].to_vec(), buf.as_slice(), "data to much");
+            assert_eq!(b"bc"[..].to_vec(), buf.as_slice(), "data to match");
         }
 
         // use AsyncBufRead a bit, then seek relatively. This ensures consume() updates the internal position tracking.

@@ -1,6 +1,6 @@
 use crate::B3Digest;
 
-mod reader;
+mod bytes_stream;
 
 /// Describes information to assemble a Blob.
 ///

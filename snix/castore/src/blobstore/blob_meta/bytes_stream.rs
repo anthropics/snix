@@ -1,37 +1,28 @@
 use futures::StreamExt;
 use std::io::{self, Cursor};
 
-use tokio::io::AsyncBufRead;
-use tokio_util::io::StreamReader;
-
 use crate::{B3Digest, blobstore::BlobMeta, chunkstore::ChunkStore};
 
 impl BlobMeta {
-    /// Returns a AsyncBufRead impl for the actual blob bytes.
+    /// Returns a stream of bytes of actual blob bytes.
     /// Queries the passed ChunkStore, with configurable concurrency.
-    /// A offset to start seeking from can be specified. Chunks before this are then skipped.
-    ///
-    /// NOTE: This does not implement AsyncSeek, on a seek this should be called again
-    /// with the new offset to seek into.
-    pub fn reader_for_offset<'a>(
+    /// A offset to start seeking from can be specified.
+    /// Chunks before this are then skipped.
+    pub fn bytes_stream_for_offset<'a>(
         &'a self,
         offset: u64,
         fetch_concurrency: usize,
         chunk_store: &'a (impl ChunkStore + 'a),
-    ) -> impl AsyncBufRead + Unpin + 'a {
+    ) -> impl futures::Stream<Item = std::io::Result<Cursor<Vec<u8>>>> + 'a {
         // Get all remaining chunk digests, and the bytes to skip from the first chunk
         let (skip_first, iter) = self.chunk_digests_from(offset);
 
         // produce a stream of byte chunks
-        StreamReader::new(
-            tokio_stream::iter({
-                iter.zip(std::iter::once(skip_first).chain(std::iter::repeat(0)))
-            })
+        tokio_stream::iter(iter.zip(std::iter::once(skip_first).chain(std::iter::repeat(0))))
             .map(move |(chunk_digest, skip_in_chunk)| {
                 chunk_digest_to_buf(chunk_digest, skip_in_chunk, chunk_store)
             })
-            .buffered(fetch_concurrency),
-        )
+            .buffered(fetch_concurrency)
     }
 }
 
@@ -40,7 +31,7 @@ async fn chunk_digest_to_buf(
     chunk_digest: &B3Digest,
     skip_in_chunk: u64,
     chunk_store: &impl ChunkStore,
-) -> io::Result<impl bytes::Buf> {
+) -> io::Result<Cursor<Vec<u8>>> {
     let chunk = chunk_store
         .get(chunk_digest)
         .await
@@ -70,10 +61,10 @@ async fn chunk_digest_to_buf(
 
 #[cfg(test)]
 mod test {
-    use std::sync::LazyLock;
+    use std::{io::Cursor, sync::LazyLock};
 
+    use futures::TryStreamExt;
     use mockall::predicate;
-    use tokio::io::AsyncReadExt;
 
     use crate::{
         B3Digest,
@@ -94,7 +85,16 @@ mod test {
         ])
     });
 
-    /// Reads to the beginning of the second chunk, ensures the first chunk is not fetched.
+    async fn collect_chunks(
+        s: impl futures::Stream<Item = std::io::Result<Cursor<Vec<u8>>>>,
+    ) -> Vec<Vec<u8>> {
+        s.map_ok(|c| c.get_ref()[c.position() as usize..].to_vec())
+            .try_collect()
+            .await
+            .expect("to not fail")
+    }
+
+    /// Sets offset to the beginning of the second chunk, ensures the first chunk is not fetched.
     #[tokio::test]
     async fn chunked_get_skip() {
         let mut chunk_service = MockChunkStore::new();
@@ -103,10 +103,10 @@ mod test {
             .with(predicate::eq(*CHUNK_2_DIGEST))
             .return_once(|_| Ok(Some(CHUNK_2.to_owned())));
 
-        let mut rd = (*BLOB_1_META).reader_for_offset(2, 10, &chunk_service);
-        let mut buf = Vec::new();
-        rd.read_to_end(&mut buf).await.expect("to succeed");
-        assert_eq!(b"c".to_vec(), buf);
+        let chunks =
+            collect_chunks((*BLOB_1_META).bytes_stream_for_offset(2, 10, &chunk_service)).await;
+
+        assert_eq!(vec![b"c".to_vec()], chunks);
     }
 
     /// Skip the first byte in the first chunk
@@ -126,10 +126,9 @@ mod test {
             })
             .times(2);
 
-        let mut rd = (*BLOB_1_META).reader_for_offset(1, 10, &chunk_service);
-        let mut buf = Vec::new();
-        rd.read_to_end(&mut buf).await.expect("to succeed");
-        assert_eq!(b"bc".to_vec(), buf, "data to match");
+        let chunks =
+            collect_chunks((*BLOB_1_META).bytes_stream_for_offset(1, 10, &chunk_service)).await;
+        assert_eq!(vec![b"b".to_vec(), b"c".to_vec()], chunks, "data to match");
     }
 
     /// Skip to the end
@@ -138,10 +137,9 @@ mod test {
         let mut chunk_service = MockChunkStore::new();
         chunk_service.expect_get().never();
 
-        let mut rd = (*BLOB_1_META).reader_for_offset(3, 10, &chunk_service);
-        let mut buf = Vec::new();
-        rd.read_to_end(&mut buf).await.expect("to succeed");
-        assert_eq!(b"".to_vec(), buf, "data to match");
+        let chunks =
+            collect_chunks((*BLOB_1_META).bytes_stream_for_offset(3, 10, &chunk_service)).await;
+        assert_eq!(Vec::<Vec<u8>>::new(), chunks, "data to match");
     }
 
     #[tokio::test]
@@ -150,10 +148,8 @@ mod test {
         chunk_service.expect_get().never();
 
         let blob_meta = BlobMeta::from_digests_and_sizes([]);
-        let mut rd = blob_meta.reader_for_offset(0, 10, &chunk_service);
+        let chunks = collect_chunks(blob_meta.bytes_stream_for_offset(0, 10, &chunk_service)).await;
 
-        let mut buf = Vec::new();
-        rd.read_to_end(&mut buf).await.expect("to succeed");
-        assert_eq!(b"".to_vec(), buf, "data to match");
+        assert_eq!(Vec::<Vec<u8>>::new(), chunks, "data to match");
     }
 }
