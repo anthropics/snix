@@ -160,4 +160,17 @@ mod test {
         rd.read_to_end(&mut buf).await.expect("to succeed");
         assert_eq!(b"".to_vec(), buf, "data to match");
     }
+
+    #[tokio::test]
+    async fn read_empty() {
+        let mut chunk_service = MockChunkStore::new();
+        chunk_service.expect_get().never();
+
+        let blob_meta = BlobMeta::from_digests_and_sizes([]);
+        let mut rd = blob_meta.reader_for_offset(0, 10, &chunk_service);
+
+        let mut buf = Vec::new();
+        rd.read_to_end(&mut buf).await.expect("to succeed");
+        assert_eq!(b"".to_vec(), buf, "data to match");
+    }
 }
