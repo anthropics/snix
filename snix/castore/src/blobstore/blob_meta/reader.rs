@@ -13,40 +13,36 @@ impl BlobMeta {
     ///
     /// NOTE: This does not implement AsyncSeek, on a seek this should be called again
     /// with the new offset to seek into.
-    pub fn reader_for_offset<'cs>(
-        &self,
+    pub fn reader_for_offset<'a>(
+        &'a self,
         offset: u64,
         fetch_concurrency: usize,
-        chunk_store: &'cs (impl ChunkStore + 'cs),
-    ) -> impl AsyncBufRead + Unpin + 'cs {
+        chunk_store: &'a (impl ChunkStore + 'a),
+    ) -> impl AsyncBufRead + Unpin + 'a {
+        // Get all remaining chunk digests, and the bytes to skip from the first chunk
         let (skip_first, iter) = self.chunk_digests_from(offset);
-        let chunk_digests: Vec<_> = iter.cloned().collect();
 
         // produce a stream of byte chunks
-        let bytes_stream = tokio_stream::iter(
-            // We might need to skip something from the first chunk.
-            // Turn the iterator of digests to fetch into bytes to skip at the beginning and the digest itself.
-            chunk_digests
-                .into_iter()
-                .zip(std::iter::once(skip_first).chain(std::iter::repeat(0))),
+        StreamReader::new(
+            tokio_stream::iter({
+                iter.zip(std::iter::once(skip_first).chain(std::iter::repeat(0)))
+            })
+            .map(move |(chunk_digest, skip_in_chunk)| {
+                chunk_digest_to_buf(chunk_digest, skip_in_chunk, chunk_store)
+            })
+            .buffered(fetch_concurrency),
         )
-        .map(move |(chunk_digest, skip_in_chunk)| {
-            chunk_digest_to_buf(chunk_digest, skip_in_chunk, chunk_store)
-        })
-        .buffered(fetch_concurrency);
-
-        StreamReader::new(bytes_stream)
     }
 }
 
 /// For a given chunk digest, offset to skip and ChunkStore, return a impl Buf.
 async fn chunk_digest_to_buf(
-    chunk_digest: B3Digest,
+    chunk_digest: &B3Digest,
     skip_in_chunk: u64,
     chunk_store: &impl ChunkStore,
 ) -> io::Result<impl bytes::Buf> {
     let chunk = chunk_store
-        .get(&chunk_digest)
+        .get(chunk_digest)
         .await
         .map_err(io::Error::other)?
         .ok_or_else(|| {

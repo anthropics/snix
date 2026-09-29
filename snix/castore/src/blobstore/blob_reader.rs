@@ -22,7 +22,7 @@ pin_project! {
 ///
 /// Any fallback to other chunkings, needs to be happen elsewhere.
 #[project = BlobReaderProj]
-    pub enum BlobReader<'cs, CS> {
+    pub enum BlobReader<'a, CS> {
         /// Blob is composed of a single chunk.
         /// This allows skipping asking for a [BlobMeta].
         /// For very small blobs the callsite might ask a [ChunkStore] directly.
@@ -33,23 +33,23 @@ pin_project! {
         /// and we need to query a [ChunkStore] to read data.
         ChunkedBlob {
             // Chunking information for this blob
-            blob_meta: BlobMeta,
+            blob_meta: &'a BlobMeta,
 
             // A [ChunkStore] to read chunks from
-            chunk_store: &'cs CS,
+            chunk_store: &'a CS,
 
             // The position of the reader in the entire blob
             pos: u64,
 
             // A reader that would read the remaining bytes from pos to end.
-            #[pin] rd: Box<dyn AsyncBufRead + Unpin + 'cs>,
+            #[pin] rd: Box<dyn AsyncBufRead + Unpin + 'a>,
         },
     }
 }
 
-impl<'cs, CS> BlobReader<'cs, CS>
+impl<'a, CS> BlobReader<'a, CS>
 where
-    CS: ChunkStore + 'cs,
+    CS: ChunkStore,
 {
     /// Initialize a [BlobReader] with the [Chunk] of a single-chunked blob
     pub fn from_single_chunk(chunk: Chunk) -> Self {
@@ -61,10 +61,10 @@ where
     /// Initialize a [BlobReader] with a fixed [BlobMeta],
     /// a reference to a [ChunkStore] and a fetch concurrency.
     pub fn from_blob_meta(
-        blob_meta: BlobMeta,
-        chunk_store: &'cs CS,
+        blob_meta: &'a BlobMeta,
+        chunk_store: &'a CS,
         fetch_concurrency: usize,
-    ) -> BlobReader<'cs, CS> {
+    ) -> BlobReader<'a, CS> {
         let rd = Box::new(blob_meta.reader_for_offset(0, fetch_concurrency, chunk_store));
 
         Self::ChunkedBlob {
@@ -94,7 +94,7 @@ where
     }
 }
 
-impl<'cs, CS> tokio::io::AsyncRead for BlobReader<'cs, CS>
+impl<CS> tokio::io::AsyncRead for BlobReader<'_, CS>
 where
     CS: ChunkStore,
 {
@@ -123,9 +123,9 @@ where
     }
 }
 
-impl<'cs, CS> AsyncBufRead for BlobReader<'cs, CS>
+impl<CS> AsyncBufRead for BlobReader<'_, CS>
 where
-    CS: ChunkStore + 'cs,
+    CS: ChunkStore,
 {
     fn poll_fill_buf(
         self: std::pin::Pin<&mut Self>,
@@ -149,9 +149,9 @@ where
         }
     }
 }
-impl<'cs, CS> tokio::io::AsyncSeek for BlobReader<'cs, CS>
+impl<CS> tokio::io::AsyncSeek for BlobReader<'_, CS>
 where
-    CS: ChunkStore + 'cs,
+    CS: ChunkStore,
 {
     fn start_seek(self: std::pin::Pin<&mut Self>, position: SeekFrom) -> io::Result<()> {
         // calculate the new position
@@ -283,7 +283,7 @@ mod test {
             .await
             .expect("to succeed");
 
-        let mut rd = BlobReader::from_blob_meta(BLOB_1_META.clone(), &chunk_store, 10);
+        let mut rd = BlobReader::from_blob_meta(&BLOB_1_META, &chunk_store, 10);
         {
             let mut buf = Vec::new();
             tokio::io::copy(&mut rd, &mut buf)
