@@ -19,21 +19,8 @@ impl BlobMeta {
         fetch_concurrency: usize,
         chunk_store: &'cs (impl ChunkStore + 'cs),
     ) -> impl AsyncBufRead + Unpin + 'cs {
-        let mut bytes_to_skip = offset;
-
-        let chunk_digests = self
-            .0
-            .iter()
-            // Skip all chunk_meta that are irrelevant.
-            // skip_while skips up until we return false.
-            .skip_while(|chunk_meta| {
-                bytes_to_skip
-                    .checked_sub(chunk_meta.size)
-                    .map(|new_bytes_to_skip| bytes_to_skip = new_bytes_to_skip)
-                    .is_some()
-            })
-            .map(|chunk_meta| chunk_meta.digest.to_owned())
-            .collect::<Vec<_>>();
+        let (skip_first, iter) = self.chunk_digests_from(offset);
+        let chunk_digests: Vec<_> = iter.cloned().collect();
 
         // produce a stream of byte chunks
         let bytes_stream = tokio_stream::iter(
@@ -41,7 +28,7 @@ impl BlobMeta {
             // Turn the iterator of digests to fetch into bytes to skip at the beginning and the digest itself.
             chunk_digests
                 .into_iter()
-                .zip(std::iter::once(bytes_to_skip).chain(std::iter::repeat(0))),
+                .zip(std::iter::once(skip_first).chain(std::iter::repeat(0))),
         )
         .map(move |(chunk_digest, skip_in_chunk)| {
             chunk_digest_to_buf(chunk_digest, skip_in_chunk, chunk_store)
