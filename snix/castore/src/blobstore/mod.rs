@@ -6,7 +6,7 @@ mod blob_reader;
 mod blob_writer;
 
 use crate::B3Digest;
-pub use blob_meta::{BlobMeta, ChunkMeta};
+pub use blob_meta::BlobMeta;
 pub use blob_reader::BlobReader;
 pub use blob_writer::BlobWriter;
 

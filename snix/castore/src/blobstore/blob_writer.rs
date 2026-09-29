@@ -10,7 +10,7 @@ use tokio_util::io::InspectReader;
 
 use crate::{
     B3Digest,
-    blobstore::{BlobMeta, ChunkMeta},
+    blobstore::BlobMeta,
     chunkstore::{Chunk, ChunkStore},
 };
 
@@ -51,7 +51,7 @@ impl BlobWriter {
                 avg_chunk_size * 2,
             );
 
-            let chunk_metas: Vec<ChunkMeta> = chunker
+            let chunk_digests_sizes: Vec<(B3Digest, u64)> = chunker
                 .as_stream()
                 .map_ok(|chunk| {
                     let chunk = Chunk::from(chunk.data);
@@ -64,7 +64,7 @@ impl BlobWriter {
                         })?;
 
                         // on an upload error, this will cause rx to be dropped, which we will see when trying to enqueue work.
-                        Ok(ChunkMeta::new(chunk_digest, chunk_len as u64))
+                        Ok((chunk_digest, chunk_len as u64))
                     }
                 })
                 .try_buffered(upload_concurrency)
@@ -72,7 +72,7 @@ impl BlobWriter {
                 .await?;
 
             Ok((
-                BlobMeta::from_iter(chunk_metas),
+                BlobMeta::from_digests_and_sizes(chunk_digests_sizes),
                 blob_hasher.finalize().into(),
             ))
         });
@@ -135,7 +135,7 @@ mod test {
     use tokio::io::AsyncWriteExt;
 
     use super::BlobWriter;
-    use crate::blobstore::{BlobMeta, ChunkMeta};
+    use crate::blobstore::BlobMeta;
     use crate::{
         B3Digest,
         chunkstore::{self, ChunkStore},
@@ -165,7 +165,7 @@ mod test {
         assert_eq!(7, blob_meta.blob_len(), "BlobMeta blob len must match");
         assert_eq!(exp_digest, blob_digest, "blob digest must match",);
 
-        let exp_blob_meta = BlobMeta::from_iter([ChunkMeta::new(exp_digest, 7)]);
+        let exp_blob_meta = BlobMeta::from_digests_and_sizes([(exp_digest, 7)]);
         assert_eq!(exp_blob_meta, blob_meta, "expected blob meta to be correct");
 
         assert_eq!(
@@ -197,7 +197,7 @@ mod test {
         let exp_digest: B3Digest = blake3::hash(b"").into();
         assert_eq!(exp_digest, blob_digest, "blob digest must match",);
 
-        let exp_blob_meta = BlobMeta::from_iter([]);
+        let exp_blob_meta = BlobMeta::from_digests_and_sizes([]);
         assert_eq!(exp_blob_meta, blob_meta, "expected blob meta to be correct");
     }
 }

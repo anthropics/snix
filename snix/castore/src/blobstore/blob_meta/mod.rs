@@ -14,42 +14,24 @@ pub struct BlobMeta(Vec<ChunkMeta>);
 impl BlobMeta {
     /// Returns the length of the blob, by summing up the sizes for each individual chunk.
     pub fn blob_len(&self) -> u64 {
-        self.0.iter().map(|chunk| chunk.size).sum()
+        self.0.iter().map(|e| e.size).sum()
     }
 
-    /// Iterates over all Chunks, returning [ChunkMeta].
-    fn chunks(&self) -> impl Iterator<Item = &ChunkMeta> {
-        self.0.iter()
-    }
-}
-
-impl FromIterator<ChunkMeta> for BlobMeta {
-    fn from_iter<T: IntoIterator<Item = ChunkMeta>>(iter: T) -> Self {
-        Self(iter.into_iter().collect())
+    /// Constructs from an iterator of digests and chunk sizes
+    pub fn from_digests_and_sizes<T: IntoIterator<Item = (B3Digest, u64)>>(iter: T) -> Self {
+        Self(
+            iter.into_iter()
+                .map(|(digest, size)| ChunkMeta { digest, size })
+                .collect(),
+        )
     }
 }
 
 /// Records information about a chunk part of a [BlobMeta]
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ChunkMeta {
+struct ChunkMeta {
     /// Digest of that specific chunk
     digest: B3Digest,
     /// Length of that chunk, in bytes.
     size: u64,
-}
-
-impl ChunkMeta {
-    pub fn new(digest: B3Digest, size: u64) -> Self {
-        Self { digest, size }
-    }
-
-    /// Returns the digest of that specific chunk.
-    pub fn digest(&self) -> &B3Digest {
-        &self.digest
-    }
-
-    /// Returns the length of the chunks data / payload, in bytes.
-    pub fn size(&self) -> u64 {
-        self.size
-    }
 }

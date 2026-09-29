@@ -22,7 +22,8 @@ impl BlobMeta {
         let mut bytes_to_skip = offset;
 
         let chunk_digests = self
-            .chunks()
+            .0
+            .iter()
             // Skip all chunk_meta that are irrelevant.
             // skip_while skips up until we return false.
             .skip_while(|chunk_meta| {
@@ -93,7 +94,7 @@ mod test {
 
     use crate::{
         B3Digest,
-        blobstore::{BlobMeta, ChunkMeta},
+        blobstore::BlobMeta,
         chunkstore::{Chunk, MockChunkStore},
     };
 
@@ -104,9 +105,9 @@ mod test {
     static CHUNK_2_DIGEST: LazyLock<B3Digest> =
         LazyLock::new(|| blake3::hash(CHUNK_2.as_ref()).into());
     static BLOB_1_META: LazyLock<BlobMeta> = LazyLock::new(|| {
-        BlobMeta::from_iter([
-            ChunkMeta::new(*CHUNK_1_DIGEST, CHUNK_1.len() as u64),
-            ChunkMeta::new(*CHUNK_2_DIGEST, CHUNK_2.len() as u64),
+        BlobMeta::from_digests_and_sizes([
+            (*CHUNK_1_DIGEST, CHUNK_1.len() as u64),
+            (*CHUNK_2_DIGEST, CHUNK_2.len() as u64),
         ])
     });
 
