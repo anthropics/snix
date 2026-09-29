@@ -38,6 +38,9 @@ pin_project! {
             // A [ChunkStore] to read chunks from
             chunk_store: &'a CS,
 
+            // The configured fetch concurrency
+            fetch_concurrency: usize,
+
             // The position of the reader in the entire blob
             pos: u64,
 
@@ -70,6 +73,7 @@ where
         Self::ChunkedBlob {
             blob_meta,
             chunk_store,
+            fetch_concurrency,
             pos: 0,
             rd,
         }
@@ -167,13 +171,14 @@ where
                 chunk_store,
                 pos,
                 mut rd,
+                fetch_concurrency,
             } => {
                 // Construct a new reader from that position
                 // FUTUREWORK: if we can seek forward, avoid re-assembling.
                 // At least if it's still in the same chunk?
                 rd.set(Box::new(blob_meta.reader_for_offset(
                     new_pos,
-                    10,
+                    *fetch_concurrency,
                     *chunk_store,
                 )));
                 *pos = new_pos;
