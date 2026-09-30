@@ -34,7 +34,7 @@ pin_project! {
         /// and we need to query a [ChunkStore] to read data.
         ChunkedBlob {
             // Chunking information for this blob
-            blob_meta: &'a BlobMeta,
+            blob_meta: BlobMeta,
 
             // A [ChunkStore] to read chunks from
             chunk_store: &'a CS,
@@ -68,7 +68,7 @@ where
     /// Initialize a [BlobReader] with a fixed [BlobMeta],
     /// a reference to a [ChunkStore] and a fetch concurrency.
     pub fn from_blob_meta(
-        blob_meta: &'a BlobMeta,
+        blob_meta: BlobMeta,
         chunk_store: &'a CS,
         fetch_concurrency: usize,
     ) -> BlobReader<'a, CS> {
@@ -427,7 +427,7 @@ mod test {
             .await
             .expect("to succeed");
 
-        let mut rd = BlobReader::from_blob_meta(&BLOB_1_META, &chunk_store, 10);
+        let mut rd = BlobReader::from_blob_meta(BLOB_1_META.to_owned(), &chunk_store, 10);
         {
             let mut buf = Vec::new();
             tokio::io::copy(&mut rd, &mut buf)
@@ -495,7 +495,7 @@ mod test {
 
         // construct BlobReader
         let mut rd = BlobReader::from_blob_meta(
-            &BLOB_1_META,
+            BLOB_1_META.to_owned(),
             &chunk_store,
             // we explicitly set the concurrency to 1, so BLOB2 will only get fetched if would poll the stream a second time
             // (which we don't).

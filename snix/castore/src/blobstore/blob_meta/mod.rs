@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::B3Digest;
 
 mod bytes_stream;
@@ -10,7 +12,7 @@ mod bytes_stream;
 /// (See <https://snix.dev/docs/components/castore/blobstore-chunking-verified-streaming>)
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlobMeta {
-    chunk_metas: Vec<ChunkMeta>,
+    chunk_metas: Arc<[ChunkMeta]>,
 }
 
 impl BlobMeta {
@@ -39,9 +41,9 @@ impl BlobMeta {
         Self { chunk_metas }
     }
 
-    /// For a given starting offset, returns an iterator over all chunk digests
-    /// in this range, as well as the number of bytes to skip inside the first chunk.
-    fn chunk_digests_from(&self, offset: u64) -> (u64, impl ExactSizeIterator<Item = &B3Digest>) {
+    /// For a given offset into the blob, returns the index of the first chunk
+    /// holding the requested bytes, as well as the number of bytes to skip inside the first chunk.
+    fn chunk_idx_from(&self, offset: u64) -> (usize, u64) {
         assert!(
             offset <= self.blob_len(),
             "illegal to seek past end of blob"
@@ -56,12 +58,7 @@ impl BlobMeta {
             self.chunk_metas[partition_point - 1].end
         };
 
-        (
-            offset - start_offset,
-            self.chunk_metas[partition_point..]
-                .iter()
-                .map(|ChunkMeta { digest, .. }| digest),
-        )
+        (partition_point, offset - start_offset)
     }
 }
 
@@ -95,42 +92,46 @@ mod test {
     });
 
     #[rstest::rstest]
-    #[case::start(0, &*CHUNK_1_DIGEST, 0)]
-    #[case::one(1, &*CHUNK_1_DIGEST, 1)]
-    #[case::two(2, &*CHUNK_2_DIGEST, 0)]
-    #[case::three(3, &*CHUNK_1_DIGEST, 0)]
-    #[case::four(4, &*CHUNK_1_DIGEST, 1)]
-    fn chunk_digests_from(
+    #[case::start(0, 0, 0)]
+    #[case::one(1, 0, 1)]
+    #[case::two(2, 1, 0)]
+    #[case::three(3, 2, 0)]
+    #[case::four(4, 2, 1)]
+    fn chunk_idx_from(
         #[case] offset: u64,
-        #[case] exp_first_chunk_digest: &B3Digest,
+        #[case] exp_start_idx: usize,
         #[case] exp_skip_in_chunk: u64,
     ) {
-        let (skip_in_chunk, iter) = BLOB_META.chunk_digests_from(offset);
-        assert_eq!(exp_skip_in_chunk, skip_in_chunk, "skip_in_chunk");
-
-        let mut c = iter.into_iter().peekable();
-        let a = *c.peek().expect("it to have some");
-        assert_eq!(exp_first_chunk_digest, a, "first digest to match");
+        let (start_idx, skip_in_chunk) = BLOB_META.chunk_idx_from(offset);
+        assert_eq!(exp_skip_in_chunk, skip_in_chunk, "skip_in_chunk to match");
+        assert_eq!(exp_start_idx, start_idx, "start_idx to match");
     }
 
     #[test]
-    fn chunk_digests_from_end() {
-        let (skip_in_chunk, iter) = BLOB_META.chunk_digests_from(BLOB_META.blob_len());
+    /// Calling chunk_idx_from for a offset equal to the blob len should return a start_idx equal to the chunk_meta len.
+    /// (So the range (start_idx..chunk_meta.len()) is empty)
+    fn chunk_idx_from_end() {
+        let (start_idx, skip_in_chunk) = BLOB_META.chunk_idx_from(BLOB_META.blob_len());
+        assert_eq!(
+            BLOB_META.chunk_metas.len(),
+            start_idx,
+            "chunk_idx should be 3"
+        );
         assert_eq!(0, skip_in_chunk, "skip_in_chunk should be zero");
-        assert_eq!(0, iter.into_iter().count(), "iter should be empty");
     }
 
     #[test]
     #[should_panic]
+    /// Calling chunk_idx_from for a offset past the blob len should panic
     fn chunk_digests_past_end() {
-        let _ = BLOB_META.chunk_digests_from(BLOB_META.blob_len() + 1);
+        let _ = BLOB_META.chunk_idx_from(BLOB_META.blob_len() + 1);
     }
 
     #[test]
     fn chunk_digests_empty() {
         let blob_meta = BlobMeta::from_digests_and_sizes([]);
-        let (skip_in_chunk, iter) = blob_meta.chunk_digests_from(0);
+        let (chunk_idx, skip_in_chunk) = blob_meta.chunk_idx_from(0);
         assert_eq!(0, skip_in_chunk, "skip_in_chunk should be zero");
-        assert_eq!(0, iter.into_iter().count(), "iter should be empty");
+        assert_eq!(0, chunk_idx, "chunk_idx should be 0");
     }
 }

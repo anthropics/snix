@@ -8,19 +8,21 @@ impl BlobMeta {
     /// Queries the passed ChunkStore, with configurable concurrency.
     /// A offset to start seeking from can be specified.
     /// Chunks before this are then skipped.
-    pub fn bytes_stream_for_offset<'a>(
-        &'a self,
+    pub fn bytes_stream_for_offset<'cs>(
+        &self,
         offset: u64,
         fetch_concurrency: usize,
-        chunk_store: &'a (impl ChunkStore + 'a),
-    ) -> impl futures::Stream<Item = std::io::Result<Cursor<Vec<u8>>>> + 'a {
-        // Get all remaining chunk digests, and the bytes to skip from the first chunk
-        let (skip_first, iter) = self.chunk_digests_from(offset);
+        chunk_store: &'cs (impl ChunkStore + 'cs),
+    ) -> impl futures::Stream<Item = std::io::Result<Cursor<Vec<u8>>>> + 'cs {
+        // Calculate the range of chunks we want to iterate over
+        let (start_idx, skip_first) = self.chunk_idx_from(offset);
+        let chunk_metas = self.chunk_metas.clone();
 
         // produce a stream of byte chunks
-        tokio_stream::iter(iter.zip(std::iter::once(skip_first).chain(std::iter::repeat(0))))
-            .map(move |(chunk_digest, skip_in_chunk)| {
-                chunk_digest_to_buf(chunk_digest, skip_in_chunk, chunk_store)
+        tokio_stream::iter(start_idx..chunk_metas.len())
+            .map(move |i| {
+                let skip = if i == start_idx { skip_first } else { 0 };
+                chunk_digest_to_buf(chunk_metas[i].digest, skip, chunk_store)
             })
             .buffered(fetch_concurrency)
     }
@@ -28,12 +30,12 @@ impl BlobMeta {
 
 /// For a given chunk digest, offset to skip and ChunkStore, return a impl Buf.
 async fn chunk_digest_to_buf(
-    chunk_digest: &B3Digest,
+    chunk_digest: B3Digest,
     skip_in_chunk: u64,
     chunk_store: &impl ChunkStore,
 ) -> io::Result<Cursor<Vec<u8>>> {
     let chunk = chunk_store
-        .get(chunk_digest)
+        .get(&chunk_digest)
         .await
         .map_err(io::Error::other)?
         .ok_or_else(|| {
