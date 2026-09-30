@@ -37,4 +37,4 @@ pub trait BlobStore: Send + Sync {
 /// Usually boxes an inner, more backend-specific error.
 #[derive(thiserror::Error, Debug)]
 #[error(transparent)]
-pub struct Error(#[from] Box<dyn std::error::Error>);
+pub struct Error(#[from] Box<dyn std::error::Error + Send + Sync + 'static>);
