@@ -255,6 +255,9 @@ where
     }
 }
 
+// FUTUREWORK: move the trait into BlobStore once BlobService is gone
+impl<'a, CS> crate::blobservice::BlobReader for BlobReader<'a, CS> where CS: ChunkStore + 'a {}
+
 /// For a given blob length and current position, returns the position that seek_from would seek to.
 fn calc_position(cur_pos: u64, blob_len: u64, seek_from: SeekFrom) -> std::io::Result<u64> {
     let new_pos = match seek_from {
