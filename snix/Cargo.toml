@@ -122,7 +122,11 @@ pin-project = "1.1"
 pin-project-lite = "0.2.14"
 pretty_assertions = "1.4.0"
 proc-macro2 = "1.0.86"
-proptest = { version = "1.5.0", default-features = false }
+proptest = { version = "1.11.0", default-features = false, features = [
+  "std",
+  "fork",
+  "timeout",
+] }
 prost = "0.14.3"
 quote = "1.0.37"
 redb = "4.0.0"

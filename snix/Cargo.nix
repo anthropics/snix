@@ -14508,6 +14508,9 @@ rec {
             usesDefaultFeatures = false;
             features = [
               "std"
+              "fork"
+              "timeout"
+              "std"
               "alloc"
               "tempfile"
             ];
@@ -17373,6 +17376,12 @@ rec {
             optional = true;
           }
           {
+            name = "rusty-fork";
+            packageId = "rusty-fork";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
             name = "tempfile";
             packageId = "tempfile";
             optional = true;
@@ -17427,9 +17436,12 @@ rec {
         };
         resolvedDefaultFeatures = [
           "alloc"
+          "fork"
           "regex-syntax"
+          "rusty-fork"
           "std"
           "tempfile"
+          "timeout"
         ];
       };
       "prost" = rec {
@@ -17728,6 +17740,18 @@ rec {
             packageId = "pulldown-cmark";
             usesDefaultFeatures = false;
           }
+        ];
+
+      };
+      "quick-error" = rec {
+        crateName = "quick-error";
+        version = "1.2.3";
+        edition = "2015";
+        sha256 = "1q6za3v78hsspisc197bg3g7rpc989qycy8ypr8ap8igv10ikl51";
+        libName = "quick_error";
+        authors = [
+          "Paul Colomiets <paul@colomiets.name>"
+          "Colin Kiegel <kiegel@gmx.de>"
         ];
 
       };
@@ -21447,6 +21471,44 @@ rec {
         ];
 
       };
+      "rusty-fork" = rec {
+        crateName = "rusty-fork";
+        version = "0.3.1";
+        edition = "2018";
+        sha256 = "1qkf9rvz2irb1wlbkrhrns8n9hnax48z1lgql5nqyr2fyagzfsyc";
+        libName = "rusty_fork";
+        authors = [
+          "Jason Lingle"
+        ];
+        dependencies = [
+          {
+            name = "fnv";
+            packageId = "fnv";
+          }
+          {
+            name = "quick-error";
+            packageId = "quick-error";
+          }
+          {
+            name = "tempfile";
+            packageId = "tempfile";
+          }
+          {
+            name = "wait-timeout";
+            packageId = "wait-timeout";
+            optional = true;
+          }
+        ];
+        features = {
+          "default" = [ "timeout" ];
+          "timeout" = [ "wait-timeout" ];
+          "wait-timeout" = [ "dep:wait-timeout" ];
+        };
+        resolvedDefaultFeatures = [
+          "timeout"
+          "wait-timeout"
+        ];
+      };
       "rustyline" = rec {
         crateName = "rustyline";
         version = "17.0.2";
@@ -24626,6 +24688,9 @@ rec {
             optional = true;
             usesDefaultFeatures = false;
             features = [
+              "std"
+              "fork"
+              "timeout"
               "std"
               "alloc"
               "tempfile"
@@ -30992,6 +31057,25 @@ rec {
         libPath = "vu128/vu128.rs";
         authors = [
           "John Millikin <john@john-millikin.com>"
+        ];
+
+      };
+      "wait-timeout" = rec {
+        crateName = "wait-timeout";
+        version = "0.2.1";
+        edition = "2015";
+        crateBin = [ ];
+        sha256 = "04azqv9mnfxgvnc8j2wp362xraybakh2dy1nj22gj51rdl93pb09";
+        libName = "wait_timeout";
+        authors = [
+          "Alex Crichton <alex@alexcrichton.com>"
+        ];
+        dependencies = [
+          {
+            name = "libc";
+            packageId = "libc";
+            target = { target, features }: (target."unix" or false);
+          }
         ];
 
       };
