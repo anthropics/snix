@@ -1,3 +1,5 @@
+#![deny(missing_docs)]
+//! [BlobMeta] storage, used to assemble blobs from more granular Chunks.
 use auto_impl::auto_impl;
 use tonic::async_trait;
 
@@ -10,6 +12,9 @@ pub use blob_meta::BlobMeta;
 pub use blob_reader::BlobReader;
 pub use blob_writer::BlobWriter;
 
+/// Retrieves and stores [BlobMeta] about Blobs.
+/// Blobs can consist of multiple Chunks.
+/// Blobs are keyed by the BLAKE3 digest of their entire data.
 #[cfg_attr(test, mockall::automock)]
 #[async_trait]
 #[auto_impl(&, &mut, Arc, Box)]
@@ -24,6 +29,9 @@ pub trait BlobStore: Send + Sync {
     async fn put(&self, digest: &B3Digest, blob_meta: BlobMeta) -> Result<(), Error>;
 }
 
+/// Error returned from all BlobStores.
+///
+/// Usually boxes an inner, more backend-specific error.
 #[derive(thiserror::Error, Debug)]
 #[error(transparent)]
 pub struct Error(#[from] Box<dyn std::error::Error>);

@@ -22,13 +22,16 @@ pin_project! {
 /// provided upfront.
 ///
 /// Any fallback to other chunkings, needs to be happen elsewhere.
+// pin_project_lite doesnt't seem to support docstrings fully
+#[allow(missing_docs)]
 #[project = BlobReaderProj]
     pub enum BlobReader<'a, CS> {
         /// Blob is composed of a single chunk.
         /// This allows skipping asking for a [BlobMeta].
         /// For very small blobs the callsite might ask a [ChunkStore] directly.
-        SingleChunk{
-            #[pin] cursor: Cursor<Chunk>
+        SingleChunk {
+            // A cursor over the single chunk.
+            #[pin] cursor: Cursor<Chunk>,
         },
         /// The blob is composed of multiple chunks,
         /// and we need to query a [ChunkStore] to read data.
