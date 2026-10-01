@@ -325,7 +325,6 @@ mod test {
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
     use crate::{
-        B3Digest,
         blobstore::BlobMeta,
         chunkstore::{Chunk, ChunkStore, MockChunkStore, memory::MemoryChunkStore},
     };
@@ -407,14 +406,10 @@ mod test {
 
     const CHUNK_1: Chunk = Chunk::from_static(b"ab");
     const CHUNK_2: Chunk = Chunk::from_static(b"c");
-    static CHUNK_1_DIGEST: LazyLock<B3Digest> =
-        LazyLock::new(|| blake3::hash(CHUNK_1.as_ref()).into());
-    static CHUNK_2_DIGEST: LazyLock<B3Digest> =
-        LazyLock::new(|| blake3::hash(CHUNK_2.as_ref()).into());
     static BLOB_1_META: LazyLock<BlobMeta> = LazyLock::new(|| {
         BlobMeta::from_digests_and_sizes([
-            (*CHUNK_1_DIGEST, CHUNK_1.len() as u64),
-            (*CHUNK_2_DIGEST, CHUNK_2.len() as u64),
+            (CHUNK_1.digest(), CHUNK_1.len() as u64),
+            (CHUNK_2.digest(), CHUNK_2.len() as u64),
         ])
     });
 
@@ -493,7 +488,7 @@ mod test {
         let mut chunk_store = MockChunkStore::new();
         chunk_store
             .expect_get()
-            .with(predicate::eq(*CHUNK_1_DIGEST))
+            .with(predicate::eq(CHUNK_1.digest()))
             .return_once(|_| Ok(Some(CHUNK_1.to_owned())));
 
         // construct BlobReader

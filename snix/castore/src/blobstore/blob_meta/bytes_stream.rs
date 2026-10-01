@@ -72,21 +72,16 @@ mod test {
     use mockall::predicate;
 
     use crate::{
-        B3Digest,
         blobstore::BlobMeta,
         chunkstore::{Chunk, MockChunkStore},
     };
 
     const CHUNK_1: Chunk = Chunk::from_static(b"ab");
     const CHUNK_2: Chunk = Chunk::from_static(b"c");
-    static CHUNK_1_DIGEST: LazyLock<B3Digest> =
-        LazyLock::new(|| blake3::hash(CHUNK_1.as_ref()).into());
-    static CHUNK_2_DIGEST: LazyLock<B3Digest> =
-        LazyLock::new(|| blake3::hash(CHUNK_2.as_ref()).into());
     static BLOB_1_META: LazyLock<BlobMeta> = LazyLock::new(|| {
         BlobMeta::from_digests_and_sizes([
-            (*CHUNK_1_DIGEST, CHUNK_1.len() as u64),
-            (*CHUNK_2_DIGEST, CHUNK_2.len() as u64),
+            (CHUNK_1.digest(), CHUNK_1.len() as u64),
+            (CHUNK_2.digest(), CHUNK_2.len() as u64),
         ])
     });
 
@@ -105,7 +100,7 @@ mod test {
         let mut chunk_service = MockChunkStore::new();
         chunk_service
             .expect_get()
-            .with(predicate::eq(*CHUNK_2_DIGEST))
+            .with(predicate::eq(CHUNK_2.digest()))
             .return_once(|_| Ok(Some(CHUNK_2.to_owned())));
 
         let chunks =
@@ -121,9 +116,9 @@ mod test {
         chunk_service
             .expect_get()
             .returning(|digest| {
-                if *digest == *CHUNK_1_DIGEST {
+                if *digest == CHUNK_1.digest() {
                     Ok(Some(CHUNK_1.to_owned()))
-                } else if *digest == *CHUNK_2_DIGEST {
+                } else if *digest == CHUNK_2.digest() {
                     Ok(Some(CHUNK_2.to_owned()))
                 } else {
                     panic!("called with unexpected digest")

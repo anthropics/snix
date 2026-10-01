@@ -45,18 +45,20 @@ impl ChunkStore for ObjectStoreChunkStore {
                     Error::ObjectStore(err)
                 })?;
                 // FUTUREWORK: use zstd::bulk to prevent decompression bombs
-                let chunk_contents = zstd::stream::decode_all(Cursor::new(compressed_bytes))
-                    .map_err(Error::ChunkDecompress)?;
+                let chunk = Chunk::from(
+                    zstd::stream::decode_all(Cursor::new(compressed_bytes))
+                        .map_err(Error::ChunkDecompress)?,
+                );
 
-                let actual_digest = blake3::hash(&chunk_contents);
-                if actual_digest.as_bytes() != digest.as_ref() {
+                let actual_digest = chunk.digest();
+                if &actual_digest != digest {
                     Err(Error::IncorrectDigest {
                         expected: digest.to_owned(),
-                        actual: actual_digest.into(),
+                        actual: actual_digest,
                     })?
                 }
 
-                Ok(Some(chunk_contents.into()))
+                Ok(Some(chunk))
             }
             Err(object_store::Error::NotFound { .. }) => Ok(None),
             Err(err) => Err(super::Error(Box::new(err)))?,
@@ -65,7 +67,7 @@ impl ChunkStore for ObjectStoreChunkStore {
 
     #[instrument(skip_all, err, ret(Display), fields(instance_name=%self.instance_name))]
     async fn put(&self, chunk: Chunk) -> Result<B3Digest, super::Error> {
-        let digest: B3Digest = blake3::hash(chunk.as_ref()).into();
+        let digest: B3Digest = chunk.digest();
         let p = derive_chunk_path(&self.base_path, &digest);
         let compressed_chunk =
             zstd::stream::encode_all(Cursor::new(chunk.as_ref()), zstd::DEFAULT_COMPRESSION_LEVEL)

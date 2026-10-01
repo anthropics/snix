@@ -1,5 +1,7 @@
 use bytes::Bytes;
 
+use crate::B3Digest;
+
 /// Newtype for bytes in a Chunk returned from `ChunkStore`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Chunk(Bytes);
@@ -11,6 +13,11 @@ impl Chunk {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Returns the [B3Digest] of the current chunk.
+    pub fn digest(&self) -> B3Digest {
+        blake3::hash(self.0.as_ref()).into()
     }
 
     pub const fn from_static(bytes: &'static [u8]) -> Self {

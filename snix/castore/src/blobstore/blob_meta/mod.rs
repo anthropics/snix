@@ -75,22 +75,18 @@ struct ChunkMeta {
 mod test {
     use std::sync::LazyLock;
 
-    use crate::B3Digest;
     use crate::chunkstore::Chunk;
 
     use super::BlobMeta;
+
     const CHUNK_1: Chunk = Chunk::from_static(b"ab");
     const CHUNK_2: Chunk = Chunk::from_static(b"c");
-    static CHUNK_1_DIGEST: LazyLock<B3Digest> =
-        LazyLock::new(|| blake3::hash(CHUNK_1.as_ref()).into());
-    static CHUNK_2_DIGEST: LazyLock<B3Digest> =
-        LazyLock::new(|| blake3::hash(CHUNK_2.as_ref()).into());
 
     static BLOB_META: LazyLock<BlobMeta> = LazyLock::new(|| {
         BlobMeta::from_digests_and_sizes([
-            (*CHUNK_1_DIGEST, CHUNK_1.len() as u64),
-            (*CHUNK_2_DIGEST, CHUNK_2.len() as u64),
-            (*CHUNK_1_DIGEST, CHUNK_1.len() as u64),
+            (CHUNK_1.digest(), CHUNK_1.len() as u64),
+            (CHUNK_2.digest(), CHUNK_2.len() as u64),
+            (CHUNK_1.digest(), CHUNK_1.len() as u64),
         ])
     });
 
