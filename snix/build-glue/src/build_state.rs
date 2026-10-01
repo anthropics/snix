@@ -26,7 +26,6 @@ pub struct BuildState {
     pub path_info_service: Arc<dyn PathInfoService>,
     pub nar_calculation_service: Arc<dyn NarCalculationService>,
 
-    #[allow(dead_code)]
     build_service: Arc<dyn BuildService>,
 
     #[allow(clippy::type_complexity)]
