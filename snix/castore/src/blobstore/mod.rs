@@ -6,6 +6,7 @@ use tonic::async_trait;
 mod blob_meta;
 mod blob_reader;
 mod blob_writer;
+pub mod grpc;
 
 use crate::B3Digest;
 pub use blob_meta::BlobMeta;

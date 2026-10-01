@@ -1,0 +1,53 @@
+// SPDX-License-Identifier: MIT
+// Copyright © 2026 The Snix Project
+syntax = "proto3";
+
+package snix.castore.v1;
+
+import "snix/castore/protos/blobstore.proto";
+
+option go_package = "snix.dev/castore/proto;castorev1";
+
+// BlobStoreService retrieves and stores metadata about blobs.
+// Blobs can consist of multiple chunks.
+// The stored metadata describes which chunks need to be assembled
+// to produce the entire blob contents.
+// Blobs are keyed by the BLAKE3 digest of their entire data
+service BlobStoreService {
+  // Stat checks if a [BlobMeta] for a given blob exists.
+  rpc StatBlob(BSStatBlobRequest) returns (BSStatBlobResponse);
+
+  // Get retrieves a [BlobMeta] for a given blob digest.
+  rpc GetBlob(GetBlobRequest) returns (GetBlobResponse);
+
+  // Put persists a [BlobMeta] for the given blob digest.
+  rpc PutBlob(PutBlobRequest) returns (BSPutBlobResponse);
+}
+
+// FUTUREWORK: Drop BS prefix once BlobService is gone
+
+message BSStatBlobRequest {
+  // The blake3 digest of the blob requested
+  bytes digest = 1;
+}
+
+message BSStatBlobResponse {}
+
+message GetBlobRequest {
+  // The blake3 digest of the blob requested
+  bytes digest = 1;
+}
+
+message GetBlobResponse {
+  BlobMeta blob_meta = 1;
+}
+
+message PutBlobRequest {
+  // The blake3 digest of the blob uploaded
+  bytes digest = 1;
+
+  // Its BlobMeta
+  BlobMeta blob_meta = 2;
+}
+
+message BSPutBlobResponse {}
