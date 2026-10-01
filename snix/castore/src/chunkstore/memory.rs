@@ -1,7 +1,8 @@
-use std::sync::Arc;
+//! In-memory implementation, using a `HashMap`.
 
 use hashbrown::HashMap;
 use parking_lot::RwLock;
+use std::sync::Arc;
 use tonic::async_trait;
 
 use crate::{
@@ -10,6 +11,8 @@ use crate::{
 };
 
 /// In-memory [ChunkStore] implementation.
+///
+/// Uses a `HashMap<B3Digest, Chunk>` behind an `Arc<RwLock<_>>` to allow cloning and concurrent access.
 #[derive(Default, Clone)]
 pub struct MemoryChunkStore {
     db: Arc<RwLock<HashMap<B3Digest, Chunk>>>,

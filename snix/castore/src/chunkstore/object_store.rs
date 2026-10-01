@@ -1,3 +1,5 @@
+//! Object-store backend, also supporting the local filesystem.
+
 use super::Chunk;
 use crate::{B3Digest, chunkstore::ChunkStore};
 use data_encoding::HEXLOWER;
@@ -7,6 +9,10 @@ use tokio::io;
 use tonic::async_trait;
 use tracing::{Level, instrument, warn};
 
+/// Stores Chunks in any backend supported by the [object_store] crate.
+///
+/// Each [Chunk] is stored as a zstd-compressed object
+/// at `{base_path}/chunk/b3/{HEXLOWER(digest[0..2])}/{HEXLOWER(digest)}`.
 pub struct ObjectStoreChunkStore {
     instance_name: String,
     object_store: Arc<dyn object_store::ObjectStore>,
@@ -82,6 +88,7 @@ impl ChunkStore for ObjectStoreChunkStore {
     }
 }
 
+/// Error returned from [ObjectStoreChunkStore].
 #[derive(thiserror::Error, Debug)]
 enum Error {
     #[error("reading bytes from object_store")]

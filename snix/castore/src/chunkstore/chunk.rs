@@ -1,29 +1,36 @@
-use bytes::Bytes;
+//! Provides [Chunk], a wrapper around bytes and returned by `ChunkStore`.
 
 use crate::B3Digest;
+use bytes::Bytes;
 
-/// Newtype for bytes in a Chunk returned from `ChunkStore`.
+/// A Chunk returned from `ChunkStore`.
+///
+/// It's a newtype over its payload, stored as [Bytes], to allow sharing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Chunk(Bytes);
 
 impl Chunk {
+    /// Returns the length of the payload
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
+    /// Returns true if the payload is empty.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// Returns the [B3Digest] of the current chunk.
+    /// Returns the BLAKE3 digest of the payload.
     pub fn digest(&self) -> B3Digest {
-        blake3::hash(self.0.as_ref()).into()
+        B3Digest::from(blake3::hash(self.0.as_ref()))
     }
 
+    /// Constructs a new Chunk from a static byte slice as payload.
     pub const fn from_static(bytes: &'static [u8]) -> Self {
         Self(Bytes::from_static(bytes))
     }
 
+    /// Copies the Chunk payload into a new `Vec<[u8]>`.
     pub fn to_vec(self) -> Vec<u8> {
         self.0.to_vec()
     }
