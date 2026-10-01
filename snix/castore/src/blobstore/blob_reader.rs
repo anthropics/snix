@@ -405,8 +405,8 @@ mod test {
         }
     }
 
-    static CHUNK_1: LazyLock<Chunk> = LazyLock::new(|| b"ab".as_slice().into());
-    static CHUNK_2: LazyLock<Chunk> = LazyLock::new(|| b"c".as_slice().into());
+    const CHUNK_1: Chunk = Chunk::from_static(b"ab");
+    const CHUNK_2: Chunk = Chunk::from_static(b"c");
     static CHUNK_1_DIGEST: LazyLock<B3Digest> =
         LazyLock::new(|| blake3::hash(CHUNK_1.as_ref()).into());
     static CHUNK_2_DIGEST: LazyLock<B3Digest> =
