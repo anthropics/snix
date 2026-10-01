@@ -5,6 +5,7 @@ use std::cmp::Ordering;
 mod grpc_blobservice_wrapper;
 mod grpc_directoryservice_wrapper;
 
+mod chunkstore;
 mod url;
 
 use crate::{B3Digest, DirectoryError, path::PathComponent};

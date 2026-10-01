@@ -4,6 +4,7 @@
 use auto_impl::auto_impl;
 use tonic::async_trait;
 
+pub mod grpc;
 pub mod memory;
 pub mod object_store;
 

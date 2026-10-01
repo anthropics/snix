@@ -1,0 +1,56 @@
+// SPDX-License-Identifier: MIT
+// Copyright © 2026 The Snix Project
+syntax = "proto3";
+
+package snix.castore.v1;
+
+option go_package = "snix.dev/castore/proto;castorev1";
+
+// ChunkStoreService allows reading (or uploading) content-addressed chunks of raw data.
+// BLAKE3 is used as a hashing function for the data. Uploading a blob will
+// return the BLAKE3 digest of it, and that's the identifier used to Read/Stat
+// them too.
+// Chunks are considered small enough to not require any further chunking,
+// but may be broken down into smaller messages when sent as proto messages,
+// due to message size restrictions.
+service ChunkStoreService {
+  // Stat can be used to check for the existence of a chunk.
+  rpc StatChunk(StatChunkRequest) returns (StatChunkResponse);
+
+  // Get can be used to retrieve a chunk.
+  // The server may break down the response into a stream of smaller messages,
+  // to keep proto messages smaller than its maximum chunk size.
+  rpc GetChunk(GetChunkRequest) returns (stream GetChunkResponse);
+
+  // PutChunk can be used to upload a chunk.
+  // The client may break down the response into a stream of smaller messages,
+  // to keep proto messages smaller than its maximum chunk size.
+  rpc PutChunk(stream PutChunkRequest) returns (PutChunkResponse);
+}
+
+message StatChunkRequest {
+  // The blake3 digest of the chunk requested
+  bytes digest = 1;
+}
+
+message StatChunkResponse {}
+
+message GetChunkRequest {
+  // The blake3 digest of the chunk requested
+  bytes digest = 1;
+}
+
+message GetChunkResponse {
+  // Raw chunk payload
+  bytes data = 1;
+}
+
+message PutChunkRequest {
+  // Raw chunk payload
+  bytes data = 1;
+}
+
+message PutChunkResponse {
+  // The blake3 digest of the chunk received
+  bytes digest = 1;
+}
