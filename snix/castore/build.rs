@@ -25,7 +25,7 @@ fn main() -> Result<()> {
         .compile_protos(
             &[
                 "snix/castore/protos/castore.proto",
-                "snix/castore/protos/rpc_blobstore.proto",
+                "snix/castore/protos/rpc_blobservice.proto",
                 "snix/castore/protos/rpc_chunkstore.proto",
                 "snix/castore/protos/rpc_directory.proto",
             ],

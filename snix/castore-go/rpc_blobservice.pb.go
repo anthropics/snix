@@ -6,7 +6,7 @@
 // versions:
 // 	protoc-gen-go v1.36.12
 // 	protoc        (unknown)
-// source: snix/castore/protos/rpc_blobstore.proto
+// source: snix/castore/protos/rpc_blobservice.proto
 
 package castorev1
 
@@ -39,7 +39,7 @@ type StatBlobRequest struct {
 
 func (x *StatBlobRequest) Reset() {
 	*x = StatBlobRequest{}
-	mi := &file_snix_castore_protos_rpc_blobstore_proto_msgTypes[0]
+	mi := &file_snix_castore_protos_rpc_blobservice_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -51,7 +51,7 @@ func (x *StatBlobRequest) String() string {
 func (*StatBlobRequest) ProtoMessage() {}
 
 func (x *StatBlobRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_snix_castore_protos_rpc_blobstore_proto_msgTypes[0]
+	mi := &file_snix_castore_protos_rpc_blobservice_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -64,7 +64,7 @@ func (x *StatBlobRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatBlobRequest.ProtoReflect.Descriptor instead.
 func (*StatBlobRequest) Descriptor() ([]byte, []int) {
-	return file_snix_castore_protos_rpc_blobstore_proto_rawDescGZIP(), []int{0}
+	return file_snix_castore_protos_rpc_blobservice_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *StatBlobRequest) GetDigest() []byte {
@@ -103,7 +103,7 @@ type StatBlobResponse struct {
 
 func (x *StatBlobResponse) Reset() {
 	*x = StatBlobResponse{}
-	mi := &file_snix_castore_protos_rpc_blobstore_proto_msgTypes[1]
+	mi := &file_snix_castore_protos_rpc_blobservice_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -115,7 +115,7 @@ func (x *StatBlobResponse) String() string {
 func (*StatBlobResponse) ProtoMessage() {}
 
 func (x *StatBlobResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_snix_castore_protos_rpc_blobstore_proto_msgTypes[1]
+	mi := &file_snix_castore_protos_rpc_blobservice_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -128,7 +128,7 @@ func (x *StatBlobResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatBlobResponse.ProtoReflect.Descriptor instead.
 func (*StatBlobResponse) Descriptor() ([]byte, []int) {
-	return file_snix_castore_protos_rpc_blobstore_proto_rawDescGZIP(), []int{1}
+	return file_snix_castore_protos_rpc_blobservice_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *StatBlobResponse) GetChunks() []*StatBlobResponse_ChunkMeta {
@@ -155,7 +155,7 @@ type ReadBlobRequest struct {
 
 func (x *ReadBlobRequest) Reset() {
 	*x = ReadBlobRequest{}
-	mi := &file_snix_castore_protos_rpc_blobstore_proto_msgTypes[2]
+	mi := &file_snix_castore_protos_rpc_blobservice_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -167,7 +167,7 @@ func (x *ReadBlobRequest) String() string {
 func (*ReadBlobRequest) ProtoMessage() {}
 
 func (x *ReadBlobRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_snix_castore_protos_rpc_blobstore_proto_msgTypes[2]
+	mi := &file_snix_castore_protos_rpc_blobservice_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -180,7 +180,7 @@ func (x *ReadBlobRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadBlobRequest.ProtoReflect.Descriptor instead.
 func (*ReadBlobRequest) Descriptor() ([]byte, []int) {
-	return file_snix_castore_protos_rpc_blobstore_proto_rawDescGZIP(), []int{2}
+	return file_snix_castore_protos_rpc_blobservice_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ReadBlobRequest) GetDigest() []byte {
@@ -201,7 +201,7 @@ type BlobChunk struct {
 
 func (x *BlobChunk) Reset() {
 	*x = BlobChunk{}
-	mi := &file_snix_castore_protos_rpc_blobstore_proto_msgTypes[3]
+	mi := &file_snix_castore_protos_rpc_blobservice_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -213,7 +213,7 @@ func (x *BlobChunk) String() string {
 func (*BlobChunk) ProtoMessage() {}
 
 func (x *BlobChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_snix_castore_protos_rpc_blobstore_proto_msgTypes[3]
+	mi := &file_snix_castore_protos_rpc_blobservice_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -226,7 +226,7 @@ func (x *BlobChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BlobChunk.ProtoReflect.Descriptor instead.
 func (*BlobChunk) Descriptor() ([]byte, []int) {
-	return file_snix_castore_protos_rpc_blobstore_proto_rawDescGZIP(), []int{3}
+	return file_snix_castore_protos_rpc_blobservice_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *BlobChunk) GetData() []byte {
@@ -246,7 +246,7 @@ type PutBlobResponse struct {
 
 func (x *PutBlobResponse) Reset() {
 	*x = PutBlobResponse{}
-	mi := &file_snix_castore_protos_rpc_blobstore_proto_msgTypes[4]
+	mi := &file_snix_castore_protos_rpc_blobservice_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -258,7 +258,7 @@ func (x *PutBlobResponse) String() string {
 func (*PutBlobResponse) ProtoMessage() {}
 
 func (x *PutBlobResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_snix_castore_protos_rpc_blobstore_proto_msgTypes[4]
+	mi := &file_snix_castore_protos_rpc_blobservice_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -271,7 +271,7 @@ func (x *PutBlobResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutBlobResponse.ProtoReflect.Descriptor instead.
 func (*PutBlobResponse) Descriptor() ([]byte, []int) {
-	return file_snix_castore_protos_rpc_blobstore_proto_rawDescGZIP(), []int{4}
+	return file_snix_castore_protos_rpc_blobservice_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *PutBlobResponse) GetDigest() []byte {
@@ -293,7 +293,7 @@ type StatBlobResponse_ChunkMeta struct {
 
 func (x *StatBlobResponse_ChunkMeta) Reset() {
 	*x = StatBlobResponse_ChunkMeta{}
-	mi := &file_snix_castore_protos_rpc_blobstore_proto_msgTypes[5]
+	mi := &file_snix_castore_protos_rpc_blobservice_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -305,7 +305,7 @@ func (x *StatBlobResponse_ChunkMeta) String() string {
 func (*StatBlobResponse_ChunkMeta) ProtoMessage() {}
 
 func (x *StatBlobResponse_ChunkMeta) ProtoReflect() protoreflect.Message {
-	mi := &file_snix_castore_protos_rpc_blobstore_proto_msgTypes[5]
+	mi := &file_snix_castore_protos_rpc_blobservice_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -318,7 +318,7 @@ func (x *StatBlobResponse_ChunkMeta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatBlobResponse_ChunkMeta.ProtoReflect.Descriptor instead.
 func (*StatBlobResponse_ChunkMeta) Descriptor() ([]byte, []int) {
-	return file_snix_castore_protos_rpc_blobstore_proto_rawDescGZIP(), []int{1, 0}
+	return file_snix_castore_protos_rpc_blobservice_proto_rawDescGZIP(), []int{1, 0}
 }
 
 func (x *StatBlobResponse_ChunkMeta) GetDigest() []byte {
@@ -335,11 +335,11 @@ func (x *StatBlobResponse_ChunkMeta) GetSize() uint64 {
 	return 0
 }
 
-var File_snix_castore_protos_rpc_blobstore_proto protoreflect.FileDescriptor
+var File_snix_castore_protos_rpc_blobservice_proto protoreflect.FileDescriptor
 
-const file_snix_castore_protos_rpc_blobstore_proto_rawDesc = "" +
+const file_snix_castore_protos_rpc_blobservice_proto_rawDesc = "" +
 	"\n" +
-	"'snix/castore/protos/rpc_blobstore.proto\x12\x0fsnix.castore.v1\"e\n" +
+	")snix/castore/protos/rpc_blobservice.proto\x12\x0fsnix.castore.v1\"e\n" +
 	"\x0fStatBlobRequest\x12\x16\n" +
 	"\x06digest\x18\x01 \x01(\fR\x06digest\x12\x1f\n" +
 	"\vsend_chunks\x18\x02 \x01(\bR\n" +
@@ -363,19 +363,19 @@ const file_snix_castore_protos_rpc_blobstore_proto_rawDesc = "" +
 	"\x03Put\x12\x1a.snix.castore.v1.BlobChunk\x1a .snix.castore.v1.PutBlobResponse(\x01B\"Z snix.dev/castore/proto;castorev1b\x06proto3"
 
 var (
-	file_snix_castore_protos_rpc_blobstore_proto_rawDescOnce sync.Once
-	file_snix_castore_protos_rpc_blobstore_proto_rawDescData []byte
+	file_snix_castore_protos_rpc_blobservice_proto_rawDescOnce sync.Once
+	file_snix_castore_protos_rpc_blobservice_proto_rawDescData []byte
 )
 
-func file_snix_castore_protos_rpc_blobstore_proto_rawDescGZIP() []byte {
-	file_snix_castore_protos_rpc_blobstore_proto_rawDescOnce.Do(func() {
-		file_snix_castore_protos_rpc_blobstore_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_snix_castore_protos_rpc_blobstore_proto_rawDesc), len(file_snix_castore_protos_rpc_blobstore_proto_rawDesc)))
+func file_snix_castore_protos_rpc_blobservice_proto_rawDescGZIP() []byte {
+	file_snix_castore_protos_rpc_blobservice_proto_rawDescOnce.Do(func() {
+		file_snix_castore_protos_rpc_blobservice_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_snix_castore_protos_rpc_blobservice_proto_rawDesc), len(file_snix_castore_protos_rpc_blobservice_proto_rawDesc)))
 	})
-	return file_snix_castore_protos_rpc_blobstore_proto_rawDescData
+	return file_snix_castore_protos_rpc_blobservice_proto_rawDescData
 }
 
-var file_snix_castore_protos_rpc_blobstore_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
-var file_snix_castore_protos_rpc_blobstore_proto_goTypes = []any{
+var file_snix_castore_protos_rpc_blobservice_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_snix_castore_protos_rpc_blobservice_proto_goTypes = []any{
 	(*StatBlobRequest)(nil),            // 0: snix.castore.v1.StatBlobRequest
 	(*StatBlobResponse)(nil),           // 1: snix.castore.v1.StatBlobResponse
 	(*ReadBlobRequest)(nil),            // 2: snix.castore.v1.ReadBlobRequest
@@ -383,7 +383,7 @@ var file_snix_castore_protos_rpc_blobstore_proto_goTypes = []any{
 	(*PutBlobResponse)(nil),            // 4: snix.castore.v1.PutBlobResponse
 	(*StatBlobResponse_ChunkMeta)(nil), // 5: snix.castore.v1.StatBlobResponse.ChunkMeta
 }
-var file_snix_castore_protos_rpc_blobstore_proto_depIdxs = []int32{
+var file_snix_castore_protos_rpc_blobservice_proto_depIdxs = []int32{
 	5, // 0: snix.castore.v1.StatBlobResponse.chunks:type_name -> snix.castore.v1.StatBlobResponse.ChunkMeta
 	0, // 1: snix.castore.v1.BlobService.Stat:input_type -> snix.castore.v1.StatBlobRequest
 	2, // 2: snix.castore.v1.BlobService.Read:input_type -> snix.castore.v1.ReadBlobRequest
@@ -398,26 +398,26 @@ var file_snix_castore_protos_rpc_blobstore_proto_depIdxs = []int32{
 	0, // [0:1] is the sub-list for field type_name
 }
 
-func init() { file_snix_castore_protos_rpc_blobstore_proto_init() }
-func file_snix_castore_protos_rpc_blobstore_proto_init() {
-	if File_snix_castore_protos_rpc_blobstore_proto != nil {
+func init() { file_snix_castore_protos_rpc_blobservice_proto_init() }
+func file_snix_castore_protos_rpc_blobservice_proto_init() {
+	if File_snix_castore_protos_rpc_blobservice_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_snix_castore_protos_rpc_blobstore_proto_rawDesc), len(file_snix_castore_protos_rpc_blobstore_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_snix_castore_protos_rpc_blobservice_proto_rawDesc), len(file_snix_castore_protos_rpc_blobservice_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_snix_castore_protos_rpc_blobstore_proto_goTypes,
-		DependencyIndexes: file_snix_castore_protos_rpc_blobstore_proto_depIdxs,
-		MessageInfos:      file_snix_castore_protos_rpc_blobstore_proto_msgTypes,
+		GoTypes:           file_snix_castore_protos_rpc_blobservice_proto_goTypes,
+		DependencyIndexes: file_snix_castore_protos_rpc_blobservice_proto_depIdxs,
+		MessageInfos:      file_snix_castore_protos_rpc_blobservice_proto_msgTypes,
 	}.Build()
-	File_snix_castore_protos_rpc_blobstore_proto = out.File
-	file_snix_castore_protos_rpc_blobstore_proto_goTypes = nil
-	file_snix_castore_protos_rpc_blobstore_proto_depIdxs = nil
+	File_snix_castore_protos_rpc_blobservice_proto = out.File
+	file_snix_castore_protos_rpc_blobservice_proto_goTypes = nil
+	file_snix_castore_protos_rpc_blobservice_proto_depIdxs = nil
 }

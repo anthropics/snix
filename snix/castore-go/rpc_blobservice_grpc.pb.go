@@ -6,7 +6,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             (unknown)
-// source: snix/castore/protos/rpc_blobstore.proto
+// source: snix/castore/protos/rpc_blobservice.proto
 
 package castorev1
 
@@ -246,5 +246,5 @@ var BlobService_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "snix/castore/protos/rpc_blobstore.proto",
+	Metadata: "snix/castore/protos/rpc_blobservice.proto",
 }
