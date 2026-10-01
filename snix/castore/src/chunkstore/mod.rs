@@ -9,6 +9,8 @@ use crate::B3Digest;
 mod chunk;
 pub use chunk::Chunk;
 
+pub const EMPTY_CHUNK: Chunk = Chunk::from_static(&[]);
+
 #[cfg_attr(test, mockall::automock)]
 #[async_trait]
 #[auto_impl(&, &mut, Arc, Box)]

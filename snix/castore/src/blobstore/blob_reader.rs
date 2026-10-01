@@ -10,7 +10,7 @@ use tokio::io::AsyncBufRead;
 
 use crate::{
     blobstore::BlobMeta,
-    chunkstore::{Chunk, ChunkStore},
+    chunkstore::{Chunk, ChunkStore, EMPTY_CHUNK},
 };
 
 pin_project! {
@@ -46,10 +46,10 @@ pin_project! {
             pos: u64,
 
             // The current chunk.
-            current_chunk: Cursor<Vec<u8>>,
+            current_chunk: Cursor<Chunk>,
 
             // A stream providing the remaining bytes from pos + current_chunk.remaining() till the end.
-            #[pin] stream: BoxStream<'a, std::io::Result<Cursor<Vec<u8>>>>,
+            #[pin] stream: BoxStream<'a, std::io::Result<Cursor<Chunk>>>,
         },
     }
 }
@@ -81,7 +81,7 @@ where
             chunk_store,
             fetch_concurrency,
             pos: 0,
-            current_chunk: Cursor::new(vec![]),
+            current_chunk: Cursor::new(EMPTY_CHUNK),
             stream,
         }
     }
@@ -141,7 +141,7 @@ where
                     }
                 }
 
-                let b = &current_chunk.get_ref()[current_chunk.position() as usize..];
+                let b = &current_chunk.get_ref().as_ref()[current_chunk.position() as usize..];
                 let to_fill = std::cmp::min(buf.remaining(), b.len());
                 let dst = buf.initialize_unfilled_to(to_fill);
                 dst.copy_from_slice(&b[..to_fill]);
@@ -189,7 +189,7 @@ where
                 }
                 let p = current_chunk.position();
 
-                Poll::Ready(Ok(&current_chunk.get_ref()[(p as usize)..]))
+                Poll::Ready(Ok(&current_chunk.get_ref().as_ref()[(p as usize)..]))
             }
         }
     }
@@ -232,7 +232,7 @@ where
                 // if the new position is still covered by our current buffer, we can simply update our position in there.
                 // else, empty current_chunk, and construct a new stream from the new position.
                 if !seek_in_current_chunk(*pos, new_pos, current_chunk)? {
-                    *current_chunk = Cursor::new(vec![]);
+                    *current_chunk = Cursor::new(EMPTY_CHUNK);
                     stream.set(
                         blob_meta
                             .bytes_stream_for_offset(new_pos, *fetch_concurrency, *chunk_store)

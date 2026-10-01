@@ -1,7 +1,11 @@
 use futures::StreamExt;
 use std::io::{self, Cursor};
 
-use crate::{B3Digest, blobstore::BlobMeta, chunkstore::ChunkStore};
+use crate::{
+    B3Digest,
+    blobstore::BlobMeta,
+    chunkstore::{Chunk, ChunkStore},
+};
 
 impl BlobMeta {
     /// Returns a stream of bytes of actual blob bytes.
@@ -13,7 +17,7 @@ impl BlobMeta {
         offset: u64,
         fetch_concurrency: usize,
         chunk_store: &'cs (impl ChunkStore + 'cs),
-    ) -> impl futures::Stream<Item = std::io::Result<Cursor<Vec<u8>>>> + 'cs {
+    ) -> impl futures::Stream<Item = std::io::Result<Cursor<Chunk>>> + 'cs {
         // Calculate the range of chunks we want to iterate over
         let (start_idx, skip_first) = self.chunk_idx_from(offset);
         let chunk_metas = self.chunk_metas.clone();
@@ -22,18 +26,18 @@ impl BlobMeta {
         tokio_stream::iter(start_idx..chunk_metas.len())
             .map(move |i| {
                 let skip = if i == start_idx { skip_first } else { 0 };
-                chunk_digest_to_buf(chunk_metas[i].digest, skip, chunk_store)
+                fetch_chunk_and_seek(chunk_metas[i].digest, skip, chunk_store)
             })
             .buffered(fetch_concurrency)
     }
 }
 
-/// For a given chunk digest, offset to skip and ChunkStore, return a impl Buf.
-async fn chunk_digest_to_buf(
+/// Fetches a Chunk by its digest, wraps it in a Cursor and seeks to the specified position.
+async fn fetch_chunk_and_seek(
     chunk_digest: B3Digest,
-    skip_in_chunk: u64,
+    chunk_position: u64,
     chunk_store: &impl ChunkStore,
-) -> io::Result<Cursor<Vec<u8>>> {
+) -> io::Result<Cursor<Chunk>> {
     let chunk = chunk_store
         .get(&chunk_digest)
         .await
@@ -43,19 +47,18 @@ async fn chunk_digest_to_buf(
                 io::ErrorKind::BrokenPipe,
                 format!("chunk {0} not found", chunk_digest),
             )
-        })?
-        .into_vec();
+        })?;
 
     let chunk_len = chunk.len();
     let mut cursor = Cursor::new(chunk);
 
-    // skip the first few bytes if we're told to.
-    if skip_in_chunk > 0 {
+    // Set the chunk position
+    if chunk_position > 0 {
         debug_assert!(
-            chunk_len as u64 > skip_in_chunk,
+            chunk_len as u64 > chunk_position,
             "Snix bug: chunk size is smaller than bytes to skip"
         );
-        cursor.set_position(skip_in_chunk);
+        cursor.set_position(chunk_position);
     }
 
     Ok::<_, io::Error>(cursor)
@@ -88,9 +91,9 @@ mod test {
     });
 
     async fn collect_chunks(
-        s: impl futures::Stream<Item = std::io::Result<Cursor<Vec<u8>>>>,
+        s: impl futures::Stream<Item = std::io::Result<Cursor<Chunk>>>,
     ) -> Vec<Vec<u8>> {
-        s.map_ok(|c| c.get_ref()[c.position() as usize..].to_vec())
+        s.map_ok(|c| c.get_ref().as_ref()[c.position() as usize..].to_vec())
             .try_collect()
             .await
             .expect("to not fail")
