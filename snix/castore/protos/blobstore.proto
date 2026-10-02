@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: MIT
+// Copyright © 2026 The Snix Project
+syntax = "proto3";
+
+package snix.castore.v1;
+
+option go_package = "snix.dev/castore/proto;castorev1";
+
+// Describes more granular chunking information of a blob.
+// More strict than BlobService's [StatBlobResponse],
+// as it mixed request flags.
+message BlobMeta {
+  // Contains a list of more granular chunks.
+  // An empty list is only allowed if describing the empty blob.
+  repeated ChunkMeta chunks = 2;
+
+  message ChunkMeta {
+    // Digest of that specific chunk
+    bytes digest = 1;
+
+    // Length of that chunk, in bytes.
+    uint64 size = 2;
+  }
+}

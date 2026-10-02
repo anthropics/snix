@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::B3Digest;
+use crate::{B3Digest, proto};
 
 mod bytes_stream;
 
@@ -71,13 +71,90 @@ struct ChunkMeta {
     end: u64,
 }
 
+impl From<BlobMeta> for proto::BlobMeta {
+    fn from(value: BlobMeta) -> Self {
+        let mut prev_end = 0;
+
+        Self {
+            chunks: value
+                .chunk_metas
+                .iter()
+                .map(|ChunkMeta { digest, end }| {
+                    let size = end - prev_end;
+                    prev_end = *end;
+                    proto::blob_meta::ChunkMeta {
+                        digest: (*digest).into(),
+                        size,
+                    }
+                })
+                .collect(),
+        }
+    }
+}
+
+/// Constructs by parsing a [proto::BlobMeta] message.
+///
+/// This will reject a [proto::BlobMeta] message without any chunks.
+/// This is to prevent accidentially passing a `StatBlobResponse` message which
+/// historically omitted chunks in the single-chunk case.
+///
+/// It will also reject chunks with a size of zero
+///
+/// To explicitly create a [BlobMeta] for the empty blob,
+/// use [BlobMeta::from_digests_and_sizes] with an empty iterator instead.
+impl TryFrom<proto::BlobMeta> for BlobMeta {
+    type Error = DecodeError;
+
+    fn try_from(value: proto::BlobMeta) -> Result<Self, Self::Error> {
+        if value.chunks.is_empty() {
+            return Err(DecodeError::NoChunks);
+        }
+
+        // We iterate until a possible error.
+        // If there's no error we can return the complete BlobMeta.
+        let mut err = None;
+        let blob_meta =
+            Self::from_digests_and_sizes(value.chunks.into_iter().enumerate().map_while(
+                |(idx, proto::blob_meta::ChunkMeta { size, digest })| {
+                    if size == 0 {
+                        err = Some(DecodeError::EmptyChunk(idx));
+                        return None;
+                    }
+                    match B3Digest::try_from(digest) {
+                        Ok(digest) => Some((digest, size)),
+                        Err(_) => {
+                            err = Some(DecodeError::InvalidDigest(idx));
+                            // stop iteration
+                            None
+                        }
+                    }
+                },
+            ));
+
+        match err {
+            Some(err) => Err(err),
+            None => Ok(blob_meta),
+        }
+    }
+}
+
+#[derive(thiserror::Error, Debug, PartialEq, Eq)]
+pub enum DecodeError {
+    #[error("refusing to contruct with empty chunk at idx {0}")]
+    EmptyChunk(usize),
+    #[error("refusing to construct with zero chunks")]
+    NoChunks,
+    #[error("invalid digest len at idx {0}")]
+    InvalidDigest(usize),
+}
+
 #[cfg(test)]
 mod test {
     use std::sync::LazyLock;
 
-    use crate::chunkstore::Chunk;
+    use crate::{chunkstore::Chunk, proto};
 
-    use super::BlobMeta;
+    use super::{BlobMeta, DecodeError};
 
     const CHUNK_1: Chunk = Chunk::from_static(b"ab");
     const CHUNK_2: Chunk = Chunk::from_static(b"c");
@@ -132,5 +209,41 @@ mod test {
         let (chunk_idx, skip_in_chunk) = blob_meta.chunk_idx_from(0);
         assert_eq!(0, skip_in_chunk, "skip_in_chunk should be zero");
         assert_eq!(0, chunk_idx, "chunk_idx should be 0");
+    }
+
+    #[test]
+    /// Decoding a BlobMeta without any chunks should fail
+    fn decode_blob_meta_empty() {
+        let blob_meta = proto::BlobMeta { chunks: vec![] };
+        let err = BlobMeta::try_from(blob_meta).expect_err("should fail");
+        assert_eq!(DecodeError::NoChunks, err);
+    }
+
+    #[test]
+    /// Decoding a BlobMeta with a wrong digest len should fail
+    fn decode_blob_meta_wrong_digest() {
+        let blob_meta = proto::BlobMeta {
+            chunks: vec![proto::blob_meta::ChunkMeta {
+                digest: "abcd".into(),
+                size: 42,
+            }],
+        };
+
+        let err = BlobMeta::try_from(blob_meta).expect_err("should fail");
+        assert_eq!(DecodeError::InvalidDigest(0), err);
+    }
+
+    #[test]
+    /// Decoding a BlobMeta with an empty chunk should fail
+    fn decode_blob_meta_empty_chunk() {
+        let blob_meta = proto::BlobMeta {
+            chunks: vec![proto::blob_meta::ChunkMeta {
+                digest: Chunk::from_static(b"").digest().into(),
+                size: 0,
+            }],
+        };
+
+        let err = BlobMeta::try_from(blob_meta).expect_err("should fail");
+        assert_eq!(DecodeError::EmptyChunk(0), err);
     }
 }
