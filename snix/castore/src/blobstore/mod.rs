@@ -7,6 +7,7 @@ mod blob_meta;
 mod blob_reader;
 mod blob_writer;
 pub mod grpc;
+pub mod memory;
 
 use crate::B3Digest;
 pub use blob_meta::BlobMeta;
