@@ -46,9 +46,6 @@ message StatBlobRequest {
 
   // Whether the server should reply with a list of more granular chunks.
   bool send_chunks = 2;
-
-  // Whether the server should reply with a bao.
-  bool send_bao = 3;
 }
 
 message StatBlobResponse {
@@ -64,10 +61,6 @@ message StatBlobResponse {
     // Length of that chunk, in bytes.
     uint64 size = 2;
   }
-
-  // If `send_bao` was set to true, this MAY contain a outboard bao.
-  // The exact format and message types here will still be fleshed out.
-  bytes bao = 3;
 }
 
 message ReadBlobRequest {

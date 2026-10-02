@@ -30,9 +30,7 @@ type StatBlobRequest struct {
 	// The blake3 digest of the blob requested
 	Digest []byte `protobuf:"bytes,1,opt,name=digest,proto3" json:"digest,omitempty"`
 	// Whether the server should reply with a list of more granular chunks.
-	SendChunks bool `protobuf:"varint,2,opt,name=send_chunks,json=sendChunks,proto3" json:"send_chunks,omitempty"`
-	// Whether the server should reply with a bao.
-	SendBao       bool `protobuf:"varint,3,opt,name=send_bao,json=sendBao,proto3" json:"send_bao,omitempty"`
+	SendChunks    bool `protobuf:"varint,2,opt,name=send_chunks,json=sendChunks,proto3" json:"send_chunks,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -81,22 +79,12 @@ func (x *StatBlobRequest) GetSendChunks() bool {
 	return false
 }
 
-func (x *StatBlobRequest) GetSendBao() bool {
-	if x != nil {
-		return x.SendBao
-	}
-	return false
-}
-
 type StatBlobResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// If `send_chunks` was set to true, this MAY contain a list of more
 	// granular chunks, which then may be read individually via the `Read`
 	// method.
-	Chunks []*StatBlobResponse_ChunkMeta `protobuf:"bytes,2,rep,name=chunks,proto3" json:"chunks,omitempty"`
-	// If `send_bao` was set to true, this MAY contain a outboard bao.
-	// The exact format and message types here will still be fleshed out.
-	Bao           []byte `protobuf:"bytes,3,opt,name=bao,proto3" json:"bao,omitempty"`
+	Chunks        []*StatBlobResponse_ChunkMeta `protobuf:"bytes,2,rep,name=chunks,proto3" json:"chunks,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -134,13 +122,6 @@ func (*StatBlobResponse) Descriptor() ([]byte, []int) {
 func (x *StatBlobResponse) GetChunks() []*StatBlobResponse_ChunkMeta {
 	if x != nil {
 		return x.Chunks
-	}
-	return nil
-}
-
-func (x *StatBlobResponse) GetBao() []byte {
-	if x != nil {
-		return x.Bao
 	}
 	return nil
 }
@@ -339,15 +320,13 @@ var File_snix_castore_protos_rpc_blobservice_proto protoreflect.FileDescriptor
 
 const file_snix_castore_protos_rpc_blobservice_proto_rawDesc = "" +
 	"\n" +
-	")snix/castore/protos/rpc_blobservice.proto\x12\x0fsnix.castore.v1\"e\n" +
+	")snix/castore/protos/rpc_blobservice.proto\x12\x0fsnix.castore.v1\"J\n" +
 	"\x0fStatBlobRequest\x12\x16\n" +
 	"\x06digest\x18\x01 \x01(\fR\x06digest\x12\x1f\n" +
 	"\vsend_chunks\x18\x02 \x01(\bR\n" +
-	"sendChunks\x12\x19\n" +
-	"\bsend_bao\x18\x03 \x01(\bR\asendBao\"\xa2\x01\n" +
+	"sendChunks\"\x90\x01\n" +
 	"\x10StatBlobResponse\x12C\n" +
-	"\x06chunks\x18\x02 \x03(\v2+.snix.castore.v1.StatBlobResponse.ChunkMetaR\x06chunks\x12\x10\n" +
-	"\x03bao\x18\x03 \x01(\fR\x03bao\x1a7\n" +
+	"\x06chunks\x18\x02 \x03(\v2+.snix.castore.v1.StatBlobResponse.ChunkMetaR\x06chunks\x1a7\n" +
 	"\tChunkMeta\x12\x16\n" +
 	"\x06digest\x18\x01 \x01(\fR\x06digest\x12\x12\n" +
 	"\x04size\x18\x02 \x01(\x04R\x04size\")\n" +

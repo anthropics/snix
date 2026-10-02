@@ -30,9 +30,12 @@ where
         &self,
         request: Request<super::StatBlobRequest>,
     ) -> Result<Response<super::StatBlobResponse>, Status> {
-        let rq = request.into_inner();
-        let req_digest: B3Digest = rq
-            .digest
+        let super::StatBlobRequest {
+            digest,
+            // NOTE: we ignore this field and always send chunks.
+            send_chunks: _,
+        } = request.into_inner();
+        let req_digest: B3Digest = digest
             .try_into()
             .map_err(|_e| Status::invalid_argument("invalid digest length"))?;
 
@@ -43,7 +46,6 @@ where
             Ok(None) => Err(Status::not_found(format!("blob {} not found", req_digest))),
             Ok(Some(chunk_metas)) => Ok(Response::new(super::StatBlobResponse {
                 chunks: chunk_metas,
-                ..Default::default()
             })),
             Err(e) => {
                 warn!(err=%e, "failed to request chunks");

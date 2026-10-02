@@ -58,7 +58,7 @@ where
             .clone()
             .stat(proto::StatBlobRequest {
                 digest: (*digest).into(),
-                ..Default::default()
+                send_chunks: false,
             })
             .await
         {
@@ -182,7 +182,6 @@ where
             .stat(proto::StatBlobRequest {
                 digest: (*digest).into(),
                 send_chunks: true,
-                ..Default::default()
             })
             .await;
 

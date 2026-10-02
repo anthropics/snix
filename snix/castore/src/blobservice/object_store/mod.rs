@@ -674,10 +674,7 @@ mod test {
 
     #[test]
     fn stat_blob_response_empty() {
-        let stat_blob_response = proto::StatBlobResponse {
-            chunks: vec![],
-            bao: "".into(),
-        };
+        let stat_blob_response = proto::StatBlobResponse { chunks: vec![] };
 
         assert_eq!(
             stat_blob_response.encoded_len(),
@@ -700,7 +697,6 @@ mod test {
                     size: BLOB_B.len() as u64,
                 },
             ],
-            bao: "".into(),
         }
         .encode_to_vec();
 
