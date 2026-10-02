@@ -219,31 +219,37 @@ impl BlobService for ObjectStoreBlobService {
                 // We can check for the proto size instead of checking for the number of chunks,
                 // as we never populated any other fields in [StatBlobResponse].
                 if blob_data.is_empty() {
-                    Ok(Some(vec![]))
-                } else {
-                    // Else, parse as BlobMeta
-                    let proto_blob_meta = proto::BlobMeta::decode(blob_data)?;
-                    let blob_meta = BlobMeta::try_from(proto_blob_meta)
-                        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-
-                    let blob_len = blob_meta.blob_len();
-
-                    // HACK: Convert back to the BlobMeta proto, so we can access the raw fields.
-                    // The new BlobStore will just return BlobMeta.
-                    let proto_blob_meta = proto::BlobMeta::from(blob_meta);
-
-                    debug!(blob.size = blob_len, "found more granular chunks");
-
-                    Ok(Some(
-                        proto_blob_meta
-                            .chunks
-                            .into_iter()
-                            .map(|proto::blob_meta::ChunkMeta { digest, size }| {
-                                proto::stat_blob_response::ChunkMeta { digest, size }
-                            })
-                            .collect(),
-                    ))
+                    return Ok(Some(vec![]));
                 }
+
+                // Parse as BlobMeta
+                let proto_blob_meta = proto::BlobMeta::decode(blob_data)?;
+                let blob_meta = BlobMeta::try_from(proto_blob_meta)
+                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+
+                let blob_len = blob_meta.blob_len();
+
+                // HACK: Convert back to the BlobMeta proto, so we can access the raw fields.
+                // The new BlobStore will just return BlobMeta.
+                let proto_blob_meta = proto::BlobMeta::from(blob_meta);
+
+                // BlobStore will write the single-chunk case explicitly, so deal with this
+                // the same way as in the empty proto case, by returning an empty Vec.
+                if proto_blob_meta.chunks.len() == 1 {
+                    return Ok(Some(vec![]));
+                }
+
+                debug!(blob.size = blob_len, "found more granular chunks");
+
+                Ok(Some(
+                    proto_blob_meta
+                        .chunks
+                        .into_iter()
+                        .map(|proto::blob_meta::ChunkMeta { digest, size }| {
+                            proto::stat_blob_response::ChunkMeta { digest, size }
+                        })
+                        .collect(),
+                ))
             }
             Err(object_store::Error::NotFound { .. }) => {
                 // If there's only a chunk, we must return the empty vec here, rather than None.
@@ -616,13 +622,17 @@ where
 mod test {
     use super::{chunk_and_upload, default_avg_chunk_size};
     use crate::{
+        B3Digest,
         blobservice::{BlobService, ObjectStoreBlobService},
         blobstore::BlobMeta,
+        chunkstore::Chunk,
         fixtures::{BLOB_A, BLOB_A_DIGEST, BLOB_B, BLOB_B_DIGEST},
         proto,
     };
+    use object_store::{ObjectStoreExt, PutPayload};
     use prost::Message;
     use std::{io::Cursor, sync::Arc};
+    use tokio::io::AsyncReadExt;
     use url::Url;
 
     /// Tests chunk_and_upload directly, bypassing the BlobWriter at open_write().
@@ -711,5 +721,79 @@ mod test {
             ]),
             blob_meta
         );
+    }
+
+    /// Ensures single-chunk blobs are readable, even when using single-chunk BlobMeta explicitly.
+    #[rstest::rstest]
+    #[case::empty(b"")]
+    #[case::test(b"test")]
+    #[tokio::test]
+    async fn single_chunk_blobs(#[case] chunk_payload: &'static [u8]) {
+        let chunk = Chunk::from_static(chunk_payload);
+
+        let os = Arc::new(object_store::memory::InMemory::new());
+        let base_path = "/".into();
+        let uut = ObjectStoreBlobService {
+            instance_name: "uut".to_string(),
+            object_store: os.clone(),
+            base_path,
+            avg_chunk_size: 512,
+        };
+
+        let mut blob_writer = uut.open_write().await;
+        tokio::io::copy(&mut Cursor::new(&chunk), &mut blob_writer)
+            .await
+            .expect("write to succed");
+        let digest = blob_writer.close().await.expect("close to succeed");
+
+        /// ensures we can fetch the blob with the specified digest from the passed service,
+        /// and receive the expected payload.
+        async fn verify_blob(svc: impl BlobService, digest: &B3Digest, exp_payload: &[u8]) {
+            let mut reader = svc
+                .open_read(digest)
+                .await
+                .expect("open_read to succeed")
+                .expect("reader to be some");
+
+            let mut buf = Vec::new();
+            let len = reader
+                .read_to_end(&mut buf)
+                .await
+                .expect("read_to_end to succeed");
+
+            assert_eq!(exp_payload.len(), len, "expect chunk len to match");
+            assert_eq!(exp_payload, buf.as_slice(), "expect chunk payload to match");
+        }
+
+        // expect reading to work
+        verify_blob(&uut, &digest, chunk.as_ref()).await;
+
+        // With the current format, the object storage should have an empty file at the derived blob path.
+        let blob_path = super::derive_blob_path(&uut.base_path, &digest);
+        let b = os
+            .get(&blob_path)
+            .await
+            .expect("get to succeed")
+            .bytes()
+            .await
+            .expect("getting bytes to succeed");
+
+        assert_eq!(0, b.len(), "expect BlobMeta to be empty");
+
+        // Now replace with a BlobMeta with explicit chunk references for the single chunk
+        {
+            let blob_meta =
+                BlobMeta::from_digests_and_sizes([(chunk.digest(), chunk.len() as u64)]);
+            let blob_meta_proto = proto::BlobMeta::from(blob_meta);
+            os.put(
+                &blob_path,
+                PutPayload::from_bytes(bytes::Bytes::from_owner(blob_meta_proto.encode_to_vec())),
+            )
+            .await
+            .expect("put to succeed");
+        }
+
+        // Ensure we can still read as expected
+        verify_blob(&uut, &digest, chunk.as_ref()).await
     }
 }
