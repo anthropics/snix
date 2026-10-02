@@ -19,6 +19,22 @@ pub struct ObjectStoreChunkStore {
     base_path: Path,
 }
 
+impl ObjectStoreChunkStore {
+    /// Constructs a new [ObjectStoreChunkStore] from already existing
+    /// `instance_name`, `object_store` and `base_name`.
+    pub fn from_parts(
+        instance_name: String,
+        object_store: Arc<dyn object_store::ObjectStore>,
+        base_path: Path,
+    ) -> Self {
+        Self {
+            instance_name,
+            object_store,
+            base_path,
+        }
+    }
+}
+
 #[instrument(level=Level::TRACE, skip_all,fields(base_path=%base_path,chunk.digest=%digest))]
 fn derive_chunk_path(base_path: &Path, digest: &B3Digest) -> Path {
     base_path
