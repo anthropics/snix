@@ -10,6 +10,12 @@ pub struct B3Digest([u8; Self::LENGTH]);
 
 impl B3Digest {
     pub const LENGTH: usize = blake3::OUT_LEN;
+    /// The digest of the empty slice.
+    pub const EMPTY: Self = B3Digest([
+        0xaf, 0x13, 0x49, 0xb9, 0xf5, 0xf9, 0xa1, 0xa6, 0xa0, 0x40, 0x4d, 0xea, 0x36, 0xdc, 0xc9,
+        0x49, 0x9b, 0xcb, 0x25, 0xc9, 0xad, 0xc1, 0x12, 0xb7, 0xcc, 0x9a, 0x93, 0xca, 0xe4, 0x1f,
+        0x32, 0x62,
+    ]);
 }
 
 #[derive(Error, Debug, PartialEq)]
@@ -119,5 +125,17 @@ impl FromStr for B3Digest {
             .decode(encoded.as_bytes())
             .map_err(|_| Error::InvalidDigestLen(s.len()))?;
         decoded.as_slice().try_into()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::B3Digest;
+
+    /// ensures B3Digest::EMPTY actually equals the BLAKE3 digest of an empty slice.
+    #[test]
+    fn empty() {
+        let exp: B3Digest = blake3::hash(b"").as_bytes().into();
+        assert_eq!(exp, B3Digest::EMPTY);
     }
 }
