@@ -20,8 +20,9 @@ use url::Url;
 
 use crate::{
     B3Digest,
+    blobstore::BlobMeta,
     composition::{CompositionContext, ServiceBuilder},
-    proto::{StatBlobResponse, stat_blob_response::ChunkMeta},
+    proto::{self, stat_blob_response::ChunkMeta},
 };
 
 use super::{BlobReader, BlobService, BlobWriter, ChunkedReader};
@@ -209,22 +210,40 @@ impl BlobService for ObjectStoreBlobService {
             .await
         {
             Ok(get_result) => {
-                // fetch the data at the blob path
+                // Fetch the data at the blob path
                 let blob_data = get_result.bytes().await?;
-                // parse into StatBlobResponse
-                let stat_blob_response: StatBlobResponse = StatBlobResponse::decode(blob_data)?;
 
-                debug!(
-                    chunk.count = stat_blob_response.chunks.len(),
-                    blob.size = stat_blob_response
-                        .chunks
-                        .iter()
-                        .map(|x| x.size)
-                        .sum::<u64>(),
-                    "found more granular chunks"
-                );
+                // If this is an empty file, it signals this blob only consists of a single chunk
+                // (but we don't know its size).
+                // In this case, the trait semantics are to respond back with an empty Vec.
+                // We can check for the proto size instead of checking for the number of chunks,
+                // as we never populated any other fields in [StatBlobResponse].
+                if blob_data.is_empty() {
+                    Ok(Some(vec![]))
+                } else {
+                    // Else, parse as BlobMeta
+                    let proto_blob_meta = proto::BlobMeta::decode(blob_data)?;
+                    let blob_meta = BlobMeta::try_from(proto_blob_meta)
+                        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
 
-                Ok(Some(stat_blob_response.chunks))
+                    let blob_len = blob_meta.blob_len();
+
+                    // HACK: Convert back to the BlobMeta proto, so we can access the raw fields.
+                    // The new BlobStore will just return BlobMeta.
+                    let proto_blob_meta = proto::BlobMeta::from(blob_meta);
+
+                    debug!(blob.size = blob_len, "found more granular chunks");
+
+                    Ok(Some(
+                        proto_blob_meta
+                            .chunks
+                            .into_iter()
+                            .map(|proto::blob_meta::ChunkMeta { digest, size }| {
+                                proto::stat_blob_response::ChunkMeta { digest, size }
+                            })
+                            .collect(),
+                    ))
+                }
             }
             Err(object_store::Error::NotFound { .. }) => {
                 // If there's only a chunk, we must return the empty vec here, rather than None.
@@ -353,8 +372,9 @@ impl ServiceBuilder for ObjectStoreBlobServiceConfig {
     }
 }
 
-/// Reads blob contents from a AsyncRead, chunks and uploads them.
-/// On success, returns a [StatBlobResponse] pointing to the individual chunks.
+/// Reads blob contents from a AsyncRead, chunks and uploads them,
+/// then writes chunking info and uploads it as well.
+/// On success, returns the [B3Digest] of the blob written.
 #[instrument(skip_all, fields(base_path=%base_path, min_chunk_size, avg_chunk_size, max_chunk_size), err)]
 async fn chunk_and_upload<R: AsyncRead + Unpin>(
     r: R,
@@ -375,7 +395,7 @@ async fn chunk_and_upload<R: AsyncRead + Unpin>(
 
     // Use the fastcdc chunker to produce a stream of chunks, and upload these
     // that don't exist to the backend.
-    let chunks = chunker
+    let digests_and_sizes = chunker
         .as_stream()
         .err_into()
         .map_ok(|chunk_data| {
@@ -385,22 +405,8 @@ async fn chunk_and_upload<R: AsyncRead + Unpin>(
             upload_chunk(object_store, chunk_digest, chunk_path, chunk_data.data)
         })
         .try_buffered(CONCURRENT_CHUNK_UPLOADS)
-        .try_collect::<Vec<ChunkMeta>>()
+        .try_collect::<Vec<_>>()
         .await?;
-
-    let chunks = if chunks.len() < 2 {
-        // The chunker returned only one chunk, which is the entire blob.
-        // According to the protocol, we must return an empty list of chunks
-        // when the blob is not split up further.
-        vec![]
-    } else {
-        chunks
-    };
-
-    let stat_blob_response = StatBlobResponse {
-        chunks,
-        bao: "".into(), // still todo
-    };
 
     // check for Blob, if it doesn't exist, persist.
     let blob_digest: B3Digest = hasher.finalize().into();
@@ -415,16 +421,27 @@ async fn chunk_and_upload<R: AsyncRead + Unpin>(
                 "blob already exists on backend"
             );
         }
-        // chunk does not yet exist, upload first
+        // blob does not yet exist, upload
         Err(object_store::Error::NotFound { .. }) => {
             debug!(
                 blob.digest = %blob_digest,
                 blob.path = %blob_path,
                 "uploading blob"
             );
-            object_store
-                .put(&blob_path, stat_blob_response.encode_to_vec().into())
-                .await?;
+
+            let payload = if digests_and_sizes.len() < 2 {
+                // The chunker returned only one chunk, which is the entire blob.
+                // In this case, we historically wrote a StatBlobResponse with an empty list of chunks,
+                // which results in an empty file.
+                bytes::Bytes::from_static(&[])
+            } else {
+                // Write proto::BlobMeta in all other cases.
+                let blob_meta =
+                    proto::BlobMeta::from(BlobMeta::from_digests_and_sizes(digests_and_sizes));
+                blob_meta.encode_to_vec().into()
+            };
+
+            object_store.put(&blob_path, payload.into()).await?;
         }
         Err(err) => {
             // other error
@@ -435,15 +452,15 @@ async fn chunk_and_upload<R: AsyncRead + Unpin>(
     Ok(blob_digest)
 }
 
-/// upload chunk if it doesn't exist yet.
+/// Upload chunk if it doesn't exist yet
 #[instrument(skip_all, fields(chunk.digest = %chunk_digest, chunk.size = chunk_data.len(), chunk.path = %chunk_path), err)]
 async fn upload_chunk(
     object_store: Arc<dyn ObjectStore>,
     chunk_digest: B3Digest,
     chunk_path: Path,
     chunk_data: Vec<u8>,
-) -> std::io::Result<ChunkMeta> {
-    let chunk_size = chunk_data.len();
+) -> std::io::Result<(B3Digest, u64)> {
+    let chunk_size = chunk_data.len() as u64;
     match object_store.head(&chunk_path).await {
         // chunk already exists, nothing to do
         Ok(_) => {
@@ -466,10 +483,7 @@ async fn upload_chunk(
         Err(err) => Err(err)?,
     }
 
-    Ok(ChunkMeta {
-        digest: chunk_digest.into(),
-        size: chunk_size as u64,
-    })
+    Ok((chunk_digest, chunk_size))
 }
 
 pin_project! {
@@ -603,8 +617,11 @@ mod test {
     use super::{chunk_and_upload, default_avg_chunk_size};
     use crate::{
         blobservice::{BlobService, ObjectStoreBlobService},
+        blobstore::BlobMeta,
         fixtures::{BLOB_A, BLOB_A_DIGEST, BLOB_B, BLOB_B_DIGEST},
+        proto,
     };
+    use prost::Message;
     use std::{io::Cursor, sync::Arc};
     use url::Url;
 
@@ -653,5 +670,50 @@ mod test {
             // two chunks
             assert!(chunks.len() >= 2);
         }
+    }
+
+    #[test]
+    fn stat_blob_response_empty() {
+        let stat_blob_response = proto::StatBlobResponse {
+            chunks: vec![],
+            bao: "".into(),
+        };
+
+        assert_eq!(
+            stat_blob_response.encoded_len(),
+            0,
+            "encoded len without chunks should be zero"
+        )
+    }
+
+    #[test]
+    // write a proto::StatBlobResponse, ensure we parse an equivalent BlobMeta out of it.
+    fn stat_blob_response_eq() {
+        let serialized = proto::StatBlobResponse {
+            chunks: vec![
+                proto::stat_blob_response::ChunkMeta {
+                    digest: (*BLOB_A_DIGEST).into(),
+                    size: BLOB_A.len() as u64,
+                },
+                proto::stat_blob_response::ChunkMeta {
+                    digest: (*BLOB_B_DIGEST).into(),
+                    size: BLOB_B.len() as u64,
+                },
+            ],
+            bao: "".into(),
+        }
+        .encode_to_vec();
+
+        let blob_meta_proto =
+            proto::BlobMeta::decode(serialized.as_slice()).expect("proto to deserialize");
+        let blob_meta = BlobMeta::try_from(blob_meta_proto).expect("parsing to succeed");
+
+        assert_eq!(
+            BlobMeta::from_digests_and_sizes([
+                (*BLOB_A_DIGEST, BLOB_A.len() as u64),
+                (*BLOB_B_DIGEST, BLOB_B.len() as u64)
+            ]),
+            blob_meta
+        );
     }
 }
