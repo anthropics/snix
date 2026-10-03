@@ -5461,6 +5461,7 @@ dependencies = [
  "clap",
  "mimalloc",
  "nar-bridge",
+ "snix-castore",
  "snix-cli",
  "snix-store",
  "snix-tracing",

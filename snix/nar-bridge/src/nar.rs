@@ -7,7 +7,6 @@ use bstr::ByteSlice;
 use futures::TryStreamExt;
 use nix_compat::{nix_http, nixbase32};
 use serde::Deserialize;
-use snix_castore::blob_engine::BlobServiceEngine;
 use snix_castore::proto::parse_urlsafe_proto;
 use snix_store::nar::ingest_nar_and_hash;
 use std::io;
@@ -31,7 +30,7 @@ pub async fn get_head(
         nar_size: user_nar_size,
     }): Query<GetNARParams>,
     axum::extract::State(AppState {
-        blob_service,
+        blob_engine,
         directory_service,
         ..
     }): axum::extract::State<AppState>,
@@ -65,16 +64,12 @@ pub async fn get_head(
                 .body(Body::empty())
                 .unwrap()
         } else {
-            let r = snix_store::nar::Reader::new(
-                &root_node,
-                BlobServiceEngine(blob_service),
-                directory_service,
-            )
-            .await
-            .map_err(|err| {
-                warn!(%err, "failed to construct seekable nar reader");
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
+            let r = snix_store::nar::Reader::new(&root_node, blob_engine, directory_service)
+                .await
+                .map_err(|err| {
+                    warn!(%err, "failed to construct seekable nar reader");
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
 
             // ensure the user-supplied nar size was correct, no point returning data otherwise.
             if r.nar_size() != user_nar_size {
@@ -134,7 +129,7 @@ pub async fn head_root_nodes(
 pub async fn put(
     axum::extract::Path(nar_str): axum::extract::Path<String>,
     axum::extract::State(AppState {
-        blob_service,
+        blob_engine,
         directory_service,
         root_nodes,
         ..
@@ -159,18 +154,14 @@ pub async fn put(
     }));
 
     // ingest the NAR
-    let (root_node, nar_hash_actual, nar_size) = ingest_nar_and_hash(
-        BlobServiceEngine(blob_service.clone()),
-        directory_service.clone(),
-        &mut r,
-        &None,
-    )
-    .await
-    .map_err(io::Error::other)
-    .map_err(|e| {
-        warn!(err=%e, "failed to ingest nar");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let (root_node, nar_hash_actual, nar_size) =
+        ingest_nar_and_hash(blob_engine, directory_service.clone(), &mut r, &None)
+            .await
+            .map_err(io::Error::other)
+            .map_err(|e| {
+                warn!(err=%e, "failed to ingest nar");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
 
     let s = Span::current();
     s.record("nar_hash.expected", nixbase32::encode(&nar_hash_expected));
@@ -204,11 +195,10 @@ mod tests {
     use data_encoding::BASE64URL_NOPAD;
     use nix_compat::{nixbase32, nixhash::Sha256};
     use snix_castore::{
-        blob_engine::BlobServiceEngine,
-        blobservice::BlobService,
+        blob_engine::BlobEngine,
         directoryservice::DirectoryService,
         fixtures::HELLOWORLD_BLOB_DIGEST,
-        utils::{gen_test_blob_service, gen_test_directory_service},
+        utils::{gen_test_blob_engine, gen_test_directory_service},
     };
     use snix_store::{
         fixtures::{
@@ -239,16 +229,16 @@ mod tests {
         router: axum::Router<AppState>,
     ) -> (
         axum_test::TestServer,
-        impl BlobService,
+        impl BlobEngine,
         impl DirectoryService,
         impl PathInfoService,
     ) {
-        let blob_service = Arc::new(gen_test_blob_service());
+        let blob_engine = Arc::new(gen_test_blob_engine());
         let directory_service = Arc::new(gen_test_directory_service());
         let path_info_service = Arc::new(gen_test_pathinfo_service());
 
         let app = router.with_state(AppState::new(
-            blob_service.clone(),
+            blob_engine.clone(),
             directory_service.clone(),
             path_info_service.clone(),
             NonZero::new(100).unwrap(),
@@ -256,7 +246,7 @@ mod tests {
 
         (
             axum_test::TestServer::new(app),
-            blob_service,
+            blob_engine,
             directory_service,
             path_info_service,
         )
@@ -265,7 +255,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn test_get_head() {
-        let (server, _blob_service, _directory_service, _path_info_service) =
+        let (server, _blob_engine, _directory_service, _path_info_service) =
             gen_server(Router::new().route(
                 "/nar/snix-castore/{root_node_enc}",
                 axum::routing::get(super::get_head),
@@ -338,7 +328,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn test_put_wrong_narhash() {
-        let (server, _blob_service, _directory_service, _path_info_service) =
+        let (server, _blob_engine, _directory_service, _path_info_service) =
             gen_server(Router::new().route("/nar/{nar_str}", axum::routing::put(super::put)));
 
         server
@@ -352,7 +342,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn test_put_with_compression_fail() {
-        let (server, _blob_service, _directory_service, _path_info_service) =
+        let (server, _blob_engine, _directory_service, _path_info_service) =
             gen_server(Router::new().route("/nar/{nar_str}", axum::routing::put(super::put)));
 
         let nar_sha256 = Sha256::digest_bytes(NAR_CONTENTS_SYMLINK.as_slice());
@@ -371,7 +361,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn test_put_success() {
-        let (server, blob_service, _directory_service, _path_info_service) =
+        let (server, blob_engine, _directory_service, _path_info_service) =
             gen_server(Router::new().route("/nar/{nar_str}", axum::routing::put(super::put)));
 
         let nar_sha256 = Sha256::digest_bytes(NAR_CONTENTS_HELLOWORLD.as_slice());
@@ -384,10 +374,10 @@ mod tests {
             .await;
 
         assert!(
-            blob_service
+            blob_engine
                 .has(&HELLOWORLD_BLOB_DIGEST)
                 .await
-                .expect("blobservice")
+                .expect("blobengine to have blob")
         )
     }
 
@@ -397,7 +387,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn test_put_success2() {
-        let (server, blob_service, directory_service, _path_info_service) =
+        let (server, blob_engine, directory_service, _path_info_service) =
             gen_server(Router::new().route("/nar/{nar_str}", axum::routing::put(super::put)));
 
         let nar_sha256 = Sha256::digest_bytes(NAR_CONTENTS_COMPLICATED.as_slice());
@@ -413,7 +403,7 @@ mod tests {
         snix_store::nar::write_nar(
             &mut buf,
             &CASTORE_NODE_COMPLICATED,
-            &BlobServiceEngine(blob_service),
+            &blob_engine,
             &directory_service,
         )
         .await
@@ -426,7 +416,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn test_put_root_nodes() {
-        let (server, _blob_service, _directory_servicee, _path_info_service) = gen_server(
+        let (server, _blob_engine, _directory_servicee, _path_info_service) = gen_server(
             Router::new()
                 .route("/nar/{nar_str}", axum::routing::put(super::put))
                 .route("/nar/{nar_str}", axum::routing::get(super::head_root_nodes)),

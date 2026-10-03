@@ -24285,6 +24285,10 @@ rec {
             packageId = "nar-bridge";
           }
           {
+            name = "snix-castore";
+            packageId = "snix-castore";
+          }
+          {
             name = "snix-cli";
             packageId = "snix-cli";
             features = [ "listener" ];

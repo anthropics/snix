@@ -8,7 +8,7 @@ use lru::LruCache;
 use nix_compat::nix_http;
 use parking_lot::RwLock;
 use snix_castore::Node;
-use snix_castore::blobservice::BlobService;
+use snix_castore::blob_engine::BlobEngine;
 use snix_castore::directoryservice::DirectoryService;
 use snix_store::pathinfoservice::PathInfoService;
 use std::num::NonZeroUsize;
@@ -19,7 +19,7 @@ mod outhash;
 
 #[derive(Clone)]
 pub struct AppState {
-    blob_service: Arc<dyn BlobService>,
+    blob_engine: Arc<dyn BlobEngine>,
     directory_service: Arc<dyn DirectoryService>,
     path_info_service: Arc<dyn PathInfoService>,
 
@@ -30,13 +30,13 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(
-        blob_service: Arc<dyn BlobService>,
+        blob_engine: Arc<dyn BlobEngine>,
         directory_service: Arc<dyn DirectoryService>,
         path_info_service: Arc<dyn PathInfoService>,
         root_nodes_cache_capacity: NonZeroUsize,
     ) -> Self {
         Self {
-            blob_service,
+            blob_engine,
             directory_service,
             path_info_service,
             root_nodes: Arc::new(RwLock::new(LruCache::new(root_nodes_cache_capacity))),

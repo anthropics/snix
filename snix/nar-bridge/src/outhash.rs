@@ -194,9 +194,9 @@ mod tests {
     use axum::http::Method;
     use nix_compat::nixbase32;
     use snix_castore::{
-        blobservice::BlobService,
+        blob_engine::BlobEngine,
         directoryservice::DirectoryService,
-        utils::{gen_test_blob_service, gen_test_directory_service},
+        utils::{gen_test_blob_engine, gen_test_directory_service},
     };
     use snix_store::{
         fixtures::{DUMMY_PATH_DIGEST, NAR_CONTENTS_SYMLINK, PATH_INFO_SYMLINK},
@@ -214,16 +214,16 @@ mod tests {
         router: axum::Router<AppState>,
     ) -> (
         axum_test::TestServer,
-        impl BlobService,
+        impl BlobEngine,
         impl DirectoryService,
         impl PathInfoService,
     ) {
-        let blob_service = Arc::new(gen_test_blob_service());
+        let blob_engine = Arc::new(gen_test_blob_engine());
         let directory_service = Arc::new(gen_test_directory_service());
         let path_info_service = Arc::new(gen_test_pathinfo_service());
 
         let app = router.with_state(AppState::new(
-            blob_service.clone(),
+            blob_engine.clone(),
             directory_service.clone(),
             path_info_service.clone(),
             NonZero::new(100).unwrap(),
@@ -231,7 +231,7 @@ mod tests {
 
         (
             axum_test::TestServer::new(app),
-            blob_service,
+            blob_engine,
             directory_service,
             path_info_service,
         )
