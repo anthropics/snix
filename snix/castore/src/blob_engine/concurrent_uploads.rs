@@ -1,3 +1,5 @@
+//! Concurrent blob uploads.
+
 use std::{
     io::{Cursor, Write},
     sync::Arc,

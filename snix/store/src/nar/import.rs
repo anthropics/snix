@@ -4,13 +4,10 @@ use nix_compat::{
 };
 use snix_castore::{
     Node, PathBuf,
+    blob_engine::concurrent_uploads::{self, ConcurrentBlobUploader},
     blobservice::BlobService,
     directoryservice::DirectoryService,
-    import::{
-        IngestionEntry, IngestionError,
-        blobs::{self, ConcurrentBlobUploader},
-        ingest_entries,
-    },
+    import::{IngestionEntry, IngestionError, ingest_entries},
 };
 use tokio::{
     io::{AsyncBufRead, AsyncRead},
@@ -238,7 +235,7 @@ pub enum Error {
     IO(#[from] std::io::Error),
 
     #[error(transparent)]
-    BlobUpload(#[from] blobs::Error),
+    BlobUpload(#[from] concurrent_uploads::Error),
 }
 
 #[cfg(test)]

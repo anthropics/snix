@@ -2,6 +2,8 @@ use tonic::async_trait;
 
 mod blobservice;
 mod chunking;
+pub mod concurrent_uploads;
+
 pub use chunking::ChunkingBlobEngine;
 
 use crate::B3Digest;
