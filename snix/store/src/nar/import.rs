@@ -4,8 +4,7 @@ use nix_compat::{
 };
 use snix_castore::{
     Node, PathBuf,
-    blob_engine::concurrent_uploads::{self, ConcurrentBlobUploader},
-    blobservice::BlobService,
+    blob_engine::{self, BlobEngine, concurrent_uploads},
     directoryservice::DirectoryService,
     import::{IngestionEntry, IngestionError, ingest_entries},
 };
@@ -30,21 +29,24 @@ pub enum NarIngestionError {
 
     #[error("Ingestion failed: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("Calling open_read() on BlobEngine failed: {0}")]
+    BlobEngine(#[from] blob_engine::Error),
 }
 
 /// Ingests the contents from a [AsyncRead] providing NAR into the snix store,
-/// interacting with a [BlobService] and [DirectoryService].
+/// interacting with a [BlobEngine] and [DirectoryService].
 /// Returns the castore root node, as well as the sha256 and size of the NAR
 /// contents ingested.
-pub async fn ingest_nar_and_hash<R, BS, DS>(
-    blob_service: BS,
+pub async fn ingest_nar_and_hash<R, BE, DS>(
+    blob_engine: BE,
     directory_service: DS,
     r: &mut R,
     expected_cahash: &Option<CAHash>,
 ) -> Result<(Node, [u8; 32], u64), NarIngestionError>
 where
     R: AsyncRead + Unpin + Send,
-    BS: BlobService + Clone + 'static,
+    BE: BlobEngine + Clone + 'static,
     DS: DirectoryService,
 {
     let mut nar_hash = Sha256Digester::new();
@@ -62,7 +64,7 @@ where
                 // If this is the required CAHash, we're already computing excatly this in `nar_hash` above.
                 let mut r = tokio::io::BufReader::new(&mut r);
 
-                let root_node = ingest_nar(blob_service, directory_service, &mut r).await?;
+                let root_node = ingest_nar(blob_engine, directory_service, &mut r).await?;
                 let nar_hash = nar_hash.finalize();
                 (root_node, NixHash::from(nar_hash), nar_hash)
             } else {
@@ -71,7 +73,7 @@ where
                 let mut r =
                     tokio::io::BufReader::new(InspectReader::new(r, |data| digester.update(data)));
 
-                let root_node = ingest_nar(blob_service, directory_service, &mut r).await?;
+                let root_node = ingest_nar(blob_engine, directory_service, &mut r).await?;
                 (root_node, digester.finalize(), nar_hash.finalize())
             };
 
@@ -86,11 +88,11 @@ where
         Some(CAHash::Flat(expected_hash)) => {
             // ingest as NAR
             let mut r = tokio::io::BufReader::new(&mut r);
-            let root_node = ingest_nar(blob_service.clone(), directory_service, &mut r).await?;
+            let root_node = ingest_nar(blob_engine.clone(), directory_service, &mut r).await?;
 
             // The resulting root node must be Node::File, else CAHash::Flat is not applicable
-            if let Node::File { digest, .. } = &root_node {
-                if let Some(mut blob_reader) = blob_service.open_read(digest).await? {
+            if let Node::File { digest, size, .. } = &root_node {
+                if let Some(mut blob_reader) = blob_engine.open_read(digest, Some(*size)).await? {
                     let (_, actual_hash) = copy_hashed(
                         &mut blob_reader,
                         &mut tokio::io::sink(),
@@ -121,23 +123,23 @@ where
         // https://github.com/NixOS/nix/blob/3e9cc78eb5e5c4f1e762e201856273809fd92e71/src/libstore/local-store.cc#L1099-L1133
         _ => {
             let mut r = tokio::io::BufReader::new(&mut r);
-            let root_node = ingest_nar(blob_service, directory_service, &mut r).await?;
+            let root_node = ingest_nar(blob_engine, directory_service, &mut r).await?;
             Ok((root_node, nar_hash.finalize().into(), nar_size))
         }
     }
 }
 
 /// Ingests the contents from a [AsyncRead] providing NAR into the snix store,
-/// interacting with a [BlobService] and [DirectoryService].
+/// interacting with a [BlobEngine] and [DirectoryService].
 /// It returns the castore root node or an error.
-pub async fn ingest_nar<R, BS, DS>(
-    blob_service: BS,
+pub async fn ingest_nar<R, BE, DS>(
+    blob_engine: BE,
     directory_service: DS,
     r: &mut R,
 ) -> Result<Node, IngestionError<Error>>
 where
     R: AsyncBufRead + Unpin + Send,
-    BS: BlobService + Clone + 'static,
+    BE: BlobEngine + Clone + 'static,
     DS: DirectoryService,
 {
     // open the NAR for reading.
@@ -148,7 +150,7 @@ where
     let rx = tokio_stream::wrappers::ReceiverStream::new(rx);
 
     let produce = async move {
-        let mut blob_uploader = ConcurrentBlobUploader::new(blob_service);
+        let mut blob_uploader = concurrent_uploads::ConcurrentBlobUploader::new(blob_engine);
 
         let res = produce_nar_inner(
             &mut blob_uploader,
@@ -178,14 +180,14 @@ where
     Ok(node)
 }
 
-async fn produce_nar_inner<BS>(
-    blob_uploader: &mut ConcurrentBlobUploader<BS>,
+async fn produce_nar_inner<BE>(
+    blob_uploader: &mut concurrent_uploads::ConcurrentBlobUploader<BE>,
     node: nar_reader::Node<'_, '_>,
     path: PathBuf,
     tx: mpsc::Sender<Result<IngestionEntry, Error>>,
 ) -> Result<IngestionEntry, Error>
 where
-    BS: BlobService + Clone + 'static,
+    BE: BlobEngine + Clone + 'static,
 {
     Ok(match node {
         nar_reader::Node::Symlink { target } => IngestionEntry::Symlink { path, target },
