@@ -1,5 +1,5 @@
 use nix_compat::nar::writer::r#async as nar_writer;
-use snix_castore::{Node, blobservice::BlobService, directoryservice::DirectoryService};
+use snix_castore::{Node, blob_engine::BlobEngine, directoryservice::DirectoryService};
 use tokio::io::{self, AsyncWrite, BufReader};
 
 use crate::nar::RenderError;
@@ -12,15 +12,15 @@ use crate::nar::RenderError;
 /// This function is very linear, so roundtrip times add up quickly.
 /// You might want to use [crate::nar::write_nar] instead, which opens more
 /// blobs concurrently.
-pub async fn write_nar<W, BS, DS>(
+pub async fn write_nar<W, BE, DS>(
     mut w: W,
     root_node: &Node,
-    blob_service: BS,
+    blob_service: BE,
     directory_service: DS,
 ) -> Result<(), RenderError>
 where
     W: AsyncWrite + Unpin + Send,
-    BS: BlobService,
+    BE: BlobEngine,
     DS: DirectoryService,
 {
     // Initialize NAR writer
@@ -42,16 +42,16 @@ where
 
 /// Process an intermediate node in the structure.
 /// This consumes the node.
-async fn walk_node<BS, DS>(
+async fn walk_node<BE, DS>(
     nar_node: nar_writer::Node<'_, '_>,
     castore_node: &Node,
     name: &[u8],
-    blob_service: BS,
+    blob_engine: BE,
     directory_service: DS,
-) -> Result<(BS, DS), RenderError>
+) -> Result<(BE, DS), RenderError>
 where
-    BS: BlobService + Send,
-    DS: DirectoryService + Send,
+    BE: BlobEngine,
+    DS: DirectoryService,
 {
     match castore_node {
         Node::Symlink { target, .. } => {
@@ -65,10 +65,10 @@ where
             size,
             executable,
         } => {
-            let mut blob_reader = match blob_service
-                .open_read(digest)
+            let mut blob_reader = match blob_engine
+                .open_read(digest, Some(*size))
                 .await
-                .map_err(RenderError::BlobService)?
+                .map_err(RenderError::BlobEngine)?
             {
                 Some(blob_reader) => Ok(BufReader::new(blob_reader)),
                 None => Err(RenderError::NARWriterError(io::Error::new(
@@ -110,7 +110,7 @@ where
 
             // We put blob_service, directory_service back here whenever we come up from
             // the recursion.
-            let mut blob_service = blob_service;
+            let mut blob_service = blob_engine;
             let mut directory_service = directory_service;
 
             // for each node in the directory, create a new entry with its name,
@@ -141,5 +141,5 @@ where
         }
     }
 
-    Ok((blob_service, directory_service))
+    Ok((blob_engine, directory_service))
 }

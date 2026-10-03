@@ -38,8 +38,8 @@ where
     let mut reader = Reader::new(root_node, blob_engine, directory_service).await?;
     tokio::io::copy_buf(&mut reader, &mut w)
         .await
-        // FUTUREWORK: RenderError makes no sense
-        .map_err(RenderError::BlobService)?;
+        .map_err(RenderError::IO)?;
+    // FUTUREWORK: RenderError makes no sense
 
     Ok(())
 }

@@ -1,5 +1,5 @@
-use snix_castore::B3Digest;
 use snix_castore::directoryservice::order_validator;
+use snix_castore::{B3Digest, blob_engine};
 
 mod import;
 mod listing;
@@ -17,8 +17,11 @@ pub enum RenderError {
     #[error("failure talking to a backing directory service")]
     DirectoryService(#[source] snix_castore::directoryservice::Error),
 
-    #[error("failure talking to a backing blob service")]
-    BlobService(#[source] std::io::Error),
+    #[error("IO error: {0}")]
+    IO(#[source] std::io::Error),
+
+    #[error("failure to open blob for reading")]
+    BlobEngine(#[from] blob_engine::Error),
 
     #[error("unable to find directory {0}, referred from {1:?}")]
     DirectoryNotFound(B3Digest, bytes::Bytes),

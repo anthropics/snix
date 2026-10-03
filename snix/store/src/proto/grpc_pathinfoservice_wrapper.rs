@@ -116,11 +116,12 @@ where
 impl From<RenderError> for tonic::Status {
     fn from(value: RenderError) -> Self {
         match value {
+            RenderError::BlobEngine(_) => Self::internal(value.to_string()),
             RenderError::BlobNotFound(_, _) => Self::not_found(value.to_string()),
-            RenderError::BlobService(_) => Self::internal(value.to_string()),
             RenderError::DirectoryNotFound(_, _) => Self::not_found(value.to_string()),
             RenderError::DirectoryService(_) => Self::internal(value.to_string()),
             RenderError::NARWriterError(_) => Self::internal(value.to_string()),
+            RenderError::IO(_) => Self::internal(value.to_string()),
             RenderError::OrderingError(_) => Self::internal(value.to_string()),
             RenderError::UnexpectedBlobMeta(_, _, _, _) => Self::internal(value.to_string()),
         }
