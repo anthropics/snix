@@ -32,4 +32,4 @@ pub trait BlobEngine: Send + Sync {
 
 #[derive(thiserror::Error, Debug)]
 #[error(transparent)]
-pub struct Error(#[from] Box<dyn std::error::Error>);
+pub struct Error(#[from] Box<dyn std::error::Error + Send + Sync + 'static>);

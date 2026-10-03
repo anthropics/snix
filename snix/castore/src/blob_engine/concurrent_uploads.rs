@@ -13,9 +13,12 @@ use tokio::{
 use tokio_util::io::InspectReader;
 use tracing::{Instrument, Level, instrument};
 
-use crate::{B3Digest, Path, PathBuf, blobservice::BlobService};
+use crate::{
+    B3Digest, Path, PathBuf,
+    blob_engine::{self, BlobEngine},
+};
 
-/// Files smaller than this threshold, in bytes, are uploaded to the [BlobService] in the
+/// Files smaller than this threshold, in bytes, are uploaded to the [BlobEngine] in the
 /// background.
 ///
 /// This is a u32 since we acquire a weighted semaphore using the size of the blob.
@@ -32,7 +35,7 @@ pub enum Error {
     BlobRead(PathBuf, std::io::Error),
 
     #[error("unable to check whether blob at {0} already exists: {1}")]
-    BlobCheck(PathBuf, std::io::Error),
+    BlobCheck(PathBuf, blob_engine::Error),
 
     // FUTUREWORK: proper error for blob finalize
     #[error("unable to finalize blob {0}: {1}")]
@@ -52,32 +55,33 @@ pub enum Error {
 /// The concurrent blob uploader provides a mechanism for concurrently uploading small blobs.
 /// This is useful when ingesting from sources like tarballs and archives which each blob entry
 /// must be read sequentially. Ingesting many small blobs sequentially becomes slow due to
-/// round trip time with the blob service. The concurrent blob uploader will buffer small
-/// blobs in memory and upload them to the blob service in the background.
+/// round trip time with the [BlobEngine].
+/// The concurrent blob uploader will buffer small blobs in memory and upload
+/// them to the [BlobEngine] in the background.
 ///
 /// Once all blobs have been uploaded, make sure to call [ConcurrentBlobUploader::join] to wait
 /// for all background jobs to complete and check for any errors.
-pub struct ConcurrentBlobUploader<BS> {
-    blob_service: BS,
+pub struct ConcurrentBlobUploader<BE> {
+    blob_engine: BE,
     upload_tasks: JoinSet<Result<(), Error>>,
     upload_semaphore: Arc<Semaphore>,
 }
 
-impl<BS> ConcurrentBlobUploader<BS>
+impl<BE> ConcurrentBlobUploader<BE>
 where
-    BS: BlobService + Clone + 'static,
+    BE: BlobEngine + Clone + 'static,
 {
     /// Creates a new concurrent blob uploader which uploads blobs to the provided
-    /// blob service.
-    pub fn new(blob_service: BS) -> Self {
+    /// [BlobEngine].
+    pub fn new(blob_engine: BE) -> Self {
         Self {
-            blob_service,
+            blob_engine,
             upload_tasks: JoinSet::new(),
             upload_semaphore: Arc::new(Semaphore::new(MAX_BUFFER_SIZE)),
         }
     }
 
-    /// Uploads a blob to the blob service. If the blob is small enough it will be read to a buffer
+    /// Uploads a blob to the [BlobEngine]. If the blob is small enough it will be read to a buffer
     /// and uploaded in the background.
     /// This will read the entirety of the provided reader unless an error occurs, even if blobs
     /// are uploaded in the background..
@@ -120,12 +124,12 @@ where
             }
 
             self.upload_tasks.spawn({
-                let blob_service = self.blob_service.clone();
+                let blob_engine = self.blob_engine.clone();
                 let path = path.to_owned();
                 let r = Cursor::new(buffer);
                 async move {
                     // We know the blob digest already, check it exists before sending it.
-                    if blob_service
+                    if blob_engine
                         .has(&digest)
                         .await
                         .map_err(|e| Error::BlobCheck(path.clone(), e))?
@@ -135,12 +139,12 @@ where
                     }
 
                     let uploaded_digest =
-                        upload_blob(&blob_service, &path, expected_size, r).await?;
+                        upload_blob(&blob_engine, &path, expected_size, r).await?;
 
                     assert_eq!(uploaded_digest, digest, "Snix bug: blob digest mismatch");
 
                     // Make sure we hold the permit until we finish writing the blob
-                    // to the [BlobService].
+                    // to the [BlobEngine].
                     drop(permit);
                     Ok(())
                 }
@@ -150,7 +154,7 @@ where
             return Ok(digest);
         }
 
-        upload_blob(&self.blob_service, path, expected_size, r).await
+        upload_blob(&self.blob_engine, path, expected_size, r).await
     }
 
     /// Waits for all background upload jobs to complete, returning any upload errors.
@@ -162,17 +166,17 @@ where
     }
 }
 
-async fn upload_blob<BS, R>(
-    blob_service: &BS,
+async fn upload_blob<BE, R>(
+    blob_engine: &BE,
     path: &Path,
     expected_size: u64,
     mut r: R,
 ) -> Result<B3Digest, Error>
 where
-    BS: BlobService,
+    BE: BlobEngine,
     R: AsyncRead + Unpin,
 {
-    let mut writer = blob_service.open_write().await;
+    let mut writer = blob_engine.open_write().await;
 
     let size = tokio::io::copy(&mut r, &mut writer)
         .await
