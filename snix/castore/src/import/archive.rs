@@ -10,8 +10,7 @@ use tokio_stream::StreamExt;
 use tracing::{Level, instrument, warn};
 
 use crate::Node;
-use crate::blob_engine::concurrent_uploads;
-use crate::blobservice::BlobService;
+use crate::blob_engine::{BlobEngine, concurrent_uploads};
 use crate::directoryservice::DirectoryService;
 use crate::import::{IngestionEntry, IngestionError, ingest_entries};
 
@@ -54,15 +53,15 @@ pub enum Error {
 }
 
 /// Ingests elements from the archive readable at the passed reader into a the
-/// passed [`BlobService`] and [`DirectoryService`].
+/// passed [`BlobEngine`] and [`DirectoryService`].
 #[instrument(skip_all, ret(level = Level::TRACE), err)]
-pub async fn ingest_archive<BS, DS, R>(
-    blob_service: BS,
+pub async fn ingest_archive<BE, DS, R>(
+    blob_engine: BE,
     directory_service: DS,
     mut r: R,
 ) -> Result<Node, IngestionError<Error>>
 where
-    BS: BlobService + Clone + 'static,
+    BE: BlobEngine + Clone + 'static,
     DS: DirectoryService,
     R: AsyncRead + Unpin,
 {
@@ -76,7 +75,7 @@ where
     // In the first phase, collect up all the regular files and symlinks.
     let mut nodes = IngestionEntryGraph::new();
 
-    let mut blob_uploader = concurrent_uploads::ConcurrentBlobUploader::new(blob_service);
+    let mut blob_uploader = concurrent_uploads::ConcurrentBlobUploader::new(blob_engine);
 
     let mut entries_iter = archive.entries().map_err(Error::Entries)?;
     while let Some(mut entry) = entries_iter.try_next().await.map_err(Error::NextEntry)? {
