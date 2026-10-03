@@ -1,6 +1,9 @@
 use auto_impl::auto_impl;
 use nix_compat::nixhash::Sha256Digester;
-use snix_castore::{Node, blobservice::BlobService, directoryservice::DirectoryService};
+use snix_castore::{
+    Node, blob_engine::BlobServiceEngine, blobservice::BlobService,
+    directoryservice::DirectoryService,
+};
 use tokio_util::io::InspectWriter;
 use tonic::async_trait;
 
@@ -56,7 +59,7 @@ where
         write_nar(
             writer,
             root_node,
-            &self.blob_service,
+            &BlobServiceEngine(&self.blob_service),
             &self.directory_service,
         )
         .await?;

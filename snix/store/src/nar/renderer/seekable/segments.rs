@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
 use nix_compat::nar::writer::sync as nar_writer;
-use snix_castore::{B3Digest, Directory, Node, blobservice::BlobService};
+use snix_castore::{B3Digest, Directory, Node, blob_engine::BlobEngine};
 use std::{
     collections::HashMap,
     io::{self},
@@ -42,17 +42,17 @@ impl Segments {
 
     /// Provides a [AsyncBufRead] into a [Segments] from the given offset.
     ///
-    /// A [BlobService] to read blobs from needs to be specified, as well as
+    /// A [BlobEngine] to read blobs from needs to be specified, as well as
     /// the desired concurrency (for segments, not blobs).
     ///
     /// This does not implement AsyncSeek, seeking can be done by calling this
     /// again with another offset.
-    pub fn reader_for_offset<'bs, BS: BlobService + Clone + 'bs>(
+    pub fn reader_for_offset<'be, BE: BlobEngine + Clone + 'be>(
         &self,
         offset: u64,
         segment_concurrency: usize,
-        blob_service: BS,
-    ) -> Box<dyn AsyncBufRead + Send + Unpin + 'bs> {
+        blob_engine: BE,
+    ) -> Box<dyn AsyncBufRead + Send + Unpin + 'be> {
         // find the segment at the selected offset, or right before it
         let (idx, skip_in_segment) = match self
             .segments
@@ -76,7 +76,7 @@ impl Segments {
         // produce a stream of byte chunks
         let bytes_stream = tokio_stream::iter(items)
             .map(move |(segment, skip_in_segment)| {
-                let blob_service = blob_service.clone();
+                let blob_engine = blob_engine.clone();
                 async move {
                     let segment_len = segment.len();
                     if skip_in_segment > 0 {
@@ -98,7 +98,7 @@ impl Segments {
                         Segment::BlobRef { size: 0, .. } => futures::stream::empty().boxed(),
                         Segment::BlobRef { digest, size } => {
                             async_stream::try_stream! {
-                                let blob_reader = blob_service.open_read(&digest).await
+                                let blob_reader = blob_engine.open_read(&digest, Some(size)).await
                                     .map_err(io::Error::other)?
                                     .ok_or_else(|| {
                                         io::Error::new(

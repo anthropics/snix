@@ -3,8 +3,8 @@ use nix_compat::{
     nixhash::{Sha256, copy_sha256},
 };
 use snix_castore::{
-    Node, blobservice::BlobService, directoryservice::DirectoryService,
-    proto::parse_infused_nar_path,
+    Node, blob_engine::BlobServiceEngine, blobservice::BlobService,
+    directoryservice::DirectoryService, proto::parse_infused_nar_path,
 };
 
 /// Try to parse the NAR URL in the Narinfo as castore-infused,
@@ -31,7 +31,8 @@ where
     }
 
     // Construct a NAR Reader for the given root node
-    let mut r = crate::nar::Reader::new(&node, &blob_service, directory_service).await?;
+    let mut r =
+        crate::nar::Reader::new(&node, BlobServiceEngine(&blob_service), directory_service).await?;
 
     // Render the NAR out into a sink, while hashing and calculating nar_size at the same time.
     let (actual_nar_size, actual_nar_hash) = copy_sha256(&mut r, &mut tokio::io::sink()).await?;

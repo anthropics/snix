@@ -8,7 +8,7 @@ use std::{
 use futures::ready;
 use pin_project::pin_project;
 use segments::Segments;
-use snix_castore::blobservice::BlobService;
+use snix_castore::blob_engine::BlobEngine;
 use snix_castore::directoryservice::DirectoryService;
 use snix_castore::{Node, directoryservice::DirectoryServiceGraphExt};
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncSeek, AsyncWrite};
@@ -24,18 +24,18 @@ mod test;
 /// The number of segments to poll data from concurrently.
 const SEGMENT_CONCURRENCY: usize = 24;
 
-pub async fn write_nar<W, BS, DS>(
+pub async fn write_nar<W, BE, DS>(
     mut w: W,
     root_node: &Node,
-    blob_service: &BS,
+    blob_engine: &BE,
     directory_service: &DS,
 ) -> Result<(), RenderError>
 where
     W: AsyncWrite + Unpin + Send,
-    BS: BlobService,
+    BE: BlobEngine,
     DS: DirectoryService,
 {
-    let mut reader = Reader::new(root_node, blob_service, directory_service).await?;
+    let mut reader = Reader::new(root_node, blob_engine, directory_service).await?;
     tokio::io::copy_buf(&mut reader, &mut w)
         .await
         // FUTUREWORK: RenderError makes no sense
@@ -45,15 +45,15 @@ where
 }
 
 #[pin_project]
-pub struct Reader<'bs, BS: BlobService + 'bs> {
+pub struct Reader<'be, BE: BlobEngine + 'be> {
     segments: Segments,
     pos: u64,
-    blob_service: BS,
+    blob_engine: BE,
     #[pin]
-    rd: Box<dyn AsyncBufRead + Send + Unpin + 'bs>,
+    rd: Box<dyn AsyncBufRead + Send + Unpin + 'be>,
 }
 
-impl<'bs, BS: BlobService + Clone + 'bs> Reader<'bs, BS> {
+impl<'be, BE: BlobEngine + Clone + 'be> Reader<'be, BE> {
     /// Creates a new seekable NAR renderer for the given castore root node.
     ///
     /// This function pre-fetches the directory closure using `get_recursive()` and assembles the
@@ -62,10 +62,10 @@ impl<'bs, BS: BlobService + Clone + 'bs> Reader<'bs, BS> {
     /// The AsyncRead implementation will then switch between serving the
     /// precomputed literal segments, and the appropriate blob for the file
     /// contents.
-    #[instrument(skip(blob_service, directory_service), err)]
+    #[instrument(skip(blob_engine, directory_service), err)]
     pub async fn new(
         root_node: &Node,
-        blob_service: BS,
+        blob_engine: BE,
         directory_service: impl DirectoryService,
         // FUTUREWORK: add concurrency arg
     ) -> Result<Self, RenderError> {
@@ -92,12 +92,12 @@ impl<'bs, BS: BlobService + Clone + 'bs> Reader<'bs, BS> {
         };
 
         let segments = Segments::from_root_node_and_directories(root_node, &directories);
-        let rd = segments.reader_for_offset(0, SEGMENT_CONCURRENCY, blob_service.clone());
+        let rd = segments.reader_for_offset(0, SEGMENT_CONCURRENCY, blob_engine.clone());
 
         Ok(Self {
             segments,
             pos: 0,
-            blob_service,
+            blob_engine,
             rd,
         })
     }
@@ -107,7 +107,7 @@ impl<'bs, BS: BlobService + Clone + 'bs> Reader<'bs, BS> {
     }
 }
 
-impl<'bs, BS: BlobService> AsyncRead for Reader<'bs, BS> {
+impl<'be, BE: BlobEngine> AsyncRead for Reader<'be, BE> {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context,
@@ -132,7 +132,7 @@ impl<'bs, BS: BlobService> AsyncRead for Reader<'bs, BS> {
     }
 }
 
-impl<'bs, BS: BlobService> AsyncBufRead for Reader<'bs, BS> {
+impl<'be, BE: BlobEngine> AsyncBufRead for Reader<'be, BE> {
     fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<&[u8]>> {
         let this = self.project();
         this.rd.poll_fill_buf(cx)
@@ -149,7 +149,7 @@ impl<'bs, BS: BlobService> AsyncBufRead for Reader<'bs, BS> {
     }
 }
 
-impl<'bs, BS: BlobService + Clone + 'bs> AsyncSeek for Reader<'bs, BS> {
+impl<'be, BE: BlobEngine + Clone + 'be> AsyncSeek for Reader<'be, BE> {
     fn start_seek(self: Pin<&mut Self>, pos: io::SeekFrom) -> io::Result<()> {
         let nar_size = self.nar_size();
         let new_pos = calc_pos(self.pos, nar_size, pos)?;
@@ -161,7 +161,7 @@ impl<'bs, BS: BlobService + Clone + 'bs> AsyncSeek for Reader<'bs, BS> {
             *this.rd = this.segments.reader_for_offset(
                 new_pos,
                 SEGMENT_CONCURRENCY,
-                this.blob_service.clone(),
+                this.blob_engine.clone(),
             );
             *this.pos = new_pos;
         }

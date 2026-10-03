@@ -163,9 +163,13 @@ impl NixDaemonIO for SnixDaemon {
 
         // spawn a task rendering the NAR to the client.
         tokio::spawn(async move {
-            if let Err(e) =
-                snix_store::nar::write_nar(w, &path_info.node, &blob_service, &directory_service)
-                    .await
+            if let Err(e) = snix_store::nar::write_nar(
+                w,
+                &path_info.node,
+                &BlobServiceEngine(blob_service),
+                &directory_service,
+            )
+            .await
             {
                 warn!(err=%e, "failed to write out NAR");
             }

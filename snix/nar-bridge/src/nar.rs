@@ -65,12 +65,16 @@ pub async fn get_head(
                 .body(Body::empty())
                 .unwrap()
         } else {
-            let r = snix_store::nar::Reader::new(&root_node, blob_service, directory_service)
-                .await
-                .map_err(|err| {
-                    warn!(%err, "failed to construct seekable nar reader");
-                    StatusCode::INTERNAL_SERVER_ERROR
-                })?;
+            let r = snix_store::nar::Reader::new(
+                &root_node,
+                BlobServiceEngine(blob_service),
+                directory_service,
+            )
+            .await
+            .map_err(|err| {
+                warn!(%err, "failed to construct seekable nar reader");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
 
             // ensure the user-supplied nar size was correct, no point returning data otherwise.
             if r.nar_size() != user_nar_size {
@@ -200,6 +204,7 @@ mod tests {
     use data_encoding::BASE64URL_NOPAD;
     use nix_compat::{nixbase32, nixhash::Sha256};
     use snix_castore::{
+        blob_engine::BlobServiceEngine,
         blobservice::BlobService,
         directoryservice::DirectoryService,
         fixtures::HELLOWORLD_BLOB_DIGEST,
@@ -408,7 +413,7 @@ mod tests {
         snix_store::nar::write_nar(
             &mut buf,
             &CASTORE_NODE_COMPLICATED,
-            &blob_service,
+            &BlobServiceEngine(blob_service),
             &directory_service,
         )
         .await

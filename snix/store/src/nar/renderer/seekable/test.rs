@@ -5,9 +5,10 @@ use crate::fixtures::{
 };
 use crate::fixtures::{NAR_CONTENTS_COMPLICATED, NAR_CONTENTS_HELLOWORLD, NAR_CONTENTS_SYMLINK};
 use futures::StreamExt;
-use mockall::predicate;
+use mockall::predicate::eq;
 use snix_castore::Node;
-use snix_castore::blobservice::MockBlobService;
+#[cfg(test)]
+use snix_castore::blob_engine::MockBlobEngine;
 use snix_castore::directoryservice::{self, MockDirectoryService};
 use snix_castore::fixtures::{
     DIRECTORY_COMPLICATED, DIRECTORY_WITH_KEEP, HELLOWORLD_BLOB_CONTENTS, HELLOWORLD_BLOB_DIGEST,
@@ -17,17 +18,17 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 #[rstest::rstest]
 #[case::symlink(&*CASTORE_NODE_SYMLINK, &NAR_CONTENTS_SYMLINK,
-    |bs: &mut MockBlobService|{bs.expect_open_read().never();},
+    |bs: &mut MockBlobEngine|{bs.expect_open_read().never();},
     |ds: &mut MockDirectoryService| {ds.expect_get().never(); ds.expect_get_recursive().never();})]
 #[case::helloworld(&*CASTORE_NODE_HELLOWORLD, &NAR_CONTENTS_HELLOWORLD,
-    |bs: &mut MockBlobService|{bs.expect_open_read().once().with(predicate::eq(&*HELLOWORLD_BLOB_DIGEST)).returning(|_| {
+    |bs: &mut MockBlobEngine|{bs.expect_open_read().once().with(eq(&*HELLOWORLD_BLOB_DIGEST), eq(Some(HELLOWORLD_BLOB_CONTENTS.len() as u64))).returning(|_,_| {
         Ok(Some(Box::new(Cursor::new(HELLOWORLD_BLOB_CONTENTS))))
     });},
     |ds: &mut MockDirectoryService| {ds.expect_get().never(); ds.expect_get_recursive().never();})]
 #[case::complicated(&*CASTORE_NODE_COMPLICATED, &NAR_CONTENTS_COMPLICATED,
     // the closure only refers to the empty blob, which we don't send requests for.
-    |bs: &mut MockBlobService|{bs.expect_open_read().never();},
-    |ds: &mut MockDirectoryService| {ds.expect_get_recursive().once().with(predicate::eq(DIRECTORY_COMPLICATED.digest())).returning(|_| {
+    |bs: &mut MockBlobEngine|{bs.expect_open_read().never();},
+    |ds: &mut MockDirectoryService| {ds.expect_get_recursive().once().with(eq(DIRECTORY_COMPLICATED.digest())).returning(|_| {
         futures::stream::iter([
             &*DIRECTORY_COMPLICATED, &*DIRECTORY_WITH_KEEP
         ].map(|e| {Ok::<_, directoryservice::Error>(e.to_owned())})).boxed()
@@ -36,16 +37,16 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt};
 async fn read(
     #[case] root_node: &Node,
     #[case] expected_nar: &[u8],
-    #[case] blobservice_fn: impl Fn(&mut MockBlobService),
+    #[case] blobengine_fn: impl Fn(&mut MockBlobEngine),
     #[case] directoryservice_fn: impl Fn(&mut MockDirectoryService),
 ) {
     for case in 0..1 {
         // setup services and reader
-        let mut blob_service = MockBlobService::new();
-        blobservice_fn(&mut blob_service);
+        let mut blob_engine = MockBlobEngine::new();
+        blobengine_fn(&mut blob_engine);
         let mut directory_service = MockDirectoryService::new();
         directoryservice_fn(&mut directory_service);
-        let mut reader = Reader::new(root_node, &blob_service, directory_service)
+        let mut reader = Reader::new(root_node, &blob_engine, directory_service)
             .await
             .expect("constructing reader to succeed");
 
@@ -75,16 +76,19 @@ async fn read(
 #[tokio::test]
 /// Renders a NAR with a root node signalling a size larger than what the blob actually is, ensuring we fail.
 async fn detect_too_big() {
-    let mut blob_service = MockBlobService::new();
-    blob_service
+    let mut blob_engine = MockBlobEngine::new();
+    blob_engine
         .expect_open_read()
         .once()
-        .with(predicate::eq(&*HELLOWORLD_BLOB_DIGEST))
-        .returning(|_| Ok(Some(Box::new(Cursor::new(HELLOWORLD_BLOB_CONTENTS)))));
+        .with(
+            eq(&*HELLOWORLD_BLOB_DIGEST),
+            eq(Some(42 /* CASTORE_NODE_TOO_BIG Node::File.size */)),
+        )
+        .returning(|_, _| Ok(Some(Box::new(Cursor::new(HELLOWORLD_BLOB_CONTENTS)))));
 
     let mut reader = Reader::new(
         &CASTORE_NODE_TOO_BIG,
-        &blob_service,
+        &blob_engine,
         MockDirectoryService::new(),
     )
     .await
@@ -103,16 +107,19 @@ async fn detect_too_big() {
 #[tokio::test]
 /// Renders a NAR with a root node signalling a size smaller than what the blob actually is, ensuring we fail.
 async fn detect_too_small() {
-    let mut blob_service = MockBlobService::new();
-    blob_service
+    let mut blob_engine = MockBlobEngine::new();
+    blob_engine
         .expect_open_read()
         .once()
-        .with(predicate::eq(&*HELLOWORLD_BLOB_DIGEST))
-        .returning(|_| Ok(Some(Box::new(Cursor::new(HELLOWORLD_BLOB_CONTENTS)))));
+        .with(
+            eq(&*HELLOWORLD_BLOB_DIGEST),
+            eq(Some(2 /* CASTORE_NODE_TOO_BIG Node::File.size */)),
+        )
+        .returning(|_, _| Ok(Some(Box::new(Cursor::new(HELLOWORLD_BLOB_CONTENTS)))));
 
     let mut reader = Reader::new(
         &CASTORE_NODE_TOO_SMALL,
-        &blob_service,
+        &blob_engine,
         MockDirectoryService::new(),
     )
     .await
@@ -131,15 +138,15 @@ async fn detect_too_small() {
 #[tokio::test]
 /// Make sure it fails if a referred blob doesn't exist.
 async fn single_file_missing_blob() {
-    let mut blob_service = MockBlobService::new();
-    blob_service
+    let mut blob_engine = MockBlobEngine::new();
+    blob_engine
         .expect_open_read()
         .once()
-        .return_once(|_| Ok(None));
+        .return_once(|_, _| Ok(None));
 
     let mut reader = Reader::new(
         &CASTORE_NODE_HELLOWORLD,
-        &blob_service,
+        &blob_engine,
         MockDirectoryService::new(),
     )
     .await
@@ -153,15 +160,18 @@ async fn single_file_missing_blob() {
 
 #[tokio::test]
 async fn seek() {
-    let mut blob_service = MockBlobService::new();
-    blob_service
+    let mut blob_engine = MockBlobEngine::new();
+    blob_engine
         .expect_open_read()
-        .with(predicate::eq(&*HELLOWORLD_BLOB_DIGEST))
-        .returning(|_| Ok(Some(Box::new(Cursor::new(HELLOWORLD_BLOB_CONTENTS)))));
+        .with(
+            eq(&*HELLOWORLD_BLOB_DIGEST),
+            eq(Some(HELLOWORLD_BLOB_CONTENTS.len() as u64)),
+        )
+        .returning(|_, _| Ok(Some(Box::new(Cursor::new(HELLOWORLD_BLOB_CONTENTS)))));
 
     let mut reader = Reader::new(
         &crate::fixtures::CASTORE_NODE_HELLOWORLD,
-        &blob_service,
+        &blob_engine,
         &MockDirectoryService::new(),
     )
     .await
