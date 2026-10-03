@@ -1,6 +1,6 @@
-use auto_impl::auto_impl;
 use tonic::async_trait;
 
+mod blobservice;
 mod chunking;
 pub use chunking::ChunkingBlobEngine;
 
@@ -9,7 +9,6 @@ use crate::B3Digest;
 /// Trait describing an interface to open blobs for reading and writing.
 #[cfg_attr(any(test, feature = "mocks"), mockall::automock)]
 #[async_trait]
-#[auto_impl(&, &mut, Arc, Box)]
 pub trait BlobEngine: Send + Sync {
     /// Check if the blob with this digest exists.
     async fn has(&self, digest: &B3Digest) -> Result<bool, Error>;
