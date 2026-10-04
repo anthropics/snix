@@ -7,6 +7,7 @@ use std::rc::Rc;
 use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
 use snix_build::buildservice;
+use snix_castore::blob_engine::BlobServiceEngine;
 use snix_eval::{
     ErrorKind, EvalIO, EvalMode, GlobalsMap, SourceCode, Value,
     builtins::impure_builtins,
@@ -36,7 +37,7 @@ pub async fn init_io_handle(args: &Args) -> SnixStoreIO {
 
     let build_service = buildservice::from_addr(
         &args.build_service_addr,
-        blob_service.clone(),
+        BlobServiceEngine(blob_service.clone()),
         directory_service.clone(),
     )
     .await

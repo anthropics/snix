@@ -4,6 +4,7 @@ use snix_build::{
     buildservice,
     proto::{GRPCBuildServiceWrapper, build_service_server::BuildServiceServer},
 };
+use snix_castore::blob_engine::BlobServiceEngine;
 use snix_cli::make_listener;
 use tonic::{self, transport::Server};
 use tracing::info;
@@ -59,9 +60,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let (blob_service, directory_service) =
                 snix_castore::utils::construct_services(castore_service_addrs).await?;
 
-            let build_service =
-                buildservice::from_addr(&build_service_addr, blob_service, directory_service)
-                    .await?;
+            let build_service = buildservice::from_addr(
+                &build_service_addr,
+                BlobServiceEngine(blob_service),
+                directory_service,
+            )
+            .await?;
 
             let listen_address = listen_address
                 .unwrap_or_else(|| "[::]:8000".to_string())

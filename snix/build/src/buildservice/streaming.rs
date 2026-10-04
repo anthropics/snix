@@ -5,8 +5,7 @@ use futures::{
     stream::{BoxStream, FuturesUnordered},
 };
 use snix_castore::{
-    blob_engine::BlobServiceEngine,
-    blobservice::BlobService,
+    blob_engine::BlobEngine,
     directoryservice::DirectoryService,
     import::{IngestionError, fs::ingest_path},
     refscan::{ReferencePattern, ReferenceScanner},
@@ -27,7 +26,7 @@ pub(crate) fn run_build_streaming<'a, BS, DS, R, SpawnFut>(
     spawn: impl FnOnce() -> SpawnFut + Send + 'a,
 ) -> BoxStream<'a, BuildUpdate>
 where
-    BS: BlobService + Clone + 'a,
+    BS: BlobEngine + Clone + 'a,
     DS: DirectoryService + Clone + 'a,
     R: SandboxOutputs + Send + Sync + 'static,
     SpawnFut:
@@ -81,20 +80,20 @@ where
 /// Ingests the given host output path, while running reference scanning.
 /// Returns either a [BuildUpdate::ProducedOutput], or a [BuildFailure]
 #[tracing::instrument(skip_all, err, fields(host.path = ?host_output_path))]
-async fn ingest_host_output<BS, DS>(
+async fn ingest_host_output<BE, DS>(
     idx: usize,
     host_output_path: &std::path::Path,
     scanner: ReferenceScanner<String>,
-    blob_service: BS,
+    blob_engine: BE,
     directory_service: DS,
 ) -> Result<BuildUpdate, IngestionError<snix_castore::import::fs::Error>>
 where
-    BS: BlobService,
+    BE: BlobEngine,
     DS: DirectoryService,
 {
     debug!("ingesting path");
     let node = ingest_path(
-        BlobServiceEngine(&blob_service),
+        &blob_engine,
         &directory_service,
         host_output_path,
         Some(&scanner),

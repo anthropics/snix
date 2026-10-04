@@ -24177,6 +24177,10 @@ rec {
             packageId = "snix-build";
           }
           {
+            name = "snix-castore";
+            packageId = "snix-castore";
+          }
+          {
             name = "snix-eval";
             packageId = "snix-eval";
           }

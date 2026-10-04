@@ -10,6 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 snix-build = { path = "../../build" }
+snix-castore = { path = "../../castore" }
 snix-store = { path = "../../store", default-features = false, features = [] }
 snix-eval = { path = "../../eval" }
 snix-glue = { path = "../../glue" }

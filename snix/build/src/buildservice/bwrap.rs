@@ -2,8 +2,7 @@ use std::path::{Path, PathBuf};
 
 use futures::stream::BoxStream;
 use snix_castore::{
-    blob_engine::BlobServiceEngine, blobservice::BlobService, directoryservice::DirectoryService,
-    fs::fuse::FuseDaemon,
+    blob_engine::BlobEngine, directoryservice::DirectoryService, fs::fuse::FuseDaemon,
 };
 use tracing::{Span, info, instrument};
 use uuid::Uuid;
@@ -16,12 +15,12 @@ use crate::{
 };
 const SANDBOX_SHELL: &str = env!("SNIX_BUILD_SANDBOX_SHELL");
 
-pub struct BubblewrapBuildService<BS, DS> {
+pub struct BubblewrapBuildService<BE, DS> {
     /// Root path in which all builds run
     workdir: PathBuf,
 
-    /// Handle to a [BlobService], used by filesystems spawned during builds.
-    blob_service: BS,
+    /// Handle to a [BlobEngine], used by filesystems spawned during builds.
+    blob_engine: BE,
     /// Handle to a [DirectoryService], used by filesystems spawned during builds.
     directory_service: DS,
 
@@ -30,27 +29,27 @@ pub struct BubblewrapBuildService<BS, DS> {
     concurrent_builds: tokio::sync::Semaphore,
 }
 impl<BS, DS> BubblewrapBuildService<BS, DS> {
-    pub fn new(workdir: PathBuf, blob_service: BS, directory_service: DS) -> Self {
+    pub fn new(workdir: PathBuf, blob_engine: BS, directory_service: DS) -> Self {
         // We map root inside the container to the uid/gid this is running at,
         // and allocate one for uid 1000 into the container from the range we
         // got in /etc/sub{u,g}id.
         // FUTUREWORK: use different uids?
         Self {
             workdir,
-            blob_service,
+            blob_engine,
             directory_service,
             concurrent_builds: tokio::sync::Semaphore::new(2),
         }
     }
 }
 
-impl<BS, DS> BubblewrapBuildService<BS, DS>
+impl<BE, DS> BubblewrapBuildService<BE, DS>
 where
-    BS: BlobService + Clone + 'static,
+    BE: BlobEngine + Clone + 'static,
     DS: DirectoryService + Clone + 'static,
 {
     fn make_spec(&self, request: BuildRequest, sandbox_path: &Path) -> SandboxSpec {
-        let blob_service = self.blob_service.clone();
+        let blob_engine = self.blob_engine.clone();
         let directory_service = self.directory_service.clone();
 
         SandboxSpec::builder()
@@ -63,7 +62,7 @@ where
             .with_inputs(request.inputs_dir, move |path| {
                 let root_nodes = Box::new(request.inputs.clone());
                 let fs = snix_castore::fs::SnixStoreFs::new(
-                    BlobServiceEngine(blob_service.clone()),
+                    blob_engine.clone(),
                     directory_service.clone(),
                     root_nodes,
                     snix_castore::fs::FSSettings {
@@ -91,9 +90,9 @@ where
     }
 }
 
-impl<BS, DS> BuildService for BubblewrapBuildService<BS, DS>
+impl<BE, DS> BuildService for BubblewrapBuildService<BE, DS>
 where
-    BS: BlobService + Clone + 'static,
+    BE: BlobEngine + Clone + 'static,
     DS: DirectoryService + Clone + 'static,
 {
     #[instrument(skip_all, fields(build.name=tracing::field::Empty))]
@@ -110,7 +109,7 @@ where
 
         run_build_streaming(
             &self.concurrent_builds,
-            self.blob_service.clone(),
+            self.blob_engine.clone(),
             self.directory_service.clone(),
             outputs,
             needles,

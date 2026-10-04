@@ -7,8 +7,7 @@ use std::{
 use anyhow::Context;
 use futures::stream::BoxStream;
 use snix_castore::{
-    blob_engine::BlobServiceEngine, blobservice::BlobService, directoryservice::DirectoryService,
-    fs::fuse::FuseDaemon,
+    blob_engine::BlobEngine, directoryservice::DirectoryService, fs::fuse::FuseDaemon,
 };
 use tokio::process::{Child, Command};
 use tracing::{Span, debug, instrument};
@@ -25,12 +24,12 @@ use crate::{
 const SANDBOX_SHELL: &str = env!("SNIX_BUILD_SANDBOX_SHELL");
 const MAX_CONCURRENT_BUILDS: usize = 2; // TODO: make configurable
 
-pub struct OCIBuildService<BS, DS> {
+pub struct OCIBuildService<BE, DS> {
     /// Root path in which all bundles are created in
     bundle_root: PathBuf,
 
-    /// Handle to a [BlobService], used by filesystems spawned during builds.
-    blob_service: BS,
+    /// Handle to a [BlobEngine], used by filesystems spawned during builds.
+    blob_engine: BE,
     /// Handle to a [DirectoryService], used by filesystems spawned during builds.
     directory_service: DS,
 
@@ -39,24 +38,24 @@ pub struct OCIBuildService<BS, DS> {
     concurrent_builds: tokio::sync::Semaphore,
 }
 
-impl<BS, DS> OCIBuildService<BS, DS> {
-    pub fn new(bundle_root: PathBuf, blob_service: BS, directory_service: DS) -> Self {
+impl<BE, DS> OCIBuildService<BE, DS> {
+    pub fn new(bundle_root: PathBuf, blob_engine: BE, directory_service: DS) -> Self {
         // We map root inside the container to the uid/gid this is running at,
         // and allocate one for uid 1000 into the container from the range we
         // got in /etc/sub{u,g}id.
         // FUTUREWORK: use different uids?
         Self {
             bundle_root,
-            blob_service,
+            blob_engine,
             directory_service,
             concurrent_builds: tokio::sync::Semaphore::new(MAX_CONCURRENT_BUILDS),
         }
     }
 }
 
-impl<BS, DS> OCIBuildService<BS, DS>
+impl<BE, DS> OCIBuildService<BE, DS>
 where
-    BS: BlobService + Clone + 'static,
+    BE: BlobEngine + Clone + 'static,
     DS: DirectoryService + Clone + 'static,
 {
     /// Assembles an OCI container environment and prepares its execution
@@ -80,14 +79,14 @@ where
 
         make_bundle(request, &runtime_spec, bundle_path).context("failed to produce bundle")?;
 
-        let blob_service = self.blob_service.clone();
+        let blob_service = self.blob_engine.clone();
         let directory_service = self.directory_service.clone();
         let dest = bundle_path.join("inputs");
         let root_nodes = Box::new(request.inputs.clone());
 
         let fuse_daemon = tokio::task::spawn_blocking(move || {
             let fs = snix_castore::fs::SnixStoreFs::new(
-                BlobServiceEngine(blob_service),
+                blob_service,
                 directory_service,
                 root_nodes,
                 snix_castore::fs::FSSettings {
@@ -112,9 +111,9 @@ where
     }
 }
 
-impl<BS, DS> BuildService for OCIBuildService<BS, DS>
+impl<BE, DS> BuildService for OCIBuildService<BE, DS>
 where
-    BS: BlobService + Clone + 'static,
+    BE: BlobEngine + Clone + 'static,
     DS: DirectoryService + Clone + 'static,
 {
     #[instrument(skip_all, fields(build.name=tracing::field::Empty))]
@@ -126,7 +125,7 @@ where
 
         run_build_streaming(
             &self.concurrent_builds,
-            self.blob_service.clone(),
+            self.blob_engine.clone(),
             self.directory_service.clone(),
             request.outputs.clone(),
             request.refscan_needles.clone(),

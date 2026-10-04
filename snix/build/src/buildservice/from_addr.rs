@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::buildservice::bwrap::BubblewrapBuildService;
 
 use super::{BuildService, DummyBuildService, grpc::GRPCBuildService};
-use snix_castore::{blobservice::BlobService, directoryservice::DirectoryService};
+use snix_castore::{blob_engine::BlobEngine, directoryservice::DirectoryService};
 use url::Url;
 
 #[cfg(target_os = "linux")]
@@ -22,16 +22,16 @@ struct BubblewrapBuildService;
 /// - `grpc+*:` ([GRPCBuildService])
 /// - `bwrap:` ([BubblewrapBuildService])
 ///
-/// As some of these [BuildService] need to talk to a [BlobService] and
+/// As some of these [BuildService] need to talk to a [BlobEngine] and
 /// [DirectoryService], these also need to be passed in.
 #[cfg_attr(target_os = "macos", allow(unused_variables))]
-pub async fn from_addr<BS, DS>(
+pub async fn from_addr<BE, DS>(
     uri: &str,
-    blob_service: BS,
+    blob_engine: BE,
     directory_service: DS,
 ) -> std::io::Result<Arc<dyn BuildService>>
 where
-    BS: BlobService + Send + Sync + Clone + 'static,
+    BE: BlobEngine + Send + Sync + Clone + 'static,
     DS: DirectoryService + Send + Sync + Clone + 'static,
 {
     let url =
@@ -63,7 +63,7 @@ where
 
             Arc::new(OCIBuildService::new(
                 url.path().into(),
-                blob_service,
+                blob_engine,
                 directory_service,
             ))
         }
@@ -80,7 +80,7 @@ where
 
             Arc::new(BubblewrapBuildService::new(
                 url.path().into(),
-                blob_service,
+                blob_engine,
                 directory_service,
             ))
         }
@@ -165,7 +165,7 @@ mod tests {
     )]
     #[tokio::test]
     async fn test_from_addr(#[case] uri_str: &str, #[case] exp_succeed: bool) {
-        let blob_service = snix_castore::utils::gen_test_blob_service();
+        let blob_service = snix_castore::utils::gen_test_blob_engine();
         let directory_service = snix_castore::utils::gen_test_directory_service();
 
         let resp = from_addr(uri_str, blob_service, directory_service).await;
