@@ -260,7 +260,7 @@ mod test {
         DIRECTORY_COMPLICATED, DIRECTORY_WITH_KEEP, EMPTY_BLOB_DIGEST, HELLOWORLD_BLOB_CONTENTS,
         HELLOWORLD_BLOB_DIGEST,
     };
-    use snix_castore::utils::gen_test_blob_service;
+    use snix_castore::utils::gen_test_blob_engine;
 
     #[tokio::test]
     async fn single_symlink() {
@@ -393,7 +393,7 @@ mod test {
         use snix_castore::utils::gen_test_directory_service;
 
         let err = ingest_nar_and_hash(
-            gen_test_blob_service(),
+            gen_test_blob_engine(),
             gen_test_directory_service(),
             &mut Cursor::new(nar_content),
             &ca_hash,
@@ -417,7 +417,7 @@ mod test {
         #[case] nar_content: &[u8],
     ) {
         ingest_nar_and_hash(
-            snix_castore::utils::gen_test_blob_service(),
+            gen_test_blob_engine(),
             snix_castore::utils::gen_test_directory_service(),
             &mut Cursor::new(nar_content),
             &ca_hash,
@@ -435,7 +435,7 @@ mod test {
         #[case] nar_content: &[u8],
     ) {
         let err = ingest_nar_and_hash(
-            snix_castore::utils::gen_test_blob_service(),
+            gen_test_blob_engine(),
             snix_castore::utils::gen_test_directory_service(),
             &mut Cursor::new(nar_content),
             &ca_hash,

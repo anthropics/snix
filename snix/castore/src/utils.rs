@@ -178,3 +178,11 @@ pub fn gen_test_directory_service() -> impl DirectoryService + Clone {
 pub fn gen_test_blob_service() -> impl BlobService + Clone {
     crate::blobservice::MemoryBlobService::new_mock()
 }
+
+/// Returns a new [BlobEngine]. Should only be used for tests.
+///
+/// [BlobEngine]: crate::blob_engine::BlobEngine
+#[cfg(any(test, feature = "mocks"))]
+pub fn gen_test_blob_engine() -> impl crate::blob_engine::BlobEngine + Clone {
+    gen_test_blob_service()
+}

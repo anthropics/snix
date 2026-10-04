@@ -1,15 +1,15 @@
 use crate::Node;
-use crate::blobservice::{self, BlobService};
+use crate::blob_engine::BlobEngine;
 use crate::fixtures::*;
 use crate::import::fs::ingest_path;
-use crate::utils::gen_test_directory_service;
+use crate::utils::{gen_test_blob_engine, gen_test_directory_service};
 
 use tempfile::TempDir;
 
 #[cfg(target_family = "unix")]
 #[tokio::test]
 async fn symlink() {
-    let blob_service = blobservice::from_addr("memory:").await.unwrap();
+    let blob_engine = gen_test_blob_engine();
     let directory_service = gen_test_directory_service();
 
     let tmpdir = TempDir::new().unwrap();
@@ -22,7 +22,7 @@ async fn symlink() {
     .unwrap();
 
     let root_node = ingest_path::<_, _, _, &[u8]>(
-        blob_service,
+        blob_engine,
         directory_service,
         tmpdir.path().join("doesntmatter"),
         None,
@@ -40,7 +40,7 @@ async fn symlink() {
 
 #[tokio::test]
 async fn single_file() {
-    let blob_service = blobservice::from_addr("memory:").await.unwrap();
+    let blob_engine = gen_test_blob_engine();
     let directory_service = gen_test_directory_service();
 
     let tmpdir = TempDir::new().unwrap();
@@ -48,7 +48,7 @@ async fn single_file() {
     std::fs::write(tmpdir.path().join("root"), HELLOWORLD_BLOB_CONTENTS).unwrap();
 
     let root_node = ingest_path::<_, _, _, &[u8]>(
-        blob_service.clone(),
+        blob_engine.clone(),
         directory_service,
         tmpdir.path().join("root"),
         None,
@@ -66,7 +66,7 @@ async fn single_file() {
     );
 
     // ensure the blob has been uploaded
-    assert!(blob_service.has(&HELLOWORLD_BLOB_DIGEST).await.unwrap());
+    assert!(blob_engine.has(&HELLOWORLD_BLOB_DIGEST).await.unwrap());
 }
 
 #[cfg(target_family = "unix")]
@@ -74,7 +74,7 @@ async fn single_file() {
 async fn complicated() {
     use crate::directoryservice::DirectoryService;
 
-    let blob_service = blobservice::from_addr("memory:").await.unwrap();
+    let blob_engine = gen_test_blob_engine();
     let directory_service = gen_test_directory_service();
 
     let tmpdir = TempDir::new().unwrap();
@@ -88,14 +88,10 @@ async fn complicated() {
     // File ``keep/.keep`
     std::fs::write(tmpdir.path().join("keep").join(".keep"), vec![]).unwrap();
 
-    let root_node = ingest_path::<_, _, _, &[u8]>(
-        blob_service.clone(),
-        &directory_service,
-        tmpdir.path(),
-        None,
-    )
-    .await
-    .expect("must succeed");
+    let root_node =
+        ingest_path::<_, _, _, &[u8]>(blob_engine.clone(), &directory_service, tmpdir.path(), None)
+            .await
+            .expect("must succeed");
 
     // ensure root_node matched expectations
     assert_eq!(
@@ -123,5 +119,5 @@ async fn complicated() {
     );
 
     // ensure EMPTY_BLOB_CONTENTS has been uploaded
-    assert!(blob_service.has(&EMPTY_BLOB_DIGEST).await.unwrap());
+    assert!(blob_engine.has(&EMPTY_BLOB_DIGEST).await.unwrap());
 }
