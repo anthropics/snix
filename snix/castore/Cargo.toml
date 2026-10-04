@@ -56,6 +56,7 @@ tonic-prost.workspace = true
 tower = { workspace = true, features = ["util"] }
 tracing.workspace = true
 tracing-indicatif.workspace = true
+typed-builder.workspace = true
 url.workspace = true
 vhost = { workspace = true, optional = true }
 vhost-user-backend = { workspace = true, optional = true }

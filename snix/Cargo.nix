@@ -23466,6 +23466,10 @@ rec {
             packageId = "tracing-indicatif";
           }
           {
+            name = "typed-builder";
+            packageId = "typed-builder";
+          }
+          {
             name = "url";
             packageId = "url";
           }

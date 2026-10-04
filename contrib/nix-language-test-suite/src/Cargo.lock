@@ -4204,6 +4204,7 @@ dependencies = [
  "tower 0.4.13",
  "tracing",
  "tracing-indicatif",
+ "typed-builder",
  "url",
  "walkdir",
  "wu-manber",

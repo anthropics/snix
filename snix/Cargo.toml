@@ -183,6 +183,7 @@ tracing-test = "0.2.5"
 # https://github.com/NixOS/nixpkgs/pull/428369, tracy from nixpkgs can't open more recent traces
 tracing-tracy = "=0.11.4"
 trybuild = "1.0.99"
+typed-builder = "0.22.0"
 url = "2.5.2"
 vhost = "=0.6.1"
 vhost-user-backend = "=0.8.0"

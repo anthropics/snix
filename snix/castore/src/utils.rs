@@ -173,7 +173,7 @@ pub fn gen_test_directory_service() -> impl DirectoryService + Clone {
     crate::directoryservice::RedbDirectoryService::new_temporary("test".to_string())
 }
 
-/// Returns a new [DirectoryService]. Should only be used for tests.
+/// Returns a new [BlobService]. Should only be used for tests.
 #[cfg(any(test, feature = "mocks"))]
 pub fn gen_test_blob_service() -> impl BlobService + Clone {
     crate::blobservice::MemoryBlobService::new_mock()
@@ -184,5 +184,16 @@ pub fn gen_test_blob_service() -> impl BlobService + Clone {
 /// [BlobEngine]: crate::blob_engine::BlobEngine
 #[cfg(any(test, feature = "mocks"))]
 pub fn gen_test_blob_engine() -> impl crate::blob_engine::BlobEngine + Clone {
-    crate::blob_engine::BlobServiceEngine(gen_test_blob_service())
+    use crate::{
+        blob_engine::ChunkingBlobEngine, blobstore::memory::MemoryBlobStore,
+        chunkstore::memory::MemoryChunkStore,
+    };
+    let blob_engine = ChunkingBlobEngine::builder()
+        .blob_store(MemoryBlobStore::default())
+        .chunk_store(MemoryChunkStore::default())
+        // very small on purpose here, for tests.
+        .avg_chunk_size(512)
+        .build();
+
+    Arc::new(blob_engine)
 }

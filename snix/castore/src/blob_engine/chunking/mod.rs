@@ -1,4 +1,5 @@
 use tonic::async_trait;
+use typed_builder::TypedBuilder;
 
 use crate::{
     B3Digest,
@@ -13,11 +14,25 @@ use writer::BlobWriterWrapper;
 /// A BlobEngine that will first query [BlobStore]
 /// to retrieve more granular chunking,
 /// then use the [ChunkStore] to render the blob.
+#[derive(TypedBuilder)]
 pub struct ChunkingBlobEngine<BS, CS> {
+    /// [BlobStore] that's used.
     blob_store: BS,
+
+    /// Used [ChunkStore].
     chunk_store: CS,
+
+    /// How many chunks to fetch in parallel for each reader
+    #[builder(default = 32)]
     fetch_concurrency: usize,
+
+    /// How many chunk writes to do in parallel for each writer
+    #[builder(default = 32)]
     upload_concurrency: usize,
+
+    /// The average chunk size to use when chunking writes.
+    /// Uses half of that as minimum, and double as maximum.
+    #[builder(default=256 * 1024)]
     avg_chunk_size: u32,
 }
 
