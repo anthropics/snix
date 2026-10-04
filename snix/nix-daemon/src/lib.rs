@@ -20,7 +20,9 @@ use nix_compat::{
     nixhash::CAHashMode,
     store_path::{StorePath, build_ca_path},
 };
-use snix_castore::{blobservice::BlobService, directoryservice::DirectoryService};
+use snix_castore::{
+    blob_engine::BlobServiceEngine, blobservice::BlobService, directoryservice::DirectoryService,
+};
 use snix_store::{nar::ingest_nar_and_hash, path_info::PathInfo, pathinfoservice::PathInfoService};
 use tokio::io::BufReader;
 use tracing::{instrument, warn};
@@ -92,7 +94,7 @@ impl NixDaemonIO for SnixDaemon {
         R: tokio::io::AsyncRead + Send + Unpin,
     {
         let (root_node, nar_sha256, nar_size) = ingest_nar_and_hash(
-            self.blob_service.clone(),
+            BlobServiceEngine(self.blob_service.clone()),
             &self.directory_service,
             reader,
             &info.info.ca,

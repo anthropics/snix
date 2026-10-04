@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use snix_castore::blob_engine::BlobServiceEngine;
 use snix_castore::directoryservice;
 use snix_castore::import::{archive::ingest_archive, fs::ingest_path};
 use snix_castore::proto::blob_service_server::BlobServiceServer;
@@ -175,11 +176,21 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
             let metadata = fs::metadata(&input).await?;
             let node = if metadata.is_dir() {
-                ingest_path::<_, _, _, &[u8]>(&blob_service, &directory_service, &input, None)
-                    .await?
+                ingest_path::<_, _, _, &[u8]>(
+                    BlobServiceEngine(&blob_service),
+                    &directory_service,
+                    &input,
+                    None,
+                )
+                .await?
             } else {
                 let mut file = File::open(&input).await?;
-                ingest_archive(blob_service.clone(), &directory_service, &mut file).await?
+                ingest_archive(
+                    BlobServiceEngine(blob_service.clone()),
+                    &directory_service,
+                    &mut file,
+                )
+                .await?
             };
             let digest = match node {
                 Node::Directory { digest, .. } => digest,

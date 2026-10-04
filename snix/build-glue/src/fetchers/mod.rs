@@ -4,7 +4,10 @@ use nix_compat::{
     nixhash::{CAHash, CAHashMode, HashAlgo, NixHash, NixHashDigester, copy_buf_hashed},
     store_path::{ParseStorePathError, StorePathRef, build_ca_path},
 };
-use snix_castore::{Node, blobservice::BlobService, directoryservice::DirectoryService};
+use snix_castore::{
+    Node, blob_engine::BlobServiceEngine, blobservice::BlobService,
+    directoryservice::DirectoryService,
+};
 use snix_store::{
     decompression::DecompressedReader,
     nar::{NarCalculationService, NarIngestionError},
@@ -387,7 +390,7 @@ where
 
                 // Ingest the archive, get the root node.
                 let node = snix_castore::import::archive::ingest_archive(
-                    self.blob_service.clone(),
+                    BlobServiceEngine(self.blob_service.clone()),
                     self.directory_service.clone(),
                     r,
                 )
@@ -435,7 +438,7 @@ where
                 // Ingest the NAR, get the root node.
                 let (root_node, _actual_nar_sha256, actual_nar_size) =
                     snix_store::nar::ingest_nar_and_hash(
-                        self.blob_service.clone(),
+                        BlobServiceEngine(self.blob_service.clone()),
                         self.directory_service.clone(),
                         &mut r,
                         &Some(CAHash::Nar(exp_hash.clone())),

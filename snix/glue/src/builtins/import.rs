@@ -2,6 +2,7 @@
 
 use crate::snix_store_io::SnixStoreIO;
 use snix_castore::Node;
+use snix_castore::blob_engine::BlobServiceEngine;
 use snix_castore::import::ingest_entries;
 use snix_eval::{
     ErrorKind, EvalIO, Value,
@@ -90,7 +91,7 @@ async fn filtered_ingest(
 
     state.tokio_handle.block_on(async {
         let entries = snix_castore::import::fs::dir_entries_to_ingestion_stream::<'_, _, _, &[u8]>(
-            &state.build_state.blob_service,
+            BlobServiceEngine(&state.build_state.blob_service),
             dir_entries,
             path,
             None, // TODO re-scan

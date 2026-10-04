@@ -6,6 +6,7 @@ use futures::TryStreamExt;
 use nix_compat::nixhash::{CAHash, NixHash};
 use nix_compat::store_path;
 use nix_compat::wire::de::Error;
+use snix_castore::blob_engine::BlobServiceEngine;
 use snix_castore::directoryservice;
 use snix_castore::import::fs::ingest_path;
 use snix_cli::shutdown_signal;
@@ -390,7 +391,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
                         // Ingest the contents at the given path into castore.
                         let root_node = ingest_path::<_, _, _, &[u8]>(
-                            blob_service,
+                            BlobServiceEngine(blob_service),
                             directory_service,
                             &path,
                             None,
@@ -468,7 +469,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             // Ingest each NAR concurrently, producing the formatted output line.
             let mut imports = futures::stream::iter(paths)
                 .map(|path| {
-                    let blob_service = blob_service.clone();
+                    let blob_service = BlobServiceEngine(blob_service.clone());
                     let directory_service = &directory_service;
                     async move {
                         let reader = snix_cli::reader_for_path(path).await?;

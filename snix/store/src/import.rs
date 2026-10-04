@@ -1,5 +1,6 @@
 use snix_castore::{
-    blobservice::BlobService, directoryservice::DirectoryService, import::fs::ingest_path,
+    blob_engine::BlobServiceEngine, blobservice::BlobService, directoryservice::DirectoryService,
+    import::fs::ingest_path,
 };
 use tracing::instrument;
 
@@ -49,9 +50,14 @@ where
     NS: NarCalculationService,
 {
     // Ingest the contents at the given path `path` into castore.
-    let root_node = ingest_path::<_, _, _, &[u8]>(blob_service, directory_service, path, None)
-        .await
-        .map_err(std::io::Error::other)?;
+    let root_node = ingest_path::<_, _, _, &[u8]>(
+        BlobServiceEngine(blob_service),
+        directory_service,
+        path,
+        None,
+    )
+    .await
+    .map_err(std::io::Error::other)?;
 
     // Ask for the NAR size and sha256
     let (nar_size, nar_sha256) = nar_calculation_service

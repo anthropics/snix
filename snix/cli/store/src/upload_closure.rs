@@ -4,6 +4,7 @@ use futures::{FutureExt, StreamExt, TryStreamExt, future::ready};
 use futures_dag::FuturesDag;
 use nix_compat::store_path::StorePath;
 use snix_castore::{
+    blob_engine::BlobServiceEngine,
     blobservice::BlobService,
     directoryservice::DirectoryService,
     import::{IngestionError, fs},
@@ -195,7 +196,7 @@ where
     } = metadata;
 
     let node = snix_castore::import::fs::ingest_path::<_, _, _, &[u8]>(
-        &blob_service,
+        BlobServiceEngine(&blob_service),
         &directory_service,
         store_path.to_absolute_path(),
         None,

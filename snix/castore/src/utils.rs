@@ -184,5 +184,5 @@ pub fn gen_test_blob_service() -> impl BlobService + Clone {
 /// [BlobEngine]: crate::blob_engine::BlobEngine
 #[cfg(any(test, feature = "mocks"))]
 pub fn gen_test_blob_engine() -> impl crate::blob_engine::BlobEngine + Clone {
-    gen_test_blob_service()
+    crate::blob_engine::BlobServiceEngine(gen_test_blob_service())
 }

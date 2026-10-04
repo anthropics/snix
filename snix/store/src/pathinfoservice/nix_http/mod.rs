@@ -11,6 +11,7 @@ use nix_compat::{
 };
 use reqwest::StatusCode;
 use snix_castore::{
+    blob_engine::BlobServiceEngine,
     blobservice::{self, BlobService},
     directoryservice::{self, DirectoryService},
     proto::{
@@ -333,7 +334,7 @@ where
             };
 
             let (root_node, nar_hash, nar_size) = ingest_nar_and_hash(
-                self.blob_service.clone(),
+                BlobServiceEngine(self.blob_service.clone()),
                 &self.directory_service,
                 &mut r,
                 &narinfo.ca,

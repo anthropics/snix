@@ -7,6 +7,7 @@ use bstr::ByteSlice;
 use futures::TryStreamExt;
 use nix_compat::{nix_http, nixbase32};
 use serde::Deserialize;
+use snix_castore::blob_engine::BlobServiceEngine;
 use snix_castore::proto::parse_urlsafe_proto;
 use snix_store::nar::ingest_nar_and_hash;
 use std::io;
@@ -155,7 +156,7 @@ pub async fn put(
 
     // ingest the NAR
     let (root_node, nar_hash_actual, nar_size) = ingest_nar_and_hash(
-        blob_service.clone(),
+        BlobServiceEngine(blob_service.clone()),
         directory_service.clone(),
         &mut r,
         &None,

@@ -254,6 +254,7 @@ mod test {
     use nix_compat::nixhash::{CAHash, NixHash};
     use rstest::*;
     use snix_castore::Node;
+    use snix_castore::blob_engine::BlobServiceEngine;
     use snix_castore::blobservice::{MockBlobService, TestBlobWriter};
     use snix_castore::directoryservice::{MockDirectoryPutter, MockDirectoryService};
     use snix_castore::fixtures::{
@@ -265,7 +266,7 @@ mod test {
     #[tokio::test]
     async fn single_symlink() {
         let root_node = ingest_nar(
-            Arc::new(MockBlobService::new()),
+            BlobServiceEngine(Arc::new(MockBlobService::new())),
             MockDirectoryService::new(),
             &mut Cursor::new(&NAR_CONTENTS_SYMLINK),
         )
@@ -298,7 +299,7 @@ mod test {
             .in_sequence(&mut seq);
 
         let root_node = ingest_nar(
-            Arc::new(blob_service),
+            BlobServiceEngine(Arc::new(blob_service)),
             MockDirectoryService::new(),
             &mut Cursor::new(&NAR_CONTENTS_HELLOWORLD),
         )
@@ -364,7 +365,7 @@ mod test {
             });
 
         let root_node = ingest_nar(
-            Arc::new(blob_service),
+            BlobServiceEngine(Arc::new(blob_service)),
             directory_service,
             &mut Cursor::new(&NAR_CONTENTS_COMPLICATED),
         )

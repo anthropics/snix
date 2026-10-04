@@ -5,6 +5,7 @@ use futures::{
     stream::{BoxStream, FuturesUnordered},
 };
 use snix_castore::{
+    blob_engine::BlobServiceEngine,
     blobservice::BlobService,
     directoryservice::DirectoryService,
     import::{IngestionError, fs::ingest_path},
@@ -93,7 +94,7 @@ where
 {
     debug!("ingesting path");
     let node = ingest_path(
-        &blob_service,
+        BlobServiceEngine(&blob_service),
         &directory_service,
         host_output_path,
         Some(&scanner),
