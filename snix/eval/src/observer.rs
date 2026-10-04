@@ -90,9 +90,8 @@ impl RuntimeObserver for NoOpObserver {}
 
 /// Compiler observer that is optimised for the case where no observer is being used.
 ///
-/// The trait RuntimeObserver is implemented on the Optional<dyn
-/// RuntimeObserver>. This removes the dynamic dispatch overhead when
-/// no observer is being used.
+/// The trait [CompilerObserver] is implemented on `Option<dyn CompilerObserver>`.
+/// This removes the dynamic dispatch overhead when no observer is being used.
 #[derive(Default)]
 pub struct OptionalCompilerObserver<'o>(pub Option<&'o mut dyn CompilerObserver>);
 impl<'o> CompilerObserver for OptionalCompilerObserver<'o> {
@@ -129,9 +128,8 @@ impl<'o> From<Option<&'o mut dyn CompilerObserver>> for OptionalCompilerObserver
 
 /// Runtime observer that is optimised for the case where no observer is being used.
 ///
-/// The trait RuntimeObserver is implemented on the Optional<dyn
-/// RuntimeObserver>. This removes the dynamic dispatch overhead when
-/// no observer is being used.
+/// The trait [RuntimeObserver] is implemented on `Option<dyn RuntimeObserver>`.
+/// This removes the dynamic dispatch overhead when no observer is being used.
 pub struct OptionalRuntimeObserver<'o>(pub Option<&'o mut dyn RuntimeObserver>);
 
 impl<'o> From<&'o mut dyn RuntimeObserver> for OptionalRuntimeObserver<'o> {
