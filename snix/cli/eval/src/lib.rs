@@ -1,8 +1,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use std::fmt::Write;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::{fmt::Write, sync::Arc};
 
 use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
@@ -35,16 +35,18 @@ pub async fn init_io_handle(args: &Args) -> SnixStoreIO {
             .await
             .expect("unable to setup {blob|directory|pathinfo}service before interpreter setup");
 
+    let blob_engine = Arc::new(BlobServiceEngine(blob_service));
+
     let build_service = buildservice::from_addr(
         &args.build_service_addr,
-        BlobServiceEngine(blob_service.clone()),
+        blob_engine.clone(),
         directory_service.clone(),
     )
     .await
     .expect("unable to setup buildservice before interpreter setup");
 
     SnixStoreIO::new(
-        blob_service,
+        blob_engine.clone(),
         directory_service,
         path_info_service,
         nar_calculation_service,

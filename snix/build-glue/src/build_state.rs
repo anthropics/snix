@@ -7,7 +7,7 @@ use nix_compat::{
 };
 use snix_build::buildservice::{BuildService, BuildUpdate};
 use snix_castore::{
-    blobservice::BlobService,
+    blob_engine::BlobEngine,
     directoryservice::{DirectoryService, traversal::descend_to},
 };
 use snix_store::{
@@ -21,7 +21,7 @@ use crate::{builder, fetchers::Fetcher, known_paths::KnownPaths};
 
 pub struct BuildState {
     // This is public so helper functions can interact with the stores directly.
-    pub blob_service: Arc<dyn BlobService>,
+    pub blob_engine: Arc<dyn BlobEngine>,
     pub directory_service: Arc<dyn DirectoryService>,
     pub path_info_service: Arc<dyn PathInfoService>,
     pub nar_calculation_service: Arc<dyn NarCalculationService>,
@@ -30,7 +30,7 @@ pub struct BuildState {
 
     #[allow(clippy::type_complexity)]
     pub fetcher: Fetcher<
-        Arc<dyn BlobService>,
+        Arc<dyn BlobEngine>,
         Arc<dyn DirectoryService>,
         Arc<dyn PathInfoService>,
         Arc<dyn NarCalculationService>,
@@ -42,7 +42,7 @@ pub struct BuildState {
 
 impl BuildState {
     pub fn new(
-        blob_service: Arc<dyn BlobService>,
+        blob_engine: Arc<dyn BlobEngine>,
         directory_service: Arc<dyn DirectoryService>,
         path_info_service: Arc<dyn PathInfoService>,
         nar_calculation_service: Arc<dyn NarCalculationService>,
@@ -50,13 +50,13 @@ impl BuildState {
         hashed_mirrors: Vec<Url>,
     ) -> Self {
         Self {
-            blob_service: blob_service.clone(),
+            blob_engine: blob_engine.clone(),
             directory_service: directory_service.clone(),
             path_info_service: path_info_service.clone(),
             nar_calculation_service: nar_calculation_service.clone(),
             build_service,
             fetcher: Fetcher::new(
-                blob_service,
+                blob_engine,
                 directory_service,
                 path_info_service,
                 nar_calculation_service,

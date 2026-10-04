@@ -1,4 +1,5 @@
 use pretty_assertions::{assert_eq, assert_ne};
+use snix_castore::blob_engine::BlobServiceEngine;
 use snix_eval::builtins::impure_builtins;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -65,8 +66,10 @@ fn build_eval(
             })
             .unwrap();
 
+    let blob_engine = BlobServiceEngine(blob_service);
+
     let snix_store_io = Rc::new(SnixStoreIO::new(
-        blob_service,
+        Arc::new(blob_engine),
         directory_service,
         path_info_service,
         nar_calculation_service,

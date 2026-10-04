@@ -1,6 +1,6 @@
 use nix_compat::nixhash::NixHash;
 use nix_compat::store_path;
-use snix_castore::import;
+use snix_castore::{blob_engine, import};
 use url::Url;
 
 #[derive(Debug, thiserror::Error)]
@@ -19,6 +19,9 @@ pub enum FetcherError {
 
     #[error(transparent)]
     Io(#[from] std::io::Error),
+
+    #[error(transparent)]
+    BlobEngine(#[from] blob_engine::Error),
 
     #[error(transparent)]
     Import(Box<snix_castore::import::IngestionError<import::archive::Error>>),

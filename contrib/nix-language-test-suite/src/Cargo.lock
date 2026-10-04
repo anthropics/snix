@@ -2770,6 +2770,7 @@ dependencies = [
  "rstest",
  "serde",
  "snix-build",
+ "snix-castore",
  "snix-eval",
  "snix-glue",
  "snix-store",

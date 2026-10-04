@@ -14,14 +14,11 @@ use tokio_util::io::SyncIoBridge;
 use tracing::{Level, error, instrument};
 use url::Url;
 
-use snix_castore::{
-    Node, blob_engine::BlobServiceEngine, blobservice::BlobService,
-    directoryservice::DirectoryService,
-};
+use snix_castore::{Node, blob_engine::BlobEngine, directoryservice::DirectoryService};
 use snix_store::pathinfoservice::{PathInfo, PathInfoService};
 
 /// Implements [EvalIO], asking given [PathInfoService], [DirectoryService]
-/// and [BlobService].
+/// and [BlobEngine].
 ///
 /// In case the given path does not exist in these stores, we ask StdIO.
 /// This is to both cover cases of syntactically valid store paths, that exist
@@ -44,7 +41,7 @@ pub struct SnixStoreIO {
 
 impl SnixStoreIO {
     pub fn new(
-        blob_service: Arc<dyn BlobService>,
+        blob_engine: Arc<dyn BlobEngine>,
         directory_service: Arc<dyn DirectoryService>,
         path_info_service: Arc<dyn PathInfoService>,
         nar_calculation_service: Arc<dyn NarCalculationService>,
@@ -54,7 +51,7 @@ impl SnixStoreIO {
     ) -> Self {
         Self {
             build_state: BuildState::new(
-                blob_service,
+                blob_engine,
                 directory_service,
                 path_info_service,
                 nar_calculation_service,
@@ -156,30 +153,59 @@ impl EvalIO for SnixStoreIO {
                                 format!("tried to open directory at {path:?}"),
                             ))
                         }
-                        Node::File { digest, .. } => {
-                            let resp = self
-                                .build_state
-                                .blob_service
-                                .as_ref()
-                                .open_read(&digest)
-                                .await?;
-                            match resp {
-                                Some(blob_reader) => {
-                                    // The VM Response needs a sync [std::io::Reader].
-                                    Ok(Box::new(SyncIoBridge::new(blob_reader))
-                                        as Box<dyn io::Read>)
+                        Node::File { digest, size, .. } => {
+                            // We need to return a io::Read with static lifetime.
+                            // Clone the `Arc<dyn BlobEngine>`, move it into a separate task writing to a [tokio::io::simplex],
+                            // and return the read half wrapped via [SyncIOBridge].
+                            // We also need a oneshot channel to send back the status of the [BlobEngine::open_read]
+                            // before constructing the [SyncIOBridge].
+                            let blob_engine = self.build_state.blob_engine.clone();
+                            let (reader, mut writer) = tokio::io::simplex(64 * 1024);
+                            let (open_tx, open_rx) = tokio::sync::oneshot::channel();
+                            self.tokio_handle.spawn(async move {
+                                match blob_engine.open_read(&digest, Some(size)).await {
+                                    Ok(Some(mut blob_reader)) => {
+                                        if open_tx.send(Ok(true)).is_err() {
+                                            return;
+                                        }
+                                        if let Err(err) =
+                                            tokio::io::copy(&mut *blob_reader, &mut writer).await
+                                        {
+                                            error!(%err, "error streaming blob to writer");
+                                        }
+                                    }
+                                    Ok(None) => {
+                                        let _ = open_tx.send(Ok(false));
+                                    }
+                                    Err(err) => {
+                                        let _ = open_tx.send(Err(err));
+                                    }
                                 }
-                                None => {
+                            });
+                            let blob_found = open_rx
+                                .await
+                                .map_err(|err| {
+                                    io::Error::other(format!("blob open task went away: {err}"))
+                                })?
+                                .map_err(|err| {
+                                    io::Error::other(format!("error calling open_read: {err}"))
+                                })?;
+
+                            blob_found
+                                .then(|| {
+                                    // The VM Response needs a sync [std::io::Reader].
+                                    Box::new(SyncIoBridge::new(reader)) as Box<dyn io::Read>
+                                })
+                                .ok_or_else(|| {
                                     error!(
                                         blob.digest = %digest,
                                         "blob not found",
                                     );
-                                    Err(io::Error::new(
+                                    io::Error::new(
                                         io::ErrorKind::NotFound,
                                         format!("blob {} not found", digest),
-                                    ))
-                                }
-                            }
+                                    )
+                                })
                         }
                         Node::Symlink { .. } => Err(io::Error::new(
                             io::ErrorKind::Unsupported,
@@ -283,7 +309,7 @@ impl EvalIO for SnixStoreIO {
                 path,
                 nix_compat::store_path::validate_name_from_os_str(file_name)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
-                BlobServiceEngine(&self.build_state.blob_service),
+                &self.build_state.blob_engine,
                 &self.build_state.directory_service,
                 &self.build_state.path_info_service,
                 &self.build_state.nar_calculation_service,
@@ -311,6 +337,7 @@ mod tests {
     use bstr::ByteSlice;
     use clap::Parser;
     use snix_build::buildservice::DummyBuildService;
+    use snix_castore::blob_engine::BlobServiceEngine;
     use snix_eval::{EvalIO, EvaluationResult};
     use snix_store::utils::{ServiceUrlsMemory, construct_services};
     use tempfile::TempDir;
@@ -332,7 +359,7 @@ mod tests {
                 .unwrap();
 
         let io = Rc::new(SnixStoreIO::new(
-            blob_service,
+            Arc::new(BlobServiceEngine(blob_service)),
             directory_service,
             path_info_service,
             nar_calculation_service,

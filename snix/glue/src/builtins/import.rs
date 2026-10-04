@@ -2,7 +2,6 @@
 
 use crate::snix_store_io::SnixStoreIO;
 use snix_castore::Node;
-use snix_castore::blob_engine::BlobServiceEngine;
 use snix_castore::import::ingest_entries;
 use snix_eval::{
     ErrorKind, EvalIO, Value,
@@ -91,7 +90,7 @@ async fn filtered_ingest(
 
     state.tokio_handle.block_on(async {
         let entries = snix_castore::import::fs::dir_entries_to_ingestion_stream::<'_, _, _, &[u8]>(
-            BlobServiceEngine(&state.build_state.blob_service),
+            &state.build_state.blob_engine,
             dir_entries,
             path,
             None, // TODO re-scan
@@ -117,7 +116,7 @@ mod import_builtins {
         StorePath, StorePathRef, build_ca_path, build_text_path_from_content_digest,
     };
     use sha2::Digest;
-    use snix_castore::blobservice::BlobService;
+    use snix_castore::blob_engine::BlobEngine;
     use snix_eval::builtins::coerce_value_to_path;
     use snix_eval::generators::Gen;
     use snix_eval::{AddContext, FileType, NixContext, NixContextElement, NixString};
@@ -128,13 +127,13 @@ mod import_builtins {
     use tokio::io::AsyncWriteExt;
 
     /// Helper function dealing with uploading something from a std::io::Read to
-    /// the passed [BlobService], returning the B3Digest and size.
+    /// the passed [BlobEngine], returning the B3Digest and size.
     /// This function is sync (and uses the tokio handle to block).
     /// A sync closure getting a copy of all bytes read can be passed in,
     /// allowing to do other hashing where needed.
-    fn copy_to_blobservice<F>(
+    fn copy_to_blob_engine<F>(
         tokio_handle: tokio::runtime::Handle,
-        blob_service: impl BlobService,
+        blob_engine: impl BlobEngine,
         mut r: impl std::io::Read,
         mut inspect_f: F,
     ) -> std::io::Result<(snix_castore::B3Digest, u64)>
@@ -143,7 +142,7 @@ mod import_builtins {
     {
         let mut blob_size = 0;
 
-        let mut blob_writer = tokio_handle.block_on(async { blob_service.open_write().await });
+        let mut blob_writer = tokio_handle.block_on(async { blob_engine.open_write().await });
 
         // read piece by piece and write to blob_writer.
         // This is a bit manual due to EvalIO being sync, while the blob writer being async.
@@ -214,16 +213,16 @@ mod import_builtins {
         // and optionally the sha256 a flat file.
         let (root_node, ca) = match std::fs::metadata(&path)?.file_type().into() {
             // Check if the path points to a regular file.
-            // If it does, the filter function is never executed, and we copy to the blobservice directly.
+            // If it does, the filter function is never executed, and we copy to the blob engine directly.
             // If recursive is false, we need to calculate the sha256 digest of the raw contents,
             // as that affects the output path calculation.
             FileType::Regular => {
                 let mut file = state.open(&path)?;
                 let mut h = (!recursive_ingestion).then(sha2::Sha256::new);
 
-                let (blob_digest, blob_size) = copy_to_blobservice(
+                let (blob_digest, blob_size) = copy_to_blob_engine(
                     state.tokio_handle.clone(),
-                    &state.build_state.blob_service,
+                    &state.build_state.blob_engine,
                     &mut file,
                     |data| {
                         // update blob_sha256 if needed.
@@ -491,11 +490,11 @@ mod import_builtins {
             return Err(ErrorKind::UnexpectedContext);
         }
 
-        // upload contents to the blobservice and create a root node
+        // upload contents to the blob engine and create a root node
         let mut h = sha2::Sha256::new();
-        let (blob_digest, blob_size) = copy_to_blobservice(
+        let (blob_digest, blob_size) = copy_to_blob_engine(
             state.tokio_handle.clone(),
-            &state.build_state.blob_service,
+            &state.build_state.blob_engine,
             std::io::Cursor::new(&content),
             |data| h.update(data),
         )?;

@@ -69,6 +69,7 @@ mod tests {
     use nix_compat::store_path::hash_placeholder;
     use rstest::rstest;
     use snix_build::buildservice::DummyBuildService;
+    use snix_castore::blob_engine::BlobServiceEngine;
     use snix_eval::{EvalIO, EvaluationResult};
     use snix_store::utils::{ServiceUrlsMemory, construct_services};
 
@@ -85,7 +86,7 @@ mod tests {
             .expect("Failed to construct store services in memory");
 
         let io = Rc::new(SnixStoreIO::new(
-            blob_service,
+            Arc::new(BlobServiceEngine(blob_service)),
             directory_service,
             path_info_service,
             nar_calculation_service,

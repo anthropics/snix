@@ -4,10 +4,7 @@ use nix_compat::{
     nixhash::{CAHash, CAHashMode, HashAlgo, NixHash, NixHashDigester, copy_buf_hashed},
     store_path::{ParseStorePathError, StorePathRef, build_ca_path},
 };
-use snix_castore::{
-    Node, blob_engine::BlobServiceEngine, blobservice::BlobService,
-    directoryservice::DirectoryService,
-};
+use snix_castore::{Node, blob_engine::BlobEngine, directoryservice::DirectoryService};
 use snix_store::{
     decompression::DecompressedReader,
     nar::{NarCalculationService, NarIngestionError},
@@ -177,18 +174,18 @@ impl Fetch {
 }
 
 /// Knows how to fetch a given [Fetch].
-pub struct Fetcher<BS, DS, PS, NS> {
+pub struct Fetcher<BE, DS, PS, NS> {
     http_client: reqwest::Client,
-    blob_service: BS,
+    blob_engine: BE,
     directory_service: DS,
     path_info_service: PS,
     nar_calculation_service: NS,
     hashed_mirrors: Vec<Url>,
 }
 
-impl<BS, DS, PS, NS> Fetcher<BS, DS, PS, NS> {
+impl<BE, DS, PS, NS> Fetcher<BE, DS, PS, NS> {
     pub fn new(
-        blob_service: BS,
+        blob_engine: BE,
         directory_service: DS,
         path_info_service: PS,
         nar_calculation_service: NS,
@@ -199,7 +196,7 @@ impl<BS, DS, PS, NS> Fetcher<BS, DS, PS, NS> {
                 .user_agent(crate::USER_AGENT)
                 .build()
                 .expect("Client::new()"),
-            blob_service,
+            blob_engine,
             directory_service,
             path_info_service,
             nar_calculation_service,
@@ -330,9 +327,9 @@ impl<BS, DS, PS, NS> Fetcher<BS, DS, PS, NS> {
     }
 }
 
-impl<BS, DS, PS, NS> Fetcher<BS, DS, PS, NS>
+impl<BE, DS, PS, NS> Fetcher<BE, DS, PS, NS>
 where
-    BS: BlobService + Clone + 'static,
+    BE: BlobEngine + Clone + 'static,
     DS: DirectoryService + Clone,
     PS: PathInfoService,
     NS: NarCalculationService,
@@ -347,8 +344,8 @@ where
                 // Construct a AsyncRead reading from the data as its downloaded.
                 let mut r = self.download(url.clone(), exp_hash.as_ref()).await?;
 
-                // Construct a AsyncWrite to write into the BlobService.
-                let mut blob_writer = self.blob_service.open_write().await;
+                // Construct a AsyncWrite to write into the [BlobEngine].
+                let mut blob_writer = self.blob_engine.open_write().await;
 
                 // Copy the contents from the download reader to the blob writer.
                 // Calculate the digest of the file received, depending on the
@@ -390,7 +387,7 @@ where
 
                 // Ingest the archive, get the root node.
                 let node = snix_castore::import::archive::ingest_archive(
-                    BlobServiceEngine(self.blob_service.clone()),
+                    self.blob_engine.clone(),
                     self.directory_service.clone(),
                     r,
                 )
@@ -438,7 +435,7 @@ where
                 // Ingest the NAR, get the root node.
                 let (root_node, _actual_nar_sha256, actual_nar_size) =
                     snix_store::nar::ingest_nar_and_hash(
-                        BlobServiceEngine(self.blob_service.clone()),
+                        self.blob_engine.clone(),
                         self.directory_service.clone(),
                         &mut r,
                         &Some(CAHash::Nar(exp_hash.clone())),
@@ -464,8 +461,8 @@ where
                 // Construct a AsyncRead reading from the data as its downloaded.
                 let mut r = self.download(url.clone(), Some(&exp_hash)).await?;
 
-                // Construct a AsyncWrite to write into the BlobService.
-                let mut blob_writer = self.blob_service.open_write().await;
+                // Construct a AsyncWrite to write into the [BlobEngine].
+                let mut blob_writer = self.blob_engine.open_write().await;
 
                 // Copy the contents from the download reader to the blob writer.
                 let file_size = tokio::io::copy(&mut r, &mut blob_writer).await?;
@@ -488,8 +485,8 @@ where
                     let node = nix_compat::nar::writer::r#async::open(&mut w).await?;
 
                     let blob_reader = self
-                        .blob_service
-                        .open_read(&blob_digest)
+                        .blob_engine
+                        .open_read(&blob_digest, Some(file_size))
                         .await?
                         .expect("Snix bug: just-uploaded blob not found");
 

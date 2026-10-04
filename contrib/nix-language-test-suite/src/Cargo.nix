@@ -11657,6 +11657,10 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "snix-castore";
+            packageId = "snix-castore";
+          }
+          {
             name = "snix-eval";
             packageId = "snix-eval";
           }
