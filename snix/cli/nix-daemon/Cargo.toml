@@ -13,6 +13,7 @@ clap = { workspace = true, features = ["derive", "env"] }
 mimalloc.workspace = true
 nix-compat.path = "../../nix-compat"
 nix-daemon.path = "../../nix-daemon"
+snix-castore.path = "../../castore"
 snix-cli = { path = "../base", features = ["listener"] }
 snix-store.path = "../../store"
 snix-tracing = { path = "../../tracing", features = ["clap", "otlp"] }

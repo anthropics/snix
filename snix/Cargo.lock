@@ -5479,6 +5479,7 @@ dependencies = [
  "mimalloc",
  "nix-compat",
  "nix-daemon",
+ "snix-castore",
  "snix-cli",
  "snix-store",
  "snix-tracing",

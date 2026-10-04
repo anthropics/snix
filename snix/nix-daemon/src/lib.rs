@@ -20,9 +20,7 @@ use nix_compat::{
     nixhash::CAHashMode,
     store_path::{StorePath, build_ca_path},
 };
-use snix_castore::{
-    blob_engine::BlobServiceEngine, blobservice::BlobService, directoryservice::DirectoryService,
-};
+use snix_castore::{blob_engine::BlobEngine, directoryservice::DirectoryService};
 use snix_store::{nar::ingest_nar_and_hash, path_info::PathInfo, pathinfoservice::PathInfoService};
 use tokio::io::BufReader;
 use tracing::{instrument, warn};
@@ -31,19 +29,19 @@ const NAR_BUF_SIZE: usize = 8 * 1024;
 
 #[allow(dead_code)]
 pub struct SnixDaemon {
-    blob_service: Arc<dyn BlobService>,
+    blob_engine: Arc<dyn BlobEngine>,
     directory_service: Arc<dyn DirectoryService>,
     path_info_service: Arc<dyn PathInfoService>,
 }
 
 impl SnixDaemon {
     pub fn new(
-        blob_service: Arc<dyn BlobService>,
+        blob_engine: Arc<dyn BlobEngine>,
         directory_service: Arc<dyn DirectoryService>,
         path_info_service: Arc<dyn PathInfoService>,
     ) -> Self {
         Self {
-            blob_service,
+            blob_engine,
             directory_service,
             path_info_service,
         }
@@ -94,7 +92,7 @@ impl NixDaemonIO for SnixDaemon {
         R: tokio::io::AsyncRead + Send + Unpin,
     {
         let (root_node, nar_sha256, nar_size) = ingest_nar_and_hash(
-            BlobServiceEngine(self.blob_service.clone()),
+            self.blob_engine.clone(),
             &self.directory_service,
             reader,
             &info.info.ca,
@@ -158,18 +156,15 @@ impl NixDaemonIO for SnixDaemon {
 
         let (r, w) = tokio::io::simplex(NAR_BUF_SIZE);
         let r = BufReader::new(r);
-        let blob_service = self.blob_service.clone();
+        let blob_engine = self.blob_engine.clone();
         let directory_service = self.directory_service.clone();
 
         // spawn a task rendering the NAR to the client.
+        // We can't use [snix_store::nar::Reader] directly, as our boxed reader needs to currently have 'static lifetimes.
         tokio::spawn(async move {
-            if let Err(e) = snix_store::nar::write_nar(
-                w,
-                &path_info.node,
-                &BlobServiceEngine(blob_service),
-                &directory_service,
-            )
-            .await
+            if let Err(e) =
+                snix_store::nar::write_nar(w, &path_info.node, &blob_engine, &directory_service)
+                    .await
             {
                 warn!(err=%e, "failed to write out NAR");
             }

@@ -2,6 +2,7 @@ use clap::Parser;
 use mimalloc::MiMalloc;
 use nix_compat::nix_daemon::handler::NixDaemon;
 use nix_daemon::SnixDaemon;
+use snix_castore::blob_engine::BlobServiceEngine;
 use snix_cli::make_listener;
 use snix_store::utils::{ServiceUrlsGrpc, construct_services};
 use std::{error::Error, sync::Arc};
@@ -53,7 +54,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         construct_services(cli.service_addrs).await?;
 
     let io = Arc::new(SnixDaemon::new(
-        blob_service,
+        Arc::new(BlobServiceEngine(blob_service)),
         directory_service,
         path_info_service,
     ));
