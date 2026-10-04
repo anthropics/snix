@@ -608,7 +608,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             use snix_castore::fs::{FSSettings, SnixStoreFs, fuse::FuseDaemon};
 
             let fs = SnixStoreFs::new(
-                blob_service,
+                BlobServiceEngine(blob_service),
                 directory_service,
                 pathinfoservice::RootNodesWrapper::from(path_info_service),
                 FSSettings {
@@ -655,7 +655,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             use snix_castore::fs::{FSSettings, SnixStoreFs, virtiofs::start_virtiofs_daemon};
 
             let fs = SnixStoreFs::new(
-                blob_service,
+                BlobServiceEngine(blob_service),
                 directory_service,
                 pathinfoservice::RootNodesWrapper::from(path_info_service),
                 FSSettings {

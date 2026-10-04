@@ -7,7 +7,8 @@ use std::{
 use anyhow::Context;
 use futures::stream::BoxStream;
 use snix_castore::{
-    blobservice::BlobService, directoryservice::DirectoryService, fs::fuse::FuseDaemon,
+    blob_engine::BlobServiceEngine, blobservice::BlobService, directoryservice::DirectoryService,
+    fs::fuse::FuseDaemon,
 };
 use tokio::process::{Child, Command};
 use tracing::{Span, debug, instrument};
@@ -86,7 +87,7 @@ where
 
         let fuse_daemon = tokio::task::spawn_blocking(move || {
             let fs = snix_castore::fs::SnixStoreFs::new(
-                blob_service,
+                BlobServiceEngine(blob_service),
                 directory_service,
                 root_nodes,
                 snix_castore::fs::FSSettings {

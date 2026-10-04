@@ -16,9 +16,7 @@ use self::{
     inodes::{DirectoryInodeData, InodeData},
 };
 use crate::{
-    B3Digest, Node,
-    blobservice::{BlobReader, BlobService},
-    directoryservice::DirectoryService,
+    B3Digest, Node, blob_engine::BlobEngine, directoryservice::DirectoryService,
     path::PathComponent,
 };
 use bstr::ByteVec;
@@ -40,11 +38,14 @@ use std::{
     time::Duration,
 };
 use std::{ffi::CStr, io::Cursor};
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
-use tracing::{Span, debug, error, instrument, warn};
+use tokio::{
+    io::{AsyncReadExt, AsyncSeekExt},
+    sync::{mpsc, oneshot},
+};
+use tracing::{Instrument, Span, debug, error, instrument, warn};
 
 /// This implements a read-only [FileSystem] for a snix-castore
-/// with the passed [BlobService], [DirectoryService] and [RootNodes].
+/// with the passed [BlobEngine], [DirectoryService] and [RootNodes].
 ///
 /// Linux uses inodes in filesystems. When implementing the trait, most calls
 /// *are for* a given inode.
@@ -75,8 +76,8 @@ use tracing::{Span, debug, error, instrument, warn};
 /// allocation", aka reserve Directory.size inodes for each directory node we
 /// explore.
 /// Tests for this live in the snix-store crate.
-pub struct SnixStoreFs<BS, DS, RN: RootNodes> {
-    blob_service: BS,
+pub struct SnixStoreFs<BE, DS, RN: RootNodes> {
+    blob_engine: Arc<BE>,
     directory_service: DS,
     root_nodes_provider: Arc<RN>,
     settings: FSSettings,
@@ -106,9 +107,10 @@ pub struct SnixStoreFs<BS, DS, RN: RootNodes> {
 
     next_dir_handle: AtomicU64,
 
-    /// This holds all open file handles
-    #[allow(clippy::type_complexity)]
-    file_handles: RwLock<HashMap<u64, (Span, Arc<Mutex<Box<dyn BlobReader>>>)>>,
+    /// This holds all open file handles.
+    /// Each open file handle is served by a task holding the blob reader,
+    /// see [serve_blob_reads]. We keep the sending side of its channel here.
+    file_handles: RwLock<HashMap<u64, (Span, mpsc::Sender<ReadRequest>)>>,
 
     next_file_handle: AtomicU64,
 
@@ -128,14 +130,14 @@ pub struct FSSettings {
     pub show_xattr: bool,
 }
 
-impl<BS, DS, RN> SnixStoreFs<BS, DS, RN>
+impl<BE, DS, RN> SnixStoreFs<BE, DS, RN>
 where
-    BS: BlobService,
+    BE: BlobEngine,
     DS: DirectoryService,
     RN: RootNodes,
 {
     pub fn new(
-        blob_service: BS,
+        blob_engine: impl Into<Arc<BE>>,
         directory_service: DS,
         root_nodes_provider: RN,
 
@@ -143,7 +145,7 @@ where
         tokio_handle: tokio::runtime::Handle,
     ) -> Self {
         Self {
-            blob_service,
+            blob_engine: blob_engine.into(),
             directory_service,
             root_nodes_provider: Arc::new(root_nodes_provider),
 
@@ -359,13 +361,82 @@ fn node_to_dirent_type(node: &Node) -> u32 {
     ty as u32
 }
 
+/// A request to read `size` bytes at `offset` from an open file handle.
+struct ReadRequest {
+    offset: u64,
+    size: u32,
+    reply_tx: oneshot::Sender<io::Result<Vec<u8>>>,
+}
+
+/// Opens the blob for reading, sends the result of that to `open_tx`, and
+/// then serves [ReadRequest]s from `read_rx`, until all read_tx are dropped
+/// (can be more than one due to [FsOptions::ASYNC_READ] and multiple FUSE threads).
+async fn serve_blob_reads<BE: BlobEngine>(
+    blob_engine: Arc<BE>,
+    blob_digest: B3Digest,
+    blob_size: u64,
+    open_tx: oneshot::Sender<Result<bool, crate::blob_engine::Error>>,
+    mut read_rx: mpsc::Receiver<ReadRequest>,
+) {
+    let mut blob_reader = match blob_engine.open_read(&blob_digest, Some(blob_size)).await {
+        Ok(Some(blob_reader)) => {
+            if open_tx.send(Ok(true)).is_err() {
+                return;
+            }
+            blob_reader
+        }
+        Ok(None) => {
+            let _ = open_tx.send(Ok(false));
+            return;
+        }
+        Err(e) => {
+            let _ = open_tx.send(Err(e));
+            return;
+        }
+    };
+
+    while let Some(ReadRequest {
+        offset,
+        size,
+        reply_tx,
+    }) = read_rx.recv().await
+    {
+        let res = async {
+            // seek to the offset specified (noop if we're already there)
+            let pos = blob_reader
+                .seek(io::SeekFrom::Start(offset))
+                .await
+                .map_err(|e| {
+                    warn!("failed to seek to offset {}: {}", offset, e);
+                    io::Error::from_raw_os_error(libc::EIO)
+                })?;
+
+            debug_assert_eq!(offset, pos);
+
+            // As written in the fuse docs, read should send exactly the number
+            // of bytes requested except on EOF or error.
+
+            let mut buf: Vec<u8> = Vec::with_capacity(size as usize);
+
+            // copy things from the internal buffer into buf to fill it till up until size
+            tokio::io::copy(&mut blob_reader.as_mut().take(size as u64), &mut buf).await?;
+
+            Ok::<_, io::Error>(buf)
+        }
+        .await;
+
+        // The requester might have gone away, nothing to do then.
+        let _ = reply_tx.send(res);
+    }
+}
+
 const XATTR_NAME_DIRECTORY_DIGEST: &[u8] = b"user.snix.castore.directory.digest";
 const XATTR_NAME_BLOB_DIGEST: &[u8] = b"user.snix.castore.blob.digest";
 
 #[cfg(all(feature = "virtiofs", target_os = "linux"))]
-impl<BS, DS, RN> fuse_backend_rs::api::filesystem::Layer for SnixStoreFs<BS, DS, RN>
+impl<BE, DS, RN> fuse_backend_rs::api::filesystem::Layer for SnixStoreFs<BE, DS, RN>
 where
-    BS: BlobService,
+    BE: BlobEngine + 'static,
     DS: DirectoryService,
     RN: RootNodes,
 {
@@ -374,9 +445,9 @@ where
     }
 }
 
-impl<BS, DS, RN> FileSystem for SnixStoreFs<BS, DS, RN>
+impl<BE, DS, RN> FileSystem for SnixStoreFs<BE, DS, RN>
 where
-    BS: BlobService,
+    BE: BlobEngine + 'static,
     DS: DirectoryService,
     RN: RootNodes,
 {
@@ -734,41 +805,57 @@ where
                 warn!("is directory");
                 Err(io::Error::from_raw_os_error(libc::EISDIR))
             }
-            InodeData::Regular(ref blob_digest, _blob_size, _) => {
+            InodeData::Regular(ref blob_digest, blob_size, _) => {
                 Span::current().record("blob.digest", blob_digest.to_string());
 
-                match self
+                // Spawn a task opening the blob and serving reads for it.
+                // We need to do this dance as the reader returned by [BlobEngine::open_read] borrows from it.
+                let (open_tx, open_rx) = oneshot::channel();
+                let (read_tx, read_rx) = mpsc::channel(1);
+                self.tokio_handle.spawn(
+                    serve_blob_reads(
+                        self.blob_engine.clone(),
+                        *blob_digest,
+                        blob_size,
+                        open_tx,
+                        read_rx,
+                    )
+                    .in_current_span(),
+                );
+
+                let found = self
                     .tokio_handle
-                    .block_on(async { self.blob_service.open_read(blob_digest).await })
-                {
-                    Ok(None) => {
-                        warn!("blob not found");
-                        Err(io::Error::from_raw_os_error(libc::EIO))
-                    }
-                    Err(e) => {
-                        warn!(e=?e, "error opening blob");
-                        Err(io::Error::from_raw_os_error(libc::EIO))
-                    }
-                    Ok(Some(blob_reader)) => {
-                        // get a new file handle
-                        // TODO: this will overflow after 2**64 operations,
-                        // which is fine for now.
-                        // See https://cl.tvl.fyi/c/depot/+/8834/comment/a6684ce0_d72469d1
-                        // for the discussion on alternatives.
-                        let fh = self.next_file_handle.fetch_add(1, Ordering::SeqCst);
+                    .block_on(open_rx)
+                    .map_err(|err| {
+                        warn!(%err, "task opening blob went away");
+                        io::Error::from_raw_os_error(libc::EIO)
+                    })?
+                    .map_err(|err| {
+                        warn!(%err, "error opening blob");
+                        io::Error::from_raw_os_error(libc::EIO)
+                    })?;
 
-                        self.file_handles
-                            .write()
-                            .insert(fh, (Span::current(), Arc::new(Mutex::new(blob_reader))));
-
-                        Ok((
-                            Some(fh),
-                            // Don't invalidate the data cache on open.
-                            OpenOptions::KEEP_CACHE,
-                            None,
-                        ))
-                    }
+                if !found {
+                    warn!("blob not found");
+                    return Err(io::Error::from_raw_os_error(libc::EIO));
                 }
+                // get a new file handle
+                // TODO: this will overflow after 2**64 operations,
+                // which is fine for now.
+                // See https://cl.tvl.fyi/c/depot/+/8834/comment/a6684ce0_d72469d1
+                // for the discussion on alternatives.
+                let fh = self.next_file_handle.fetch_add(1, Ordering::SeqCst);
+
+                self.file_handles
+                    .write()
+                    .insert(fh, (Span::current(), read_tx));
+
+                Ok((
+                    Some(fh),
+                    // Don't invalidate the data cache on open.
+                    OpenOptions::KEEP_CACHE,
+                    None,
+                ))
             }
         }
     }
@@ -785,8 +872,9 @@ where
         _lock_owner: Option<u64>,
     ) -> io::Result<()> {
         match self.file_handles.write().remove(&handle) {
-            // drop the blob reader, which will close it.
-            Some(blob_reader) => drop(blob_reader),
+            // Drop the sender, which causes the task serving reads to exit,
+            // closing the blob reader.
+            Some(read_tx) => drop(read_tx),
             None => {
                 // These might already be dropped if a read error occurred.
                 warn!("file handle not found");
@@ -810,10 +898,8 @@ where
     ) -> io::Result<usize> {
         debug!("read");
 
-        // We need to take out the blob reader from self.file_handles, so we can
-        // interact with it in the separate task.
-        // On success, we pass it back out of the task, so we can put it back in self.file_handles.
-        let (_span, blob_reader) = self
+        // Get the sender to the task serving reads for this file handle.
+        let (_span, read_tx) = self
             .file_handles
             .read()
             .get(&handle)
@@ -823,31 +909,25 @@ where
             })
             .cloned()?;
 
-        let mut blob_reader = blob_reader
-            .lock()
-            .map_err(|_| io::Error::other("mutex poisoned"))?;
-
+        // Send it the read request, and wait for the response.
         let buf = self.tokio_handle.block_on(async move {
-            // seek to the offset specified, which is relative to the start of the file.
-            let pos = blob_reader
-                .seek(io::SeekFrom::Start(offset))
+            let (reply_tx, reply_rx) = oneshot::channel();
+            read_tx
+                .send(ReadRequest {
+                    offset,
+                    size,
+                    reply_tx,
+                })
                 .await
-                .map_err(|e| {
-                    warn!("failed to seek to offset {}: {}", offset, e);
+                .map_err(|_| {
+                    warn!("task serving reads went away");
                     io::Error::from_raw_os_error(libc::EIO)
                 })?;
 
-            debug_assert_eq!(offset, pos);
-
-            // As written in the fuse docs, read should send exactly the number
-            // of bytes requested except on EOF or error.
-
-            let mut buf: Vec<u8> = Vec::with_capacity(size as usize);
-
-            // copy things from the internal buffer into buf to fill it till up until size
-            tokio::io::copy(&mut blob_reader.as_mut().take(size as u64), &mut buf).await?;
-
-            Ok::<_, std::io::Error>(buf)
+            reply_rx.await.map_err(|_| {
+                warn!("task serving reads went away");
+                io::Error::from_raw_os_error(libc::EIO)
+            })?
         })?;
 
         // We cannot use w.write() here, we're required to call write multiple

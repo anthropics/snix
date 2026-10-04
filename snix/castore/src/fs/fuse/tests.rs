@@ -13,10 +13,10 @@ use tokio_stream::{StreamExt, wrappers::ReadDirStream};
 use super::FuseDaemon;
 use crate::{
     Node,
-    blobservice::BlobService,
+    blob_engine::BlobEngine,
     directoryservice::DirectoryService,
     fixtures,
-    utils::{gen_test_blob_service, gen_test_directory_service},
+    utils::{gen_test_blob_engine, gen_test_directory_service},
 };
 use crate::{
     PathComponent,
@@ -31,26 +31,26 @@ const SYMLINK_NAME2: &str = "44444444444444444444444444444444-test";
 const DIRECTORY_WITH_KEEP_NAME: &str = "22222222222222222222222222222222-test";
 const DIRECTORY_COMPLICATED_NAME: &str = "33333333333333333333333333333333-test";
 
-fn gen_svcs() -> (Arc<dyn BlobService>, Arc<dyn DirectoryService>) {
+fn gen_svcs() -> (Arc<dyn BlobEngine>, Arc<dyn DirectoryService>) {
     (
-        Arc::new(gen_test_blob_service()),
+        Arc::new(gen_test_blob_engine()),
         Arc::new(gen_test_directory_service()),
     )
 }
 
-fn do_mount<P: AsRef<Path>, BS, DS>(
-    blob_service: BS,
+fn do_mount<P: AsRef<Path>, BE, DS>(
+    blob_engine: BE,
     directory_service: DS,
     root_nodes: BTreeMap<PathComponent, Node>,
     mountpoint: P,
     settings: FSSettings,
 ) -> io::Result<FuseDaemon>
 where
-    BS: BlobService + Send + Sync + Clone + 'static,
+    BE: BlobEngine + Send + Sync + Clone + 'static,
     DS: DirectoryService + Send + Sync + Clone + 'static,
 {
     let fs = SnixStoreFs::new(
-        blob_service,
+        blob_engine,
         directory_service,
         Arc::new(root_nodes),
         settings,
@@ -60,10 +60,10 @@ where
 }
 
 async fn populate_blob_a(
-    blob_service: &Arc<dyn BlobService>,
+    blob_engine: &Arc<dyn BlobEngine>,
     root_nodes: &mut BTreeMap<PathComponent, Node>,
 ) {
-    let mut bw = blob_service.open_write().await;
+    let mut bw = blob_engine.open_write().await;
     tokio::io::copy(&mut Cursor::new(fixtures::BLOB_A.to_vec()), &mut bw)
         .await
         .expect("must succeed uploading");
@@ -80,10 +80,10 @@ async fn populate_blob_a(
 }
 
 async fn populate_blob_b(
-    blob_service: &Arc<dyn BlobService>,
+    blob_engine: &Arc<dyn BlobEngine>,
     root_nodes: &mut BTreeMap<PathComponent, Node>,
 ) {
-    let mut bw = blob_service.open_write().await;
+    let mut bw = blob_engine.open_write().await;
     tokio::io::copy(&mut Cursor::new(fixtures::BLOB_B.to_vec()), &mut bw)
         .await
         .expect("must succeed uploading");
@@ -101,10 +101,10 @@ async fn populate_blob_b(
 
 /// adds a blob containing helloworld and marks it as executable
 async fn populate_blob_helloworld(
-    blob_service: &Arc<dyn BlobService>,
+    blob_engine: &Arc<dyn BlobEngine>,
     root_nodes: &mut BTreeMap<PathComponent, Node>,
 ) {
-    let mut bw = blob_service.open_write().await;
+    let mut bw = blob_engine.open_write().await;
     tokio::io::copy(
         &mut Cursor::new(fixtures::HELLOWORLD_BLOB_CONTENTS.to_vec()),
         &mut bw,
@@ -144,12 +144,12 @@ async fn populate_symlink2(root_nodes: &mut BTreeMap<PathComponent, Node>) {
 }
 
 async fn populate_directory_with_keep(
-    blob_service: &Arc<dyn BlobService>,
+    blob_engine: &Arc<dyn BlobEngine>,
     directory_service: &Arc<dyn DirectoryService>,
     root_nodes: &mut BTreeMap<PathComponent, Node>,
 ) {
     // upload empty blob
-    let mut bw = blob_service.open_write().await;
+    let mut bw = blob_engine.open_write().await;
     assert_eq!(
         fixtures::EMPTY_BLOB_DIGEST.as_slice(),
         bw.close().await.expect("must succeed closing").as_slice(),
@@ -195,12 +195,12 @@ async fn populate_filenode_without_blob(root_nodes: &mut BTreeMap<PathComponent,
 }
 
 async fn populate_directory_complicated(
-    blob_service: &Arc<dyn BlobService>,
+    blob_engine: &Arc<dyn BlobEngine>,
     directory_service: &Arc<dyn DirectoryService>,
     root_nodes: &mut BTreeMap<PathComponent, Node>,
 ) {
     // upload empty blob
-    let mut bw = blob_service.open_write().await;
+    let mut bw = blob_engine.open_write().await;
     assert_eq!(
         fixtures::EMPTY_BLOB_DIGEST.as_slice(),
         bw.close().await.expect("must succeed closing").as_slice(),
@@ -238,10 +238,10 @@ async fn mount() {
 
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
 
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         BTreeMap::default(),
         tmpdir.path(),
@@ -261,9 +261,9 @@ async fn root() {
     }
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         BTreeMap::default(),
         tmpdir.path(),
@@ -290,13 +290,13 @@ async fn root_with_listing() {
     }
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
     let mut root_nodes = BTreeMap::default();
 
-    populate_blob_a(&blob_service, &mut root_nodes).await;
+    populate_blob_a(&blob_engine, &mut root_nodes).await;
 
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         root_nodes,
         tmpdir.path(),
@@ -337,13 +337,13 @@ async fn stat_file_at_root() {
     }
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
     let mut root_nodes = BTreeMap::default();
 
-    populate_blob_a(&blob_service, &mut root_nodes).await;
+    populate_blob_a(&blob_engine, &mut root_nodes).await;
 
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         root_nodes,
         tmpdir.path(),
@@ -373,13 +373,13 @@ async fn read_file_at_root() {
     }
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
     let mut root_nodes = BTreeMap::default();
 
-    populate_blob_a(&blob_service, &mut root_nodes).await;
+    populate_blob_a(&blob_engine, &mut root_nodes).await;
 
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         root_nodes,
         tmpdir.path(),
@@ -409,13 +409,13 @@ async fn read_large_file_at_root() {
     }
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
     let mut root_nodes = BTreeMap::default();
 
-    populate_blob_b(&blob_service, &mut root_nodes).await;
+    populate_blob_b(&blob_engine, &mut root_nodes).await;
 
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         root_nodes,
         tmpdir.path(),
@@ -453,13 +453,13 @@ async fn symlink_readlink() {
     }
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
     let mut root_nodes = BTreeMap::default();
 
     populate_symlink(&mut root_nodes).await;
 
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         root_nodes,
         tmpdir.path(),
@@ -498,14 +498,14 @@ async fn read_stat_through_symlink() {
     }
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
     let mut root_nodes = BTreeMap::default();
 
-    populate_blob_a(&blob_service, &mut root_nodes).await;
+    populate_blob_a(&blob_engine, &mut root_nodes).await;
     populate_symlink(&mut root_nodes).await;
 
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         root_nodes,
         tmpdir.path(),
@@ -543,13 +543,13 @@ async fn read_stat_directory() {
     }
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
     let mut root_nodes = BTreeMap::default();
 
-    populate_directory_with_keep(&blob_service, &directory_service, &mut root_nodes).await;
+    populate_directory_with_keep(&blob_engine, &directory_service, &mut root_nodes).await;
 
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         root_nodes,
         tmpdir.path(),
@@ -577,13 +577,13 @@ async fn uid_gid_override() {
     }
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
     let mut root_nodes = BTreeMap::default();
 
-    populate_directory_with_keep(&blob_service, &directory_service, &mut root_nodes).await;
+    populate_directory_with_keep(&blob_engine, &directory_service, &mut root_nodes).await;
 
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         root_nodes,
         tmpdir.path(),
@@ -618,14 +618,14 @@ async fn xattr() {
     }
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
     let mut root_nodes = BTreeMap::default();
 
-    populate_directory_with_keep(&blob_service, &directory_service, &mut root_nodes).await;
-    populate_blob_a(&blob_service, &mut root_nodes).await;
+    populate_directory_with_keep(&blob_engine, &directory_service, &mut root_nodes).await;
+    populate_blob_a(&blob_engine, &mut root_nodes).await;
 
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         root_nodes,
         tmpdir.path(),
@@ -705,13 +705,13 @@ async fn read_blob_inside_dir() {
     }
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
     let mut root_nodes = BTreeMap::default();
 
-    populate_directory_with_keep(&blob_service, &directory_service, &mut root_nodes).await;
+    populate_directory_with_keep(&blob_engine, &directory_service, &mut root_nodes).await;
 
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         root_nodes,
         tmpdir.path(),
@@ -744,13 +744,13 @@ async fn read_blob_deep_inside_dir() {
     }
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
     let mut root_nodes = BTreeMap::default();
 
-    populate_directory_complicated(&blob_service, &directory_service, &mut root_nodes).await;
+    populate_directory_complicated(&blob_engine, &directory_service, &mut root_nodes).await;
 
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         root_nodes,
         tmpdir.path(),
@@ -786,13 +786,13 @@ async fn readdir() {
     }
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
     let mut root_nodes = BTreeMap::default();
 
-    populate_directory_complicated(&blob_service, &directory_service, &mut root_nodes).await;
+    populate_directory_complicated(&blob_engine, &directory_service, &mut root_nodes).await;
 
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         root_nodes,
         tmpdir.path(),
@@ -845,13 +845,13 @@ async fn readdir_deep() {
     }
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
     let mut root_nodes = BTreeMap::default();
 
-    populate_directory_complicated(&blob_service, &directory_service, &mut root_nodes).await;
+    populate_directory_complicated(&blob_engine, &directory_service, &mut root_nodes).await;
 
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         root_nodes,
         tmpdir.path(),
@@ -891,16 +891,16 @@ async fn check_attributes() {
     }
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
     let mut root_nodes = BTreeMap::default();
 
-    populate_blob_a(&blob_service, &mut root_nodes).await;
-    populate_directory_with_keep(&blob_service, &directory_service, &mut root_nodes).await;
+    populate_blob_a(&blob_engine, &mut root_nodes).await;
+    populate_directory_with_keep(&blob_engine, &directory_service, &mut root_nodes).await;
     populate_symlink(&mut root_nodes).await;
-    populate_blob_helloworld(&blob_service, &mut root_nodes).await;
+    populate_blob_helloworld(&blob_engine, &mut root_nodes).await;
 
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         root_nodes,
         tmpdir.path(),
@@ -967,14 +967,14 @@ async fn compare_inodes_directories() {
     }
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
     let mut root_nodes = BTreeMap::default();
 
-    populate_directory_with_keep(&blob_service, &directory_service, &mut root_nodes).await;
-    populate_directory_complicated(&blob_service, &directory_service, &mut root_nodes).await;
+    populate_directory_with_keep(&blob_engine, &directory_service, &mut root_nodes).await;
+    populate_directory_complicated(&blob_engine, &directory_service, &mut root_nodes).await;
 
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         root_nodes,
         tmpdir.path(),
@@ -1011,13 +1011,13 @@ async fn compare_inodes_files() {
     }
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
     let mut root_nodes = BTreeMap::default();
 
-    populate_directory_complicated(&blob_service, &directory_service, &mut root_nodes).await;
+    populate_directory_complicated(&blob_engine, &directory_service, &mut root_nodes).await;
 
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         root_nodes,
         tmpdir.path(),
@@ -1058,14 +1058,14 @@ async fn compare_inodes_symlinks() {
     }
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
     let mut root_nodes = BTreeMap::default();
 
-    populate_directory_complicated(&blob_service, &directory_service, &mut root_nodes).await;
+    populate_directory_complicated(&blob_engine, &directory_service, &mut root_nodes).await;
     populate_symlink2(&mut root_nodes).await;
 
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         root_nodes,
         tmpdir.path(),
@@ -1101,13 +1101,13 @@ async fn read_wrong_paths_in_root() {
     }
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
     let mut root_nodes = BTreeMap::default();
 
-    populate_blob_a(&blob_service, &mut root_nodes).await;
+    populate_blob_a(&blob_engine, &mut root_nodes).await;
 
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         root_nodes,
         tmpdir.path(),
@@ -1157,11 +1157,11 @@ async fn disallow_writes() {
 
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
     let root_nodes = BTreeMap::default();
 
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         root_nodes,
         tmpdir.path(),
@@ -1186,13 +1186,13 @@ async fn missing_directory() {
     }
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
     let mut root_nodes = BTreeMap::default();
 
     populate_directorynode_without_directory(&mut root_nodes).await;
 
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         root_nodes,
         tmpdir.path(),
@@ -1233,13 +1233,13 @@ async fn missing_blob() {
     }
     let tmpdir = TempDir::new().unwrap();
 
-    let (blob_service, directory_service) = gen_svcs();
+    let (blob_engine, directory_service) = gen_svcs();
     let mut root_nodes = BTreeMap::default();
 
     populate_filenode_without_blob(&mut root_nodes).await;
 
     let fuse_daemon = do_mount(
-        blob_service,
+        blob_engine,
         directory_service,
         root_nodes,
         tmpdir.path(),

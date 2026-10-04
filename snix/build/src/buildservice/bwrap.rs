@@ -2,7 +2,8 @@ use std::path::{Path, PathBuf};
 
 use futures::stream::BoxStream;
 use snix_castore::{
-    blobservice::BlobService, directoryservice::DirectoryService, fs::fuse::FuseDaemon,
+    blob_engine::BlobServiceEngine, blobservice::BlobService, directoryservice::DirectoryService,
+    fs::fuse::FuseDaemon,
 };
 use tracing::{Span, info, instrument};
 use uuid::Uuid;
@@ -62,7 +63,7 @@ where
             .with_inputs(request.inputs_dir, move |path| {
                 let root_nodes = Box::new(request.inputs.clone());
                 let fs = snix_castore::fs::SnixStoreFs::new(
-                    blob_service.clone(),
+                    BlobServiceEngine(blob_service.clone()),
                     directory_service.clone(),
                     root_nodes,
                     snix_castore::fs::FSSettings {

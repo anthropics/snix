@@ -220,7 +220,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
             let fuse_daemon = tokio::task::spawn_blocking(move || {
                 let fs = SnixStoreFs::new(
-                    blob_service,
+                    BlobServiceEngine(blob_service),
                     directory_service,
                     directory,
                     FSSettings {
@@ -272,7 +272,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
             tokio::task::spawn_blocking(move || {
                 let fs = SnixStoreFs::new(
-                    blob_service,
+                    BlobServiceEngine(blob_service),
                     directory_service,
                     directory,
                     FSSettings {

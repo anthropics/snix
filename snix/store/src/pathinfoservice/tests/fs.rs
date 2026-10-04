@@ -2,7 +2,7 @@
 
 use snix_castore::{
     fs::{FSSettings, SnixStoreFs, fuse::FuseDaemon},
-    utils::{gen_test_blob_service, gen_test_directory_service},
+    utils::{gen_test_blob_engine, gen_test_directory_service},
 };
 use tempfile::TempDir;
 
@@ -20,7 +20,7 @@ fn list_async_pathinfoservice() {
     }
 
     // Construct blob and directory services
-    let blob_service = gen_test_blob_service();
+    let blob_engine = gen_test_blob_engine();
     let directory_service = gen_test_directory_service();
 
     // Manually start a tokio runtime, we want most of this test to not be in
@@ -57,7 +57,7 @@ fn list_async_pathinfoservice() {
     };
 
     let fs = SnixStoreFs::new(
-        blob_service,
+        blob_engine,
         directory_service,
         RootNodesWrapper::from(path_info_service),
         FSSettings {
