@@ -1,8 +1,8 @@
 use hyper_util::rt::TokioIo;
 use snix_castore::{
-    blobservice::BlobService,
+    blob_engine::BlobEngine,
     directoryservice::DirectoryService,
-    utils::{gen_test_blob_service, gen_test_directory_service},
+    utils::{gen_test_blob_engine, gen_test_directory_service},
 };
 use tonic::transport::{Endpoint, Server, Uri};
 
@@ -20,18 +20,18 @@ use crate::{
 /// We also return memory-based {Blob,Directory}Service,
 /// as the consumer of this function accepts a 3-tuple.
 pub async fn make_grpc_path_info_service_client() -> (
-    impl BlobService,
+    impl BlobEngine,
     impl DirectoryService,
     GRPCPathInfoService<tonic::transport::Channel>,
 ) {
     let (left, right) = tokio::io::duplex(64);
 
-    let blob_service = gen_test_blob_service();
+    let blob_engine = gen_test_blob_engine();
     let directory_service = gen_test_directory_service();
 
     // spin up a server, which will only connect once, to the left side.
     tokio::spawn({
-        let blob_service = blob_service.clone();
+        let blob_service = blob_engine.clone();
         let directory_service = directory_service.clone();
         async move {
             let path_info_service =
@@ -69,7 +69,7 @@ pub async fn make_grpc_path_info_service_client() -> (
         ),
     );
 
-    (blob_service, directory_service, path_info_service)
+    (blob_engine, directory_service, path_info_service)
 }
 
 #[cfg(all(feature = "cloud", feature = "integration"))]

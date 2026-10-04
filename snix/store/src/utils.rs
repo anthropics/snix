@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
+use snix_castore::blob_engine::BlobServiceEngine;
 use snix_castore::utils as castore_utils;
 use snix_castore::{blobservice::BlobService, directoryservice::DirectoryService};
 use url::Url;
@@ -170,7 +171,7 @@ pub async fn construct_services_from_configs(
         .nar_calculation_service()
         .unwrap_or_else(|| {
             Arc::new(crate::nar::Renderer::new(
-                blob_service.clone(),
+                BlobServiceEngine(blob_service.clone()),
                 directory_service.clone(),
             ))
         });

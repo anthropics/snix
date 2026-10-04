@@ -1,9 +1,6 @@
 use auto_impl::auto_impl;
 use nix_compat::nixhash::Sha256Digester;
-use snix_castore::{
-    Node, blob_engine::BlobServiceEngine, blobservice::BlobService,
-    directoryservice::DirectoryService,
-};
+use snix_castore::{Node, blob_engine::BlobEngine, directoryservice::DirectoryService};
 use tokio_util::io::InspectWriter;
 use tonic::async_trait;
 
@@ -23,24 +20,24 @@ pub trait NarCalculationService: Send + Sync {
 
 /// [NarCalculationService] traversing the node and rendering the NAR
 /// to calculate NAR hash and size.
-pub struct Renderer<BS, DS> {
-    blob_service: BS,
+pub struct Renderer<BE, DS> {
+    blob_engine: BE,
     directory_service: DS,
 }
 
 impl<BS, DS> Renderer<BS, DS> {
-    pub fn new(blob_service: BS, directory_service: DS) -> Self {
+    pub fn new(blob_engine: BS, directory_service: DS) -> Self {
         Self {
-            blob_service,
+            blob_engine,
             directory_service,
         }
     }
 }
 
 #[async_trait]
-impl<BS, DS> NarCalculationService for Renderer<BS, DS>
+impl<BE, DS> NarCalculationService for Renderer<BE, DS>
 where
-    BS: BlobService,
+    BE: BlobEngine,
     DS: DirectoryService,
 {
     async fn calculate_nar(
@@ -59,7 +56,7 @@ where
         write_nar(
             writer,
             root_node,
-            &BlobServiceEngine(&self.blob_service),
+            &self.blob_engine,
             &self.directory_service,
         )
         .await?;
