@@ -1,6 +1,5 @@
 use snix_castore::{
-    blob_engine::BlobServiceEngine, blobservice::BlobService, directoryservice::DirectoryService,
-    import::fs::ingest_path,
+    blob_engine::BlobEngine, directoryservice::DirectoryService, import::fs::ingest_path,
 };
 use tracing::instrument;
 
@@ -34,30 +33,25 @@ impl From<CAHash> for nar_info::Ca {
 /// before, to avoid unnecessarily importing, but will prevent the PathInfo from
 /// being created in case of an invalid name.
 #[instrument(skip_all, fields(name=name.as_ref(), path=?path.as_ref()), err)]
-pub async fn import_path_as_nar_ca<BS, DS, PS, NS, P>(
+pub async fn import_path_as_nar_ca<BE, DS, PS, NS, P>(
     path: P,
     name: impl AsRef<str>,
-    blob_service: BS,
+    blob_engine: BE,
     directory_service: DS,
     path_info_service: PS,
     nar_calculation_service: NS,
 ) -> Result<PathInfo, std::io::Error>
 where
     P: AsRef<std::path::Path>,
-    BS: BlobService + Clone,
+    BE: BlobEngine + Clone,
     DS: DirectoryService,
     PS: AsRef<dyn PathInfoService>,
     NS: NarCalculationService,
 {
     // Ingest the contents at the given path `path` into castore.
-    let root_node = ingest_path::<_, _, _, &[u8]>(
-        BlobServiceEngine(blob_service),
-        directory_service,
-        path,
-        None,
-    )
-    .await
-    .map_err(std::io::Error::other)?;
+    let root_node = ingest_path::<_, _, _, &[u8]>(blob_engine, directory_service, path, None)
+        .await
+        .map_err(std::io::Error::other)?;
 
     // Ask for the NAR size and sha256
     let (nar_size, nar_sha256) = nar_calculation_service

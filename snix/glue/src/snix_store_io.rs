@@ -14,7 +14,10 @@ use tokio_util::io::SyncIoBridge;
 use tracing::{Level, error, instrument};
 use url::Url;
 
-use snix_castore::{Node, blobservice::BlobService, directoryservice::DirectoryService};
+use snix_castore::{
+    Node, blob_engine::BlobServiceEngine, blobservice::BlobService,
+    directoryservice::DirectoryService,
+};
 use snix_store::pathinfoservice::{PathInfo, PathInfoService};
 
 /// Implements [EvalIO], asking given [PathInfoService], [DirectoryService]
@@ -280,7 +283,7 @@ impl EvalIO for SnixStoreIO {
                 path,
                 nix_compat::store_path::validate_name_from_os_str(file_name)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
-                &self.build_state.blob_service,
+                BlobServiceEngine(&self.build_state.blob_service),
                 &self.build_state.directory_service,
                 &self.build_state.path_info_service,
                 &self.build_state.nar_calculation_service,
