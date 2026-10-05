@@ -3,6 +3,7 @@ use prost::Message;
 use std::cmp::Ordering;
 
 mod grpc_blobservice_wrapper;
+mod grpc_blobstore_wrapper;
 mod grpc_chunkstore_wrapper;
 mod grpc_directoryservice_wrapper;
 
@@ -12,6 +13,7 @@ mod url;
 
 use crate::{B3Digest, DirectoryError, path::PathComponent};
 pub use grpc_blobservice_wrapper::GRPCBlobServiceWrapper;
+pub use grpc_blobstore_wrapper::GRPCBlobStoreWrapper;
 pub use grpc_chunkstore_wrapper::GRPCChunkStoreWrapper;
 pub use grpc_directoryservice_wrapper::GRPCDirectoryServiceWrapper;
 pub use url::{parse_infused_nar_path, parse_urlsafe_proto, write_infused_nar_path};
