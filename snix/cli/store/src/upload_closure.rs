@@ -4,8 +4,7 @@ use futures::{FutureExt, StreamExt, TryStreamExt, future::ready};
 use futures_dag::FuturesDag;
 use nix_compat::store_path::StorePath;
 use snix_castore::{
-    blob_engine::BlobServiceEngine,
-    blobservice::BlobService,
+    blob_engine::BlobEngine,
     directoryservice::DirectoryService,
     import::{IngestionError, fs},
 };
@@ -27,9 +26,9 @@ use crate::path_metadata::PathMetadata;
 // FUTUREWORK: This does not re-calculate the NAR Hash/Size.
 // Should probably be configurable.
 #[tracing::instrument(skip_all, fields(indicatif.pb_show = tracing::field::Empty), err)]
-pub async fn upload_closure<PS, DS, BS>(
+pub async fn upload_closure<PS, DS, BE>(
     reference_graph: Vec<(StorePath, PathMetadata)>,
-    blob_service: BS,
+    blob_engine: BE,
     directory_service: DS,
     path_info_service: PS,
     ingest_concurrency: usize,
@@ -37,7 +36,7 @@ pub async fn upload_closure<PS, DS, BS>(
 where
     PS: PathInfoService,
     DS: DirectoryService,
-    BS: BlobService,
+    BE: BlobEngine,
 {
     let closure_span = Span::current();
     closure_span.pb_set_style(&snix_tracing::PB_PROGRESS_STYLE);
@@ -87,7 +86,7 @@ where
                 let path_info = ingest(
                     store_path.to_owned(),
                     path_metadata.to_owned(),
-                    &blob_service,
+                    &blob_engine,
                     &directory_service,
                 )
                 .await?;
@@ -177,14 +176,14 @@ enum Error {
 /// The to-be-inserted PathInfo is returned, but not inserted anywhere,
 /// that's left for the callsite.
 #[tracing::instrument(skip_all, fields(path_info.store_path = %store_path), err)]
-pub async fn ingest<DS, BS>(
+pub async fn ingest<DS, BE>(
     store_path: StorePath,
     metadata: PathMetadata,
-    blob_service: BS,
+    blob_engine: BE,
     directory_service: DS,
 ) -> Result<PathInfo, IngestionError<snix_castore::import::fs::Error>>
 where
-    BS: BlobService,
+    BE: BlobEngine,
     DS: DirectoryService,
 {
     let PathMetadata {
@@ -196,7 +195,7 @@ where
     } = metadata;
 
     let node = snix_castore::import::fs::ingest_path::<_, _, _, &[u8]>(
-        BlobServiceEngine(&blob_service),
+        &blob_engine,
         &directory_service,
         store_path.to_absolute_path(),
         None,

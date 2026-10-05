@@ -526,6 +526,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let (blob_service, directory_service, path_info_service, _nar_calculation_service) =
                 snix_store::utils::construct_services(service_addrs).await?;
 
+            let blob_engine = BlobServiceEngine(blob_service);
+
             match source {
                 UploadSource::ReferenceGraph {
                     reference_graph_path,
@@ -542,7 +544,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
                     upload_closure(
                         reference_graph,
-                        blob_service,
+                        blob_engine,
                         directory_service,
                         path_info_service,
                         concurrency,
@@ -576,7 +578,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             return Ok::<_, std::io::Error>(None);
                         }
 
-                        let path_info = upload_closure::ingest(store_path, path_metadata, &blob_service, &directory_service).await.map_err(std::io::Error::other)?;
+                        let path_info = upload_closure::ingest(store_path, path_metadata, &blob_engine, &directory_service).await.map_err(std::io::Error::other)?;
 
                         Ok(Some(path_info_service
                                 .put(path_info)
