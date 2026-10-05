@@ -2,6 +2,8 @@
 
 use crate::B3Digest;
 use bytes::Bytes;
+mod builder;
+pub use builder::ChunkBuilder;
 
 /// A Chunk returned from `ChunkStore`.
 ///
@@ -33,6 +35,11 @@ impl Chunk {
     /// Copies the Chunk payload into a new `Vec<[u8]>`.
     pub fn to_vec(self) -> Vec<u8> {
         self.0.to_vec()
+    }
+
+    /// Returns a [ChunkBuilder] to assemble a [Chunk] by concatenating one or more [bytes::Bytes.]
+    pub fn builder() -> ChunkBuilder {
+        ChunkBuilder::default()
     }
 }
 
