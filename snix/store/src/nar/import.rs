@@ -254,8 +254,8 @@ mod test {
     use nix_compat::nixhash::{CAHash, NixHash};
     use rstest::*;
     use snix_castore::Node;
-    use snix_castore::blob_engine::BlobServiceEngine;
-    use snix_castore::blobservice::{MockBlobService, TestBlobWriter};
+    use snix_castore::blob_engine::MockBlobEngine;
+    use snix_castore::blobservice::TestBlobWriter;
     use snix_castore::directoryservice::{MockDirectoryPutter, MockDirectoryService};
     use snix_castore::fixtures::{
         DIRECTORY_COMPLICATED, DIRECTORY_WITH_KEEP, EMPTY_BLOB_DIGEST, HELLOWORLD_BLOB_CONTENTS,
@@ -266,7 +266,7 @@ mod test {
     #[tokio::test]
     async fn single_symlink() {
         let root_node = ingest_nar(
-            BlobServiceEngine(Arc::new(MockBlobService::new())),
+            Arc::new(MockBlobEngine::new()),
             MockDirectoryService::new(),
             &mut Cursor::new(&NAR_CONTENTS_SYMLINK),
         )
@@ -283,23 +283,23 @@ mod test {
 
     #[tokio::test]
     async fn single_file() {
-        let mut blob_service = MockBlobService::new();
+        let mut blob_engine = MockBlobEngine::new();
         let mut seq = mockall::Sequence::new();
-        blob_service
+        blob_engine
             .expect_has()
             .once()
             .with(predicate::eq(&*HELLOWORLD_BLOB_DIGEST))
             .return_once(|_| Ok(false))
             .in_sequence(&mut seq);
 
-        blob_service
+        blob_engine
             .expect_open_write()
             .once()
             .return_once(|| Box::new(TestBlobWriter::new()))
             .in_sequence(&mut seq);
 
         let root_node = ingest_nar(
-            BlobServiceEngine(Arc::new(blob_service)),
+            Arc::new(blob_engine),
             MockDirectoryService::new(),
             &mut Cursor::new(&NAR_CONTENTS_HELLOWORLD),
         )
@@ -318,20 +318,20 @@ mod test {
 
     #[tokio::test]
     async fn complicated() {
-        let mut blob_service = MockBlobService::new();
+        let mut blob_engine = MockBlobEngine::new();
         let mut seq = mockall::Sequence::new();
-        blob_service
+        blob_engine
             .expect_has()
             .once()
             .with(predicate::eq(&*EMPTY_BLOB_DIGEST))
             .return_once(|_| Ok(false))
             .in_sequence(&mut seq);
-        blob_service
+        blob_engine
             .expect_open_write()
             .once()
             .return_once(|| Box::new(TestBlobWriter::new()))
             .in_sequence(&mut seq);
-        blob_service
+        blob_engine
             .expect_has()
             .once()
             .with(predicate::eq(&*EMPTY_BLOB_DIGEST))
@@ -365,7 +365,7 @@ mod test {
             });
 
         let root_node = ingest_nar(
-            BlobServiceEngine(Arc::new(blob_service)),
+            Arc::new(blob_engine),
             directory_service,
             &mut Cursor::new(&NAR_CONTENTS_COMPLICATED),
         )
