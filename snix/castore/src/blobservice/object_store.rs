@@ -16,7 +16,6 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_util::io::InspectReader;
 use tonic::async_trait;
 use tracing::{Level, debug, instrument, trace};
-use url::Url;
 
 use crate::{
     B3Digest,
@@ -290,24 +289,9 @@ pub struct ObjectStoreBlobServiceConfig {
 
 impl TryFrom<url::Url> for ObjectStoreBlobServiceConfig {
     type Error = Box<dyn std::error::Error + Send + Sync>;
-    /// Constructs a new [ObjectStoreBlobService] from a [Url] supported by
-    /// [object_store].
-    /// Any path suffix becomes the base path of the object store.
-    /// additional options, the same as in [object_store::parse_url_opts] can
-    /// be passed.
     fn try_from(url: url::Url) -> Result<Self, Self::Error> {
-        // We need to convert the URL to string, strip the prefix there, and then
-        // parse it back as url, as Url::set_scheme() rejects some of the transitions we want to do.
-        let trimmed_url = {
-            let s = url.to_string();
-            let mut url = Url::parse(
-                s.strip_prefix("objectstore+")
-                    .ok_or("Missing objectstore uri")?,
-            )?;
-            // trim the query pairs, they might contain credentials or local settings we don't want to send as-is.
-            url.set_query(None);
-            url
-        };
+        let trimmed_url = crate::object_store::trim_objectstore_prefix(&url)?;
+
         Ok(ObjectStoreBlobServiceConfig {
             object_store_url: trimmed_url.into(),
             object_store_options: url

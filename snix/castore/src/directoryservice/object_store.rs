@@ -13,7 +13,6 @@ use tokio::io::AsyncWriteExt;
 use tokio_util::codec::LengthDelimitedCodec;
 use tonic::async_trait;
 use tracing::{Level, instrument, trace, warn};
-use url::Url;
 
 use super::{Directory, DirectoryPutter, DirectoryService};
 use crate::composition::{CompositionContext, ServiceBuilder};
@@ -54,33 +53,8 @@ fn parse_proto_directory(encoded_directory: &[u8]) -> Result<crate::Directory, E
 
 #[allow(clippy::identity_op)]
 const MAX_FRAME_LENGTH: usize = 1 * 1024 * 1024 * 1000; // 1 MiB
-//
+
 impl ObjectStoreDirectoryService {
-    /// Constructs a new [ObjectStoreDirectoryService] from a [Url] supported by
-    /// [object_store].
-    /// Any path suffix becomes the base path of the object store.
-    /// additional options, the same as in [object_store::parse_url_opts] can
-    /// be passed.
-    pub fn parse_url_opts<I, K, V>(url: &Url, options: I) -> Result<Self, object_store::Error>
-    where
-        I: IntoIterator<Item = (K, V)>,
-        K: AsRef<str>,
-        V: Into<String>,
-    {
-        let (object_store, path) = object_store::parse_url_opts(url, options)?;
-
-        Ok(Self {
-            instance_name: "root".into(),
-            object_store: Arc::new(object_store),
-            base_path: path,
-        })
-    }
-
-    /// Like [Self::parse_url_opts], except without the options.
-    pub fn parse_url(url: &Url) -> Result<Self, object_store::Error> {
-        Self::parse_url_opts(url, Vec::<(String, String)>::new())
-    }
-
     pub fn new(instance_name: String, object_store: Arc<dyn ObjectStore>, base_path: Path) -> Self {
         Self {
             instance_name,
@@ -181,8 +155,6 @@ impl DirectoryService for ObjectStoreDirectoryService {
 
 #[derive(thiserror::Error, Debug)]
 enum Error {
-    #[error("wrong arguments: {0}")]
-    WrongConfig(&'static str),
     #[error("put() may only be used for directories without children")]
     PutForDirectoryWithChildren,
 
@@ -221,17 +193,8 @@ pub struct ObjectStoreDirectoryServiceConfig {
 impl TryFrom<url::Url> for ObjectStoreDirectoryServiceConfig {
     type Error = Box<dyn std::error::Error + Send + Sync>;
     fn try_from(url: url::Url) -> Result<Self, Self::Error> {
-        // We need to convert the URL to string, strip the prefix there, and then
-        // parse it back as url, as Url::set_scheme() rejects some of the transitions we want to do.
-        let trimmed_url = {
-            let s = url.to_string();
-            let mut url = Url::parse(s.strip_prefix("objectstore+").ok_or(Error::WrongConfig(
-                "Missing objectstore+ part in URI scheme",
-            ))?)?;
-            // trim the query pairs, they might contain credentials or local settings we don't want to send as-is.
-            url.set_query(None);
-            url
-        };
+        let trimmed_url = crate::object_store::trim_objectstore_prefix(&url)?;
+
         Ok(ObjectStoreDirectoryServiceConfig {
             object_store_url: trimmed_url.into(),
             object_store_options: url

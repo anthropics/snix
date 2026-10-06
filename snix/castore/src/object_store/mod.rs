@@ -6,6 +6,23 @@ use url::Url;
 #[cfg(feature = "cloud")]
 mod aws;
 
+/// From a URL starting with objectstore+ in the scheme, trims query params and that prefix.
+pub fn trim_objectstore_prefix(
+    url: &url::Url,
+) -> Result<url::Url, Box<dyn std::error::Error + Send + Sync>> {
+    // We need to convert the URL to string, strip the prefix there, and then
+    // parse it back as url, as Url::set_scheme() rejects this transition.
+    let s = url.to_string();
+    let mut url = Url::parse(
+        s.strip_prefix("objectstore+")
+            .ok_or("Missing objectstore uri")?,
+    )?;
+    // trim the query pairs, they might contain credentials or local settings we don't want to send as-is.
+    url.set_query(None);
+
+    Ok(url)
+}
+
 /// Constructs an [ObjectStore] from a URL and additional object store options.
 ///
 /// If the `cloud` feature is enabled and an S3 URL is passed,
