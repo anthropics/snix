@@ -4,6 +4,7 @@
 use auto_impl::auto_impl;
 use tonic::async_trait;
 
+pub mod combinators;
 pub mod grpc;
 pub mod memory;
 pub mod object_store;
@@ -40,6 +41,9 @@ pub trait ChunkStore: Send + Sync {
 
 /// Registers the builtin [ChunkStore] implementations with the given [Registry].
 pub(crate) fn register_chunk_stores(reg: &mut Registry) {
+    reg.register::<Box<dyn ServiceBuilder<Output = dyn ChunkStore>>, combinators::CacheConfig>(
+        "cache",
+    );
     reg.register::<Box<dyn ServiceBuilder<Output = dyn ChunkStore>>, grpc::GRPCChunkStoreConfig>(
         "grpc",
     );
