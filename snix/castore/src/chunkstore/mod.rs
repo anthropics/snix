@@ -8,7 +8,10 @@ pub mod grpc;
 pub mod memory;
 pub mod object_store;
 
-use crate::B3Digest;
+use crate::{
+    B3Digest,
+    composition::{Registry, ServiceBuilder},
+};
 
 mod chunk;
 pub use chunk::Chunk;
@@ -33,6 +36,20 @@ pub trait ChunkStore: Send + Sync {
     async fn has(&self, digest: &B3Digest) -> Result<bool, Error>;
     /// Upload a Chunk, returns its [B3Digest].
     async fn put(&self, chunk: Chunk) -> Result<B3Digest, Error>;
+}
+
+/// Registers the builtin [ChunkStore] implementations with the given [Registry].
+pub(crate) fn register_chunk_stores(reg: &mut Registry) {
+    reg.register::<Box<dyn ServiceBuilder<Output = dyn ChunkStore>>, grpc::GRPCChunkStoreConfig>(
+        "grpc",
+    );
+    reg.register::<Box<dyn ServiceBuilder<Output = dyn ChunkStore>>, memory::MemoryChunkStoreConfig>(
+        "memory",
+    );
+    reg.register::<
+        Box<dyn ServiceBuilder<Output = dyn ChunkStore>>,
+        object_store::ObjectStoreChunkStoreConfig,
+    >("objectstore");
 }
 
 /// Error returned from all ChunkStores.

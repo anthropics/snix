@@ -270,12 +270,12 @@ pub static REG: LazyLock<&'static Registry> = LazyLock::new(|| {
 
 // ---------- End of generic registry code --------- //
 
-/// Register the builtin services of snix_castore (blob services and directory
-/// services) with the given registry.
+/// Register the builtin services/stores of snix_castore with the given registry.
 /// This can be used outside to create your own registry with the builtin types
 /// _and_ extra third party types.
 pub fn add_default_services(reg: &mut Registry) {
     crate::blobservice::register_blob_services(reg);
+    crate::chunkstore::register_chunk_stores(reg);
     crate::directoryservice::register_directory_services(reg);
 }
 
