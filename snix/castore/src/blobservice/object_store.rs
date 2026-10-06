@@ -9,7 +9,7 @@ use std::{
 use data_encoding::HEXLOWER;
 use fastcdc::v2020::AsyncStreamCDC;
 use futures::{Future, TryStreamExt};
-use object_store::{ObjectStore, ObjectStoreExt, ObjectStoreScheme, path::Path};
+use object_store::{ObjectStore, ObjectStoreExt, path::Path};
 use pin_project_lite::pin_project;
 use prost::Message;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -26,9 +26,6 @@ use crate::{
 };
 
 use super::{BlobReader, BlobService, BlobWriter, ChunkedReader};
-
-#[cfg(feature = "cloud")]
-mod aws;
 
 /// The number of chunks that will be uploaded in parallel, per blob.
 const CONCURRENT_CHUNK_UPLOADS: usize = 64;
@@ -349,25 +346,8 @@ impl ServiceBuilder for ObjectStoreBlobServiceConfig {
 
         // object_store doesn't sufficiently support the AWS credential chain.
         let object_store_url: url::Url = self.object_store_url.parse()?;
-        let (object_store_scheme, path) =
-            object_store::ObjectStoreScheme::parse(&object_store_url)?;
-
-        let (object_store, path) = match object_store_scheme {
-            #[cfg(feature = "cloud")]
-            ObjectStoreScheme::AmazonS3 => {
-                // In the AWS case, we only support s3:// URLs.
-                if object_store_url.scheme() != "s3" {
-                    return Err(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        "only s3://-style URLs supported",
-                    )));
-                }
-
-                let store = aws::setup_aws_object_store(&object_store_url, opts).await?;
-                (Box::new(store) as Box<dyn ObjectStore>, path)
-            }
-            _ => object_store::parse_url_opts(&object_store_url, opts)?,
-        };
+        let (object_store, path) =
+            crate::object_store::setup_object_store(&object_store_url, opts).await?;
 
         Ok(Arc::new(ObjectStoreBlobService {
             instance_name: instance_name.to_string(),

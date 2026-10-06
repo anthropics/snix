@@ -11,6 +11,7 @@ pub mod combinators;
 pub mod composition;
 pub mod directoryservice;
 pub mod fixtures;
+pub(crate) mod object_store;
 pub mod refscan;
 pub mod utils;
 

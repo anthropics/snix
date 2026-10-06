@@ -100,12 +100,14 @@ where
 ///
 /// These keys will take priority over anything discovered via the AWS default
 /// credential chain.
-pub async fn setup_aws_object_store<'a, KV>(
+pub async fn setup_aws_object_store<I, K, V>(
     url: &url::Url,
-    opts: KV,
+    opts: I,
 ) -> Result<object_store::aws::AmazonS3, Box<dyn std::error::Error + Send + Sync + 'static>>
 where
-    KV: IntoIterator<Item = (&'a str, &'a str)>,
+    I: IntoIterator<Item = (K, V)>,
+    K: AsRef<str>,
+    V: Into<String> + AsRef<str>,
 {
     let bucket_name = url
         .host_str()
@@ -114,40 +116,41 @@ where
     // The AWS SDK config loader.
     let mut config_loader = aws_config::from_env();
 
-    let mut aws_access_key_id = None;
-    let mut aws_secret_access_key = None;
+    let mut aws_access_key_id: Option<String> = None;
+    let mut aws_secret_access_key: Option<String> = None;
     let mut allow_http = false;
-    let mut user_agent = None;
+    let mut user_agent: Option<String> = None;
 
     for (k, v) in opts.into_iter() {
-        match k {
+        match k.as_ref() {
             "aws_access_key_id" => {
-                aws_access_key_id = Some(v);
+                aws_access_key_id = Some(v.into());
             }
             "aws_secret_access_key" => {
-                aws_secret_access_key = Some(v);
+                aws_secret_access_key = Some(v.into());
             }
             "aws_region" => {
-                config_loader = config_loader.region(aws_config::Region::new(v.to_owned()));
+                config_loader = config_loader.region(aws_config::Region::new(v.into()));
             }
             "aws_allow_http" => {
+                let v = v.as_ref();
                 if v == "1" || v == "true" {
                     allow_http = true;
                 }
             }
             "aws_endpoint_url" => {
-                config_loader = config_loader.endpoint_url(v);
+                config_loader = config_loader.endpoint_url(v.into());
             }
             "aws_profile" => {
-                config_loader = config_loader.profile_name(v);
+                config_loader = config_loader.profile_name(v.into());
             }
             "user_agent" => {
-                user_agent = Some(v);
+                user_agent = Some(v.into());
             }
             _ => {
                 return Err(Box::new(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    format!("unexpected param: {}", k),
+                    format!("unexpected param: {}", k.as_ref()),
                 )));
             }
         }
@@ -194,7 +197,7 @@ where
 
             if let Some(user_agent) = user_agent {
                 client_options = client_options
-                    .with_user_agent(object_store::HeaderValue::from_str(user_agent)?);
+                    .with_user_agent(object_store::HeaderValue::from_str(&user_agent)?);
             }
 
             client_options

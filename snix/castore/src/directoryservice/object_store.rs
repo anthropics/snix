@@ -269,7 +269,7 @@ impl ServiceBuilder for ObjectStoreDirectoryServiceConfig {
         };
 
         let (object_store, path) =
-            object_store::parse_url_opts(&self.object_store_url.parse()?, opts)?;
+            crate::object_store::setup_object_store(&self.object_store_url.parse()?, opts).await?;
         Ok(Arc::new(ObjectStoreDirectoryService::new(
             instance_name.to_string(),
             Arc::new(object_store),
