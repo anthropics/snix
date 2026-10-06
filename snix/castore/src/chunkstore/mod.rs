@@ -54,6 +54,9 @@ pub(crate) fn register_chunk_stores(reg: &mut Registry) {
         Box<dyn ServiceBuilder<Output = dyn ChunkStore>>,
         object_store::ObjectStoreChunkStoreConfig,
     >("objectstore");
+    reg.register::<Box<dyn ServiceBuilder<Output = dyn ChunkStore>>, combinators::PriorityConfig>(
+        "priority",
+    );
     reg.register::<Box<dyn ServiceBuilder<Output = dyn ChunkStore>>, combinators::RaceConfig>(
         "race",
     );
