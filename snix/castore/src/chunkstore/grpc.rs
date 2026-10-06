@@ -1,12 +1,14 @@
 //! A gRPC client implementation.
 
 use futures::TryStreamExt;
+use std::sync::Arc;
 use tonic::{Code, async_trait};
 use tracing::instrument;
 
 use crate::{
     B3Digest,
     chunkstore::{Chunk, ChunkStore},
+    composition::{CompositionContext, ServiceBuilder},
     proto::{self, GetChunkRequest, GetChunkResponse, PutChunkRequest, PutChunkResponse},
 };
 
@@ -121,6 +123,45 @@ where
         }
 
         Ok(chunk_digest)
+    }
+}
+
+/// Configuration for a [GrpcChunkStore].
+#[derive(serde::Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct GRPCChunkStoreConfig {
+    url: String,
+}
+
+impl TryFrom<url::Url> for GRPCChunkStoreConfig {
+    type Error = Box<dyn std::error::Error + Send + Sync>;
+    fn try_from(url: url::Url) -> Result<Self, Self::Error> {
+        //   normally grpc+unix for unix sockets, and grpc+http(s) for the HTTP counterparts.
+        // - In the case of unix sockets, there must be a path, but may not be a host.
+        // - In the case of non-unix sockets, there must be a host, but no path.
+        // Constructing the channel is handled by snix_castore::channel::from_url.
+        Ok(GRPCChunkStoreConfig {
+            url: url.to_string(),
+        })
+    }
+}
+
+#[async_trait]
+impl ServiceBuilder for GRPCChunkStoreConfig {
+    type Output = dyn ChunkStore;
+    async fn build<'a>(
+        &'a self,
+        instance_name: &str,
+        _context: &CompositionContext,
+    ) -> Result<Arc<Self::Output>, Box<dyn std::error::Error + Send + Sync>> {
+        let client = proto::chunk_store_service_client::ChunkStoreServiceClient::with_interceptor(
+            crate::tonic::channel_from_url(&self.url.parse()?).await?,
+            snix_tracing::propagate::tonic::send_trace,
+        );
+        Ok(Arc::new(GrpcChunkStore::from_client(
+            instance_name.to_string(),
+            client,
+        )))
     }
 }
 
