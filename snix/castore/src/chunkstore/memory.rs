@@ -9,6 +9,7 @@ use tracing::instrument;
 use crate::{
     B3Digest,
     chunkstore::{Chunk, ChunkStore},
+    composition::{CompositionContext, ServiceBuilder},
 };
 
 /// In-memory [ChunkStore] implementation.
@@ -47,5 +48,33 @@ impl ChunkStore for MemoryChunkStore {
         let digest: B3Digest = blake3::hash(chunk.as_ref()).into();
         self.db.write().insert(digest, chunk);
         Ok(digest)
+    }
+}
+
+/// Config for [MemoryChunkStore].
+#[derive(serde::Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryChunkStoreConfig {}
+
+impl TryFrom<url::Url> for MemoryChunkStoreConfig {
+    type Error = Box<dyn std::error::Error + Send + Sync>;
+    fn try_from(url: url::Url) -> Result<Self, Self::Error> {
+        // memory doesn't support authority or path in the URL.
+        if url.has_authority() || !url.path().is_empty() {
+            return Err("invalid url".into());
+        }
+        Ok(MemoryChunkStoreConfig {})
+    }
+}
+
+#[async_trait]
+impl ServiceBuilder for MemoryChunkStoreConfig {
+    type Output = dyn ChunkStore;
+    async fn build<'a>(
+        &'a self,
+        instance_name: &str,
+        _context: &CompositionContext,
+    ) -> Result<Arc<Self::Output>, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(Arc::new(MemoryChunkStore::new(instance_name.to_string())))
     }
 }
