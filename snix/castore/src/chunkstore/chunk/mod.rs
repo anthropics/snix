@@ -37,7 +37,7 @@ impl Chunk {
         self.0.to_vec()
     }
 
-    /// Returns a [ChunkBuilder] to assemble a [Chunk] by concatenating one or more [bytes::Bytes.]
+    /// Returns a builder that can assemble a [Chunk] by concatenating one or more [bytes::Bytes].
     pub fn builder() -> ChunkBuilder {
         ChunkBuilder::default()
     }

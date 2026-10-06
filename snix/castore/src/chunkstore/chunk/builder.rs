@@ -3,7 +3,7 @@
 use super::Chunk;
 
 /// Allows assembling a [Chunk] from one or more [bytes::Bytes]
-/// If the Chunk is constructed from just one bytes::Bytes, we reuse it zero-copy.
+/// If the Chunk is constructed from just one [bytes::Bytes], we reuse it zero-copy.
 #[derive(Default)]
 pub enum ChunkBuilder {
     #[default]
