@@ -18395,6 +18395,7 @@ rec {
           {
             name = "url";
             packageId = "url";
+            features = [ "serde" ];
           }
           {
             name = "walkdir";

@@ -281,7 +281,7 @@ fn default_avg_chunk_size() -> u32 {
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ObjectStoreBlobServiceConfig {
-    object_store_url: String,
+    object_store_url: url::Url,
     #[serde(default = "default_avg_chunk_size")]
     avg_chunk_size: u32,
     object_store_options: HashMap<String, String>,
@@ -293,7 +293,7 @@ impl TryFrom<url::Url> for ObjectStoreBlobServiceConfig {
         let trimmed_url = crate::object_store::trim_objectstore_prefix(&url)?;
 
         Ok(ObjectStoreBlobServiceConfig {
-            object_store_url: trimmed_url.into(),
+            object_store_url: trimmed_url,
             object_store_options: url
                 .query_pairs()
                 .into_iter()
@@ -312,12 +312,11 @@ impl ServiceBuilder for ObjectStoreBlobServiceConfig {
         instance_name: &str,
         _context: &CompositionContext,
     ) -> Result<Arc<Self::Output>, Box<dyn std::error::Error + Send + Sync>> {
-        // object_store doesn't sufficiently support the AWS credential chain.
-        let object_store_url: url::Url = self.object_store_url.parse()?;
-
-        let (object_store, path) =
-            crate::object_store::setup_object_store(&object_store_url, &self.object_store_options)
-                .await?;
+        let (object_store, path) = crate::object_store::setup_object_store(
+            &self.object_store_url,
+            &self.object_store_options,
+        )
+        .await?;
 
         Ok(Arc::new(ObjectStoreBlobService {
             instance_name: instance_name.to_string(),

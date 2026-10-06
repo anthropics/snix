@@ -185,7 +185,7 @@ impl From<Error> for super::Error {
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ObjectStoreDirectoryServiceConfig {
-    object_store_url: String,
+    object_store_url: url::Url,
     #[serde(default)]
     object_store_options: HashMap<String, String>,
 }
@@ -196,7 +196,7 @@ impl TryFrom<url::Url> for ObjectStoreDirectoryServiceConfig {
         let trimmed_url = crate::object_store::trim_objectstore_prefix(&url)?;
 
         Ok(ObjectStoreDirectoryServiceConfig {
-            object_store_url: trimmed_url.into(),
+            object_store_url: trimmed_url,
             object_store_options: url
                 .query_pairs()
                 .into_iter()
@@ -215,7 +215,7 @@ impl ServiceBuilder for ObjectStoreDirectoryServiceConfig {
         _context: &CompositionContext,
     ) -> Result<Arc<Self::Output>, Box<dyn std::error::Error + Send + Sync>> {
         let (object_store, path) = crate::object_store::setup_object_store(
-            &self.object_store_url.parse()?,
+            &self.object_store_url,
             &self.object_store_options,
         )
         .await?;

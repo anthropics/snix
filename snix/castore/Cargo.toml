@@ -57,7 +57,7 @@ tower = { workspace = true, features = ["util"] }
 tracing.workspace = true
 tracing-indicatif.workspace = true
 typed-builder.workspace = true
-url.workspace = true
+url = { workspace = true, features = ["serde"] }
 vhost = { workspace = true, optional = true }
 vhost-user-backend = { workspace = true, optional = true }
 virtio-bindings = { workspace = true, optional = true }

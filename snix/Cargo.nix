@@ -23472,6 +23472,7 @@ rec {
           {
             name = "url";
             packageId = "url";
+            features = [ "serde" ];
           }
           {
             name = "vhost";
