@@ -119,7 +119,7 @@ where
     let mut aws_access_key_id: Option<String> = None;
     let mut aws_secret_access_key: Option<String> = None;
     let mut allow_http = false;
-    let mut user_agent: Option<String> = None;
+    let mut user_agent = Some(crate::USER_AGENT.to_owned());
 
     for (k, v) in opts.into_iter() {
         match k.as_ref() {

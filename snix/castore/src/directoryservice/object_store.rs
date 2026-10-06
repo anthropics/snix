@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::collections::hash_map;
 use std::sync::Arc;
 
 use data_encoding::HEXLOWER;
@@ -252,24 +251,12 @@ impl ServiceBuilder for ObjectStoreDirectoryServiceConfig {
         instance_name: &str,
         _context: &CompositionContext,
     ) -> Result<Arc<Self::Output>, Box<dyn std::error::Error + Send + Sync>> {
-        let opts = {
-            let mut opts: HashMap<&str, _> = self
-                .object_store_options
-                .iter()
-                .map(|(k, v)| (k.as_str(), v.as_str()))
-                .collect();
+        let (object_store, path) = crate::object_store::setup_object_store(
+            &self.object_store_url.parse()?,
+            &self.object_store_options,
+        )
+        .await?;
 
-            if let hash_map::Entry::Vacant(e) =
-                opts.entry(object_store::ClientConfigKey::UserAgent.as_ref())
-            {
-                e.insert(crate::USER_AGENT);
-            }
-
-            opts
-        };
-
-        let (object_store, path) =
-            crate::object_store::setup_object_store(&self.object_store_url.parse()?, opts).await?;
         Ok(Arc::new(ObjectStoreDirectoryService::new(
             instance_name.to_string(),
             Arc::new(object_store),

@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, hash_map},
+    collections::HashMap,
     io::{self, Cursor},
     pin::pin,
     sync::Arc,
@@ -328,26 +328,12 @@ impl ServiceBuilder for ObjectStoreBlobServiceConfig {
         instance_name: &str,
         _context: &CompositionContext,
     ) -> Result<Arc<Self::Output>, Box<dyn std::error::Error + Send + Sync>> {
-        let opts = {
-            let mut opts: HashMap<&str, _> = self
-                .object_store_options
-                .iter()
-                .map(|(k, v)| (k.as_str(), v.as_str()))
-                .collect();
-
-            if let hash_map::Entry::Vacant(e) =
-                opts.entry(object_store::ClientConfigKey::UserAgent.as_ref())
-            {
-                e.insert(crate::USER_AGENT);
-            }
-
-            opts
-        };
-
         // object_store doesn't sufficiently support the AWS credential chain.
         let object_store_url: url::Url = self.object_store_url.parse()?;
+
         let (object_store, path) =
-            crate::object_store::setup_object_store(&object_store_url, opts).await?;
+            crate::object_store::setup_object_store(&object_store_url, &self.object_store_options)
+                .await?;
 
         Ok(Arc::new(ObjectStoreBlobService {
             instance_name: instance_name.to_string(),
