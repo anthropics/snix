@@ -6,6 +6,8 @@ use tonic::async_trait;
 mod blob_meta;
 mod blob_reader;
 mod blob_writer;
+
+pub mod combinators;
 pub mod grpc;
 pub mod memory;
 pub mod object_store;
@@ -44,6 +46,9 @@ pub struct Error(#[from] Box<dyn std::error::Error + Send + Sync + 'static>);
 
 /// Registers the builtin [BlobStore]s with the registry.
 pub(crate) fn register_blob_stores(reg: &mut Registry) {
+    reg.register::<Box<dyn ServiceBuilder<Output = dyn BlobStore>>, combinators::CacheConfig>(
+        "cache",
+    );
     reg.register::<Box<dyn ServiceBuilder<Output = dyn BlobStore>>, grpc::GRPCBlobStoreConfig>(
         "grpc",
     );
