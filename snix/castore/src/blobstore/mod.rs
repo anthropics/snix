@@ -56,4 +56,7 @@ pub(crate) fn register_blob_stores(reg: &mut Registry) {
         "memory",
     );
     reg.register::<Box<dyn ServiceBuilder<Output = dyn BlobStore>>, object_store::ObjectStoreBlobStoreConfig>("objectstore");
+    reg.register::<Box<dyn ServiceBuilder<Output = dyn BlobStore>>, combinators::PriorityConfig>(
+        "priority",
+    );
 }
