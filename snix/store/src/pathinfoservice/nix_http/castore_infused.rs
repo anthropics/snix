@@ -3,22 +3,22 @@ use nix_compat::{
     nixhash::{Sha256, copy_sha256},
 };
 use snix_castore::{
-    Node, blob_engine::BlobServiceEngine, blobservice::BlobService,
-    directoryservice::DirectoryService, proto::parse_infused_nar_path,
+    Node, blob_engine::BlobEngine, directoryservice::DirectoryService,
+    proto::parse_infused_nar_path,
 };
 
 /// Try to parse the NAR URL in the Narinfo as castore-infused,
 /// return the validated root_node if successful.
 /// If the URL is not castore-infused, returns Ok(Some).
-/// The passed blob_service and directory_service need to include the gRPC
+/// The passed [BlobEngine] and [DirectoryService] need to include the gRPC
 /// castore services, so substitution of new castore data is possible.
-pub async fn try_infused_nar_path<BS, DS>(
+pub async fn try_infused_nar_path<BE, DS>(
     narinfo: &NarInfo<'_>,
-    blob_service: BS,
+    blob_engine: BE,
     directory_service: DS,
 ) -> Result<Option<Node>, Error>
 where
-    BS: BlobService,
+    BE: BlobEngine,
     DS: DirectoryService,
 {
     let (node, nar_size) = match parse_infused_nar_path(narinfo.url) {
@@ -31,8 +31,7 @@ where
     }
 
     // Construct a NAR Reader for the given root node
-    let mut r =
-        crate::nar::Reader::new(&node, BlobServiceEngine(&blob_service), directory_service).await?;
+    let mut r = crate::nar::Reader::new(&node, &blob_engine, directory_service).await?;
 
     // Render the NAR out into a sink, while hashing and calculating nar_size at the same time.
     let (actual_nar_size, actual_nar_hash) = copy_sha256(&mut r, &mut tokio::io::sink()).await?;

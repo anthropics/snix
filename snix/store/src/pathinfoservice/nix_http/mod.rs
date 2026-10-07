@@ -278,7 +278,7 @@ where
         let root_node = if !self.force_download_nar
             && let Some(root_node) = try_infused_nar_path(
                 &narinfo,
-                self.layered_blob_service.clone(),
+                BlobServiceEngine(self.layered_blob_service.clone()),
                 &self.layered_directory_service,
             )
             .await
