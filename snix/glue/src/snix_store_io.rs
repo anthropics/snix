@@ -154,58 +154,24 @@ impl EvalIO for SnixStoreIO {
                             ))
                         }
                         Node::File { digest, size, .. } => {
-                            // We need to return a io::Read with static lifetime.
-                            // Clone the `Arc<dyn BlobEngine>`, move it into a separate task writing to a [tokio::io::simplex],
-                            // and return the read half wrapped via [SyncIOBridge].
-                            // We also need a oneshot channel to send back the status of the [BlobEngine::open_read]
-                            // before constructing the [SyncIOBridge].
-                            let blob_engine = self.build_state.blob_engine.clone();
-                            let (reader, mut writer) = tokio::io::simplex(64 * 1024);
-                            let (open_tx, open_rx) = tokio::sync::oneshot::channel();
-                            self.tokio_handle.spawn(async move {
-                                match blob_engine.open_read(&digest, Some(size)).await {
-                                    Ok(Some(mut blob_reader)) => {
-                                        if open_tx.send(Ok(true)).is_err() {
-                                            return;
-                                        }
-                                        if let Err(err) =
-                                            tokio::io::copy(&mut *blob_reader, &mut writer).await
-                                        {
-                                            error!(%err, "error streaming blob to writer");
-                                        }
-                                    }
-                                    Ok(None) => {
-                                        let _ = open_tx.send(Ok(false));
-                                    }
-                                    Err(err) => {
-                                        let _ = open_tx.send(Err(err));
-                                    }
-                                }
-                            });
-                            let blob_found = open_rx
+                            if let Some(blob_reader) = self
+                                .build_state
+                                .blob_engine
+                                .open_read(&digest, Some(size))
                                 .await
-                                .map_err(|err| {
-                                    io::Error::other(format!("blob open task went away: {err}"))
-                                })?
-                                .map_err(|err| {
-                                    io::Error::other(format!("error calling open_read: {err}"))
-                                })?;
-
-                            blob_found
-                                .then(|| {
-                                    // The VM Response needs a sync [std::io::Reader].
-                                    Box::new(SyncIoBridge::new(reader)) as Box<dyn io::Read>
-                                })
-                                .ok_or_else(|| {
-                                    error!(
-                                        blob.digest = %digest,
-                                        "blob not found",
-                                    );
-                                    io::Error::new(
-                                        io::ErrorKind::NotFound,
-                                        format!("blob {} not found", digest),
-                                    )
-                                })
+                                .map_err(std::io::Error::other)?
+                            {
+                                Ok(Box::new(SyncIoBridge::new(blob_reader)) as Box<dyn io::Read>)
+                            } else {
+                                error!(
+                                    blob.digest = %digest,
+                                    "blob not found",
+                                );
+                                Err(io::Error::new(
+                                    io::ErrorKind::NotFound,
+                                    format!("blob {} not found", digest),
+                                ))
+                            }
                         }
                         Node::Symlink { .. } => Err(io::Error::new(
                             io::ErrorKind::Unsupported,
