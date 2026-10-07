@@ -1,5 +1,6 @@
 use clap::Parser;
 use snix_castore::Node;
+use snix_castore::blob_engine::BlobServiceEngine;
 use snix_castore::{B3Digest, utils::ServiceUrlsGrpc};
 use snix_castore_http::app_state::AppConfig;
 use snix_cli::shutdown_signal;
@@ -42,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
             .expect("failed to construct services");
 
     let state = Arc::new(AppConfig {
-        blob_service,
+        blob_engine: Arc::new(BlobServiceEngine(blob_service)),
         directory_service,
         root_node: Node::Directory {
             digest: args.root_directory,

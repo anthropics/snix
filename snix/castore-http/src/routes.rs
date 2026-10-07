@@ -31,7 +31,7 @@ pub async fn root_node_contents(
     };
 
     get_root_node_contents(
-        state.blob_service.clone(),
+        state.blob_engine.clone(),
         state.directory_service.clone(),
         path::Path::new("/"),
         &state.root_node,
@@ -49,10 +49,10 @@ mod tests {
 
     use snix_castore::{
         B3Digest, Directory, Node,
-        blobservice::BlobService,
+        blob_engine::BlobEngine,
         directoryservice::DirectoryService,
         fixtures::{DIRECTORY_COMPLICATED, HELLOWORLD_BLOB_CONTENTS, HELLOWORLD_BLOB_DIGEST},
-        utils::{gen_test_blob_service, gen_test_directory_service},
+        utils::{gen_test_blob_engine, gen_test_directory_service},
     };
 
     use axum::http::StatusCode;
@@ -67,14 +67,14 @@ mod tests {
         auto_index: bool,
     ) -> (
         axum_test::TestServer,
-        impl BlobService + use<S>,
+        impl BlobEngine + use<S>,
         impl DirectoryService + use<S>,
     ) {
-        let blob_service = Arc::new(gen_test_blob_service());
+        let blob_engine = Arc::new(gen_test_blob_engine());
         let directory_service = Arc::new(gen_test_directory_service());
 
         let app = gen_router(Arc::new(AppConfig {
-            blob_service: blob_service.clone(),
+            blob_engine: blob_engine.clone(),
             directory_service: directory_service.clone(),
             root_node,
             index_names: index_names
@@ -87,7 +87,7 @@ mod tests {
 
         (
             axum_test::TestServer::new(app),
-            blob_service,
+            blob_engine,
             directory_service,
         )
     }

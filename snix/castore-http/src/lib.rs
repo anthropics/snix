@@ -8,7 +8,7 @@ use std::path;
 
 use snix_castore::{
     B3Digest, Directory, Node, Path, SymlinkTarget,
-    blobservice::BlobService,
+    blob_engine::BlobEngine,
     directoryservice::{DirectoryService, traversal::descend_to},
 };
 
@@ -32,11 +32,11 @@ use tracing::{debug, error, instrument, warn};
 /// If the path points to a directory, files of `index_names` are tried,
 /// If no files matched then a directory listing is returned if `auto_index` is enabled.
 ///
-/// Uses the passed [BlobService] and [DirectoryService]
+/// Uses the passed [BlobEngine] and [DirectoryService]
 #[allow(clippy::too_many_arguments)]
 #[instrument(level = "trace", skip_all, fields(base_path, requested_path), err)]
-pub async fn get_root_node_contents<BS: BlobService, DS: DirectoryService, S: AsRef<str>>(
-    blob_service: BS,
+pub async fn get_root_node_contents<BE: BlobEngine, DS: DirectoryService, S: AsRef<str>>(
+    blob_engine: BE,
     directory_service: DS,
     base_path: &path::Path,
     root_node: &Node,
@@ -87,7 +87,7 @@ pub async fn get_root_node_contents<BS: BlobService, DS: DirectoryService, S: As
                                         .and_then(|b| std::str::from_utf8(b).ok());
 
                                     return respond_file(
-                                        blob_service,
+                                        blob_engine,
                                         extension,
                                         range_header,
                                         digest,
@@ -113,7 +113,7 @@ pub async fn get_root_node_contents<BS: BlobService, DS: DirectoryService, S: As
                 }
                 Node::File { digest, size, .. } => {
                     respond_file(
-                        blob_service,
+                        blob_engine,
                         requested_path
                             .extension()
                             .and_then(|b| std::str::from_utf8(b).ok()),
@@ -132,7 +132,7 @@ pub async fn get_root_node_contents<BS: BlobService, DS: DirectoryService, S: As
         }
         Node::File { digest, size, .. } => {
             if requested_path.to_string() == "" {
-                respond_file(blob_service, None, range_header, digest, *size).await
+                respond_file(blob_engine, None, range_header, digest, *size).await
             } else {
                 warn!(
                     "The client requested a path but the configured root
@@ -220,15 +220,15 @@ pub async fn respond_directory_list(
 }
 
 #[instrument(level = "trace", skip_all, fields(digest, size))]
-pub async fn respond_file<BS: BlobService>(
-    blob_service: BS,
+pub async fn respond_file(
+    blob_engine: impl BlobEngine,
     extension: Option<&str>,
     range_header: Option<TypedHeader<Range>>,
     digest: &B3Digest,
-    size: u64,
+    file_size: u64,
 ) -> Result<Response, StatusCode> {
-    let blob_reader = blob_service
-        .open_read(digest)
+    let blob_reader = blob_engine
+        .open_read(digest, Some(file_size))
         .await
         .map_err(|err| {
             error!(err=%err, "failed to read blob");
@@ -247,7 +247,7 @@ pub async fn respond_file<BS: BlobService>(
             StatusCode::OK,
             AppendHeaders([
                 (header::CONTENT_TYPE, mime_type.to_string()),
-                (header::CONTENT_LENGTH, size.to_string()),
+                (header::CONTENT_LENGTH, file_size.to_string()),
             ]),
             Body::from_stream(ReaderStream::new(blob_reader)),
         )
@@ -256,9 +256,9 @@ pub async fn respond_file<BS: BlobService>(
             StatusCode::OK,
             AppendHeaders([
                 (header::CONTENT_TYPE, mime_type.to_string()),
-                (header::CONTENT_LENGTH, size.to_string()),
+                (header::CONTENT_LENGTH, file_size.to_string()),
             ]),
-            Ranged::new(Some(range), KnownSize::sized(blob_reader, size)).into_response(),
+            Ranged::new(Some(range), KnownSize::sized(blob_reader, file_size)).into_response(),
         )
             .into_response()),
     }
