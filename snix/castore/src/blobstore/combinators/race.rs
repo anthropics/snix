@@ -10,10 +10,9 @@ use crate::{
     composition::{CompositionContext, ServiceBuilder},
 };
 
-/// Holds references to multiple [BlobStore]s.
-/// Read requests try services in parallel.
-/// The first positive response is returned,
-/// a negative response only if all backends return this.
+/// Fans out requests to multiple stores in parallel, returning the first positive or erroneous answer.
+///
+/// A negative response is returned if all backends return them.
 /// Write requests are not implemented.
 pub struct Race<BS> {
     instance_name: String,

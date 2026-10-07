@@ -10,9 +10,9 @@ use crate::{
     directoryservice::{self, DirectoryPutter, DirectoryService, FailingPutter},
 };
 
-/// Holds references to multiple directory services.
-/// Read requests try services in parallel.
-/// The first positive response is returned (Ok(None) does only bubble up if all backends return this)
+/// Fans out requests to multiple stores in parallel, returning the first positive or erroneous answer.
+///
+/// A negative response is returned if all backends return them.
 /// Write requests are not implemented.
 pub struct Race<DS> {
     instance_name: String,

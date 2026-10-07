@@ -12,9 +12,9 @@ use crate::{
     pathinfoservice::{self, PathInfoService},
 };
 
-/// Holds references to many different PathInfoService.
-/// Read requests try services sequentially.
-/// Any error in a service bubbles up.
+/// Tries requests on multiple stores sequentially, returning the first positive or erroneous answer.
+///
+/// A negative response is returned if all backends return them.
 /// Write requests are not implemented.
 pub struct Priority<PS> {
     instance_name: String,

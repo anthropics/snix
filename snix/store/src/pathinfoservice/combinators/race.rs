@@ -12,6 +12,10 @@ use crate::{
     pathinfoservice::{self, PathInfo, PathInfoService},
 };
 
+/// Fans out requests to multiple stores in parallel, returning the first positive or erroneous answer.
+///
+/// A negative response is returned if all backends return them.
+/// Write requests are not implemented.
 pub struct Race<PS> {
     #[allow(unused)]
     instance_name: String,
