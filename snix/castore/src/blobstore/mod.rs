@@ -10,7 +10,10 @@ pub mod grpc;
 pub mod memory;
 pub mod object_store;
 
-use crate::B3Digest;
+use crate::{
+    B3Digest,
+    composition::{Registry, ServiceBuilder},
+};
 pub use blob_meta::BlobMeta;
 pub use blob_reader::BlobReader;
 pub use blob_writer::BlobWriter;
@@ -38,3 +41,14 @@ pub trait BlobStore: Send + Sync {
 #[derive(thiserror::Error, Debug)]
 #[error(transparent)]
 pub struct Error(#[from] Box<dyn std::error::Error + Send + Sync + 'static>);
+
+/// Registers the builtin [BlobStore]s with the registry.
+pub(crate) fn register_blob_stores(reg: &mut Registry) {
+    reg.register::<Box<dyn ServiceBuilder<Output = dyn BlobStore>>, grpc::GRPCBlobStoreConfig>(
+        "grpc",
+    );
+    reg.register::<Box<dyn ServiceBuilder<Output = dyn BlobStore>>, memory::MemoryBlobStoreConfig>(
+        "memory",
+    );
+    reg.register::<Box<dyn ServiceBuilder<Output = dyn BlobStore>>, object_store::ObjectStoreBlobStoreConfig>("objectstore");
+}

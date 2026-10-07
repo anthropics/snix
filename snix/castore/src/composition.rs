@@ -276,6 +276,7 @@ pub static REG: LazyLock<&'static Registry> = LazyLock::new(|| {
 pub fn add_default_services(reg: &mut Registry) {
     crate::blobservice::register_blob_services(reg);
     crate::chunkstore::register_chunk_stores(reg);
+    crate::blobstore::register_blob_stores(reg);
     crate::directoryservice::register_directory_services(reg);
 }
 
