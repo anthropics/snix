@@ -52,11 +52,11 @@ where
     }
 
     #[tracing::instrument(skip_all, fields(blob_digest=%digest, blob.size_hint=size_hint))]
-    async fn open_read<'a>(
-        &'a self,
+    async fn open_read(
+        &self,
         digest: &B3Digest,
         size_hint: Option<u64>,
-    ) -> Result<Option<Box<dyn crate::blobservice::BlobReader + 'a>>, super::Error> {
+    ) -> Result<Option<Box<dyn crate::blobservice::BlobReader + 'static>>, super::Error> {
         // If the size_hint suggests it's smaller than min_size,
         // check chunk_store first before falling back to blob_store.
         // We still need to check there as chunking parameters might have changed.
@@ -81,7 +81,7 @@ where
             .map(|blob_meta| {
                 Box::new(BlobReader::from_blob_meta(
                     blob_meta,
-                    &self.chunk_store,
+                    self.chunk_store.clone(),
                     self.fetch_concurrency,
                 )) as Box<dyn crate::blobservice::BlobReader>
             }))

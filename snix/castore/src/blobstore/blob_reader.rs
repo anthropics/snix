@@ -25,7 +25,7 @@ pin_project! {
 // pin_project_lite doesnt't seem to support docstrings fully
 #[allow(missing_docs)]
 #[project = BlobReaderProj]
-    pub enum BlobReader<'a, CS> {
+    pub enum BlobReader<CS> {
         /// Blob is composed of a single chunk.
         /// This allows skipping asking for a [BlobMeta].
         /// For very small blobs the callsite might ask a [ChunkStore] directly.
@@ -40,7 +40,7 @@ pin_project! {
             blob_meta: BlobMeta,
 
             // A [ChunkStore] to read chunks from
-            chunk_store: &'a CS,
+            chunk_store: CS,
 
             // The configured fetch concurrency
             fetch_concurrency: usize,
@@ -52,14 +52,14 @@ pin_project! {
             current_chunk: Cursor<Chunk>,
 
             // A stream providing the remaining bytes from pos + current_chunk.remaining() till the end.
-            #[pin] stream: BoxStream<'a, std::io::Result<Cursor<Chunk>>>,
+            #[pin] stream: BoxStream<'static, std::io::Result<Cursor<Chunk>>>,
         },
     }
 }
 
-impl<'a, CS> BlobReader<'a, CS>
+impl<CS> BlobReader<CS>
 where
-    CS: ChunkStore,
+    CS: ChunkStore + Clone + 'static,
 {
     /// Initialize a [BlobReader] with the [Chunk] of a single-chunked blob
     pub fn from_single_chunk(chunk: Chunk) -> Self {
@@ -72,11 +72,11 @@ where
     /// a reference to a [ChunkStore] and a fetch concurrency.
     pub fn from_blob_meta(
         blob_meta: BlobMeta,
-        chunk_store: &'a CS,
+        chunk_store: CS,
         fetch_concurrency: usize,
-    ) -> BlobReader<'a, CS> {
+    ) -> BlobReader<CS> {
         let stream = blob_meta
-            .bytes_stream_for_offset(0, fetch_concurrency, chunk_store)
+            .bytes_stream_for_offset(0, fetch_concurrency, chunk_store.clone())
             .boxed();
 
         Self::ChunkedBlob {
@@ -108,7 +108,7 @@ where
     }
 }
 
-impl<CS> tokio::io::AsyncRead for BlobReader<'_, CS>
+impl<CS> tokio::io::AsyncRead for BlobReader<CS>
 where
     CS: ChunkStore,
 {
@@ -163,7 +163,7 @@ where
     }
 }
 
-impl<CS> AsyncBufRead for BlobReader<'_, CS>
+impl<CS> AsyncBufRead for BlobReader<CS>
 where
     CS: ChunkStore,
 {
@@ -211,9 +211,9 @@ where
         }
     }
 }
-impl<CS> tokio::io::AsyncSeek for BlobReader<'_, CS>
+impl<CS> tokio::io::AsyncSeek for BlobReader<CS>
 where
-    CS: ChunkStore,
+    CS: ChunkStore + Clone + 'static,
 {
     fn start_seek(self: std::pin::Pin<&mut Self>, position: SeekFrom) -> io::Result<()> {
         // calculate the new position
@@ -238,7 +238,11 @@ where
                     *current_chunk = Cursor::new(EMPTY_CHUNK);
                     stream.set(
                         blob_meta
-                            .bytes_stream_for_offset(new_pos, *fetch_concurrency, *chunk_store)
+                            .bytes_stream_for_offset(
+                                new_pos,
+                                *fetch_concurrency,
+                                chunk_store.clone(),
+                            )
                             .boxed(),
                     );
                 }
@@ -259,7 +263,7 @@ where
 }
 
 // FUTUREWORK: move the trait into BlobStore once BlobService is gone
-impl<'a, CS> crate::blobservice::BlobReader for BlobReader<'a, CS> where CS: ChunkStore + 'a {}
+impl<CS> crate::blobservice::BlobReader for BlobReader<CS> where CS: ChunkStore + Clone + 'static {}
 
 /// For a given blob length and current position, returns the position that seek_from would seek to.
 fn calc_position(cur_pos: u64, blob_len: u64, seek_from: SeekFrom) -> std::io::Result<u64> {
@@ -323,7 +327,7 @@ mod test {
     use mockall::predicate;
     use std::{
         io::{Cursor, SeekFrom},
-        sync::LazyLock,
+        sync::{Arc, LazyLock},
     };
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
@@ -428,7 +432,7 @@ mod test {
             .await
             .expect("to succeed");
 
-        let mut rd = BlobReader::from_blob_meta(BLOB_1_META.to_owned(), &chunk_store, 10);
+        let mut rd = BlobReader::from_blob_meta(BLOB_1_META.to_owned(), chunk_store, 10);
         {
             let mut buf = Vec::new();
             tokio::io::copy(&mut rd, &mut buf)
@@ -494,10 +498,12 @@ mod test {
             .with(predicate::eq(CHUNK_1.digest()))
             .return_once(|_| Ok(Some(CHUNK_1.to_owned())));
 
+        let chunk_store = Arc::new(chunk_store);
+
         // construct BlobReader
         let mut rd = BlobReader::from_blob_meta(
             BLOB_1_META.to_owned(),
-            &chunk_store,
+            chunk_store,
             // we explicitly set the concurrency to 1, so BLOB2 will only get fetched if would poll the stream a second time
             // (which we don't).
             1,

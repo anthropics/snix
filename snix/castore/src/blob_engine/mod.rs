@@ -20,11 +20,11 @@ pub trait BlobEngine: Send + Sync {
 
     /// Request a blob from the store for reading.
     /// An optional size_hint can be specified, allowing some implementations to optimize.
-    async fn open_read<'a>(
-        &'a self,
+    async fn open_read(
+        &self,
         digest: &B3Digest,
         size_hint: Option<u64>,
-    ) -> Result<Option<Box<dyn crate::blobservice::BlobReader + 'a>>, Error>;
+    ) -> Result<Option<Box<dyn crate::blobservice::BlobReader + 'static>>, Error>;
 
     /// Allows writing a new blob.
     /// Returns a [crate::blobservice::BlobWriter], which

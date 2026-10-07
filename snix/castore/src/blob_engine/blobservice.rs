@@ -23,11 +23,11 @@ where
             .map_err(|err| super::Error(Box::new(err)))
     }
 
-    async fn open_read<'a>(
-        &'a self,
+    async fn open_read(
+        &self,
         digest: &B3Digest,
         _size_hint: Option<u64>,
-    ) -> Result<Option<Box<dyn crate::blobservice::BlobReader + 'a>>, super::Error> {
+    ) -> Result<Option<Box<dyn crate::blobservice::BlobReader>>, super::Error> {
         BlobService::open_read(&self.0, digest)
             .await
             .map_err(|err| super::Error(Box::new(err)))
