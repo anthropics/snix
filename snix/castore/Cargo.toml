@@ -22,7 +22,7 @@ fastcdc = { workspace = true, features = ["tokio"] }
 fuse-backend-rs = { workspace = true, optional = true }
 futures.workspace = true
 googleapis-tonic-google-bigtable-v2 = { workspace = true, optional = true }
-hashbrown.workspace = true
+hashbrown = { workspace = true, features = ["serde"] }
 hyper-util.workspace = true
 libc = { workspace = true, optional = true }
 mockall = { workspace = true, optional = true }

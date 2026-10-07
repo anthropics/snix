@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use data_encoding::HEXLOWER;
+use hashbrown::HashMap;
 use object_store::{ObjectStoreExt, PutPayload, path::Path};
 use prost::Message;
 use tonic::async_trait;
@@ -12,6 +13,7 @@ use crate::{
     B3Digest,
     blobstore::{BlobMeta, BlobStore},
     chunkstore::{ChunkStore, object_store::ObjectStoreChunkStore},
+    composition::{CompositionContext, ServiceBuilder},
     proto,
 };
 
@@ -130,6 +132,51 @@ impl ObjectStoreBlobStore {
             *digest,
             chunk.len() as u64,
         )]))
+    }
+}
+
+/// Configuration for an [ObjectStoreBlobStore].
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObjectStoreBlobStoreConfig {
+    object_store_url: url::Url,
+    #[serde(default)]
+    object_store_options: HashMap<String, String>,
+}
+
+impl TryFrom<url::Url> for ObjectStoreBlobStoreConfig {
+    type Error = Box<dyn std::error::Error + Send + Sync>;
+    fn try_from(url: url::Url) -> Result<Self, Self::Error> {
+        Ok(ObjectStoreBlobStoreConfig {
+            object_store_url: crate::object_store::trim_objectstore_prefix(&url)?,
+            object_store_options: url
+                .query_pairs()
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        })
+    }
+}
+
+#[async_trait]
+impl ServiceBuilder for ObjectStoreBlobStoreConfig {
+    type Output = dyn BlobStore;
+    async fn build<'a>(
+        &'a self,
+        instance_name: &str,
+        _context: &CompositionContext,
+    ) -> Result<Arc<Self::Output>, Box<dyn std::error::Error + Send + Sync>> {
+        let (object_store, base_path) = crate::object_store::setup_object_store(
+            &self.object_store_url,
+            &self.object_store_options,
+        )
+        .await?;
+
+        Ok(Arc::new(ObjectStoreBlobStore {
+            instance_name: instance_name.to_string(),
+            object_store: Arc::new(object_store),
+            base_path,
+        }))
     }
 }
 

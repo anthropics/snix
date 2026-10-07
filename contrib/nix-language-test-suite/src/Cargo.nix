@@ -7742,6 +7742,19 @@ rec {
             optional = true;
             usesDefaultFeatures = false;
           }
+          {
+            name = "serde";
+            packageId = "serde";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: false;
+          }
+          {
+            name = "serde_core";
+            packageId = "serde_core";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
         ];
         features = {
           "alloc" = [ "dep:alloc" ];
@@ -7779,6 +7792,7 @@ rec {
           "equivalent"
           "inline-more"
           "raw-entry"
+          "serde"
         ];
       };
       "heck" = rec {
@@ -18259,6 +18273,7 @@ rec {
           {
             name = "hashbrown";
             packageId = "hashbrown 0.17.1";
+            features = [ "serde" ];
           }
           {
             name = "hyper-util";
