@@ -130,19 +130,13 @@ where
 #[derive(serde::Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct GRPCChunkStoreConfig {
-    url: String,
+    url: url::Url,
 }
 
 impl TryFrom<url::Url> for GRPCChunkStoreConfig {
     type Error = Box<dyn std::error::Error + Send + Sync>;
     fn try_from(url: url::Url) -> Result<Self, Self::Error> {
-        //   normally grpc+unix for unix sockets, and grpc+http(s) for the HTTP counterparts.
-        // - In the case of unix sockets, there must be a path, but may not be a host.
-        // - In the case of non-unix sockets, there must be a host, but no path.
-        // Constructing the channel is handled by snix_castore::channel::from_url.
-        Ok(GRPCChunkStoreConfig {
-            url: url.to_string(),
-        })
+        Ok(GRPCChunkStoreConfig { url })
     }
 }
 
@@ -155,7 +149,7 @@ impl ServiceBuilder for GRPCChunkStoreConfig {
         _context: &CompositionContext,
     ) -> Result<Arc<Self::Output>, Box<dyn std::error::Error + Send + Sync>> {
         let client = proto::chunk_store_service_client::ChunkStoreServiceClient::with_interceptor(
-            crate::tonic::channel_from_url(&self.url.parse()?).await?,
+            crate::tonic::channel_from_url(&self.url).await?,
             snix_tracing::propagate::tonic::send_trace,
         );
         Ok(Arc::new(GrpcChunkStore::from_client(

@@ -157,19 +157,13 @@ pub enum Error {
 #[derive(serde::Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct GRPCPathInfoServiceConfig {
-    url: String,
+    url: url::Url,
 }
 
 impl TryFrom<url::Url> for GRPCPathInfoServiceConfig {
     type Error = Box<dyn std::error::Error + Send + Sync>;
     fn try_from(url: url::Url) -> Result<Self, Self::Error> {
-        //   normally grpc+unix for unix sockets, and grpc+http(s) for the HTTP counterparts.
-        // - In the case of unix sockets, there must be a path, but may not be a host.
-        // - In the case of non-unix sockets, there must be a host, but no path.
-        // Constructing the channel is handled by snix_castore::channel::from_url.
-        Ok(GRPCPathInfoServiceConfig {
-            url: url.to_string(),
-        })
+        Ok(GRPCPathInfoServiceConfig { url })
     }
 }
 
@@ -182,7 +176,7 @@ impl ServiceBuilder for GRPCPathInfoServiceConfig {
         _context: &CompositionContext,
     ) -> Result<Arc<Self::Output>, Box<dyn std::error::Error + Send + Sync>> {
         let client = proto::path_info_service_client::PathInfoServiceClient::with_interceptor(
-            snix_castore::tonic::channel_from_url(&self.url.parse()?).await?,
+            snix_castore::tonic::channel_from_url(&self.url).await?,
             snix_tracing::propagate::tonic::send_trace,
         );
         Ok(Arc::new(GRPCPathInfoService::from_client(

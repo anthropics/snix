@@ -203,19 +203,13 @@ where
 #[derive(serde::Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct GRPCBlobServiceConfig {
-    url: String,
+    url: url::Url,
 }
 
 impl TryFrom<url::Url> for GRPCBlobServiceConfig {
     type Error = Box<dyn std::error::Error + Send + Sync>;
     fn try_from(url: url::Url) -> Result<Self, Self::Error> {
-        //   normally grpc+unix for unix sockets, and grpc+http(s) for the HTTP counterparts.
-        // - In the case of unix sockets, there must be a path, but may not be a host.
-        // - In the case of non-unix sockets, there must be a host, but no path.
-        // Constructing the channel is handled by snix_castore::channel::from_url.
-        Ok(GRPCBlobServiceConfig {
-            url: url.to_string(),
-        })
+        Ok(GRPCBlobServiceConfig { url })
     }
 }
 
@@ -228,7 +222,7 @@ impl ServiceBuilder for GRPCBlobServiceConfig {
         _context: &CompositionContext,
     ) -> Result<Arc<dyn BlobService>, Box<dyn std::error::Error + Send + Sync + 'static>> {
         let client = proto::blob_service_client::BlobServiceClient::with_interceptor(
-            crate::tonic::channel_from_url(&self.url.parse()?).await?,
+            crate::tonic::channel_from_url(&self.url).await?,
             snix_tracing::propagate::tonic::send_trace,
         );
         Ok(Arc::new(GRPCBlobService::from_client(
