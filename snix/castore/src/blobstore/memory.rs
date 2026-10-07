@@ -9,6 +9,7 @@ use tracing::instrument;
 use crate::{
     B3Digest,
     blobstore::{BlobMeta, BlobStore},
+    composition::{CompositionContext, ServiceBuilder},
 };
 
 /// In-memory [BlobStore] implementation.
@@ -41,5 +42,36 @@ impl BlobStore for MemoryBlobStore {
         }
 
         Ok(())
+    }
+}
+
+/// Config for [MemoryBlobStore].
+#[derive(serde::Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryBlobStoreConfig {}
+
+impl TryFrom<url::Url> for MemoryBlobStoreConfig {
+    type Error = Box<dyn std::error::Error + Send + Sync>;
+    fn try_from(url: url::Url) -> Result<Self, Self::Error> {
+        // memory doesn't support authority or path in the URL.
+        if url.has_authority() || !url.path().is_empty() {
+            return Err("invalid url".into());
+        }
+        Ok(MemoryBlobStoreConfig {})
+    }
+}
+
+#[async_trait]
+impl ServiceBuilder for MemoryBlobStoreConfig {
+    type Output = dyn BlobStore;
+    async fn build<'a>(
+        &'a self,
+        instance_name: &str,
+        _context: &CompositionContext,
+    ) -> Result<Arc<Self::Output>, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(Arc::new(MemoryBlobStore {
+            instance_name: instance_name.to_string(),
+            db: Default::default(),
+        }))
     }
 }
