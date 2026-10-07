@@ -140,7 +140,7 @@ impl TryFrom<proto::BlobMeta> for BlobMeta {
 
 #[derive(thiserror::Error, Debug, PartialEq, Eq)]
 pub enum DecodeError {
-    #[error("refusing to contruct with empty chunk at idx {0}")]
+    #[error("refusing to construct with empty chunk at idx {0}")]
     EmptyChunk(usize),
     #[error("refusing to construct with zero chunks")]
     NoChunks,
