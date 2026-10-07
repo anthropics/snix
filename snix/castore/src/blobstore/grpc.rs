@@ -1,11 +1,14 @@
 //! A gRPC client implementation.
 
+use std::sync::Arc;
+
 use tonic::{Code, async_trait};
 use tracing::instrument;
 
 use crate::{
     B3Digest,
     blobstore::{BlobMeta, BlobStore},
+    composition::{CompositionContext, ServiceBuilder},
     proto::{self, BsStatBlobRequest, GetBlobRequest, GetBlobResponse, PutBlobRequest},
 };
 
@@ -86,6 +89,39 @@ where
             Ok(_) => Ok(()),
             Err(err) => Err(Error::Tonic(err))?,
         }
+    }
+}
+
+/// Configuration for a [GrpcBlobStore].
+#[derive(serde::Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct GRPCBlobStoreConfig {
+    url: url::Url,
+}
+
+impl TryFrom<url::Url> for GRPCBlobStoreConfig {
+    type Error = Box<dyn std::error::Error + Send + Sync>;
+    fn try_from(url: url::Url) -> Result<Self, Self::Error> {
+        Ok(GRPCBlobStoreConfig { url })
+    }
+}
+
+#[async_trait]
+impl ServiceBuilder for GRPCBlobStoreConfig {
+    type Output = dyn BlobStore;
+    async fn build<'a>(
+        &'a self,
+        instance_name: &str,
+        _context: &CompositionContext,
+    ) -> Result<Arc<Self::Output>, Box<dyn std::error::Error + Send + Sync>> {
+        let client = proto::blob_store_service_client::BlobStoreServiceClient::with_interceptor(
+            crate::tonic::channel_from_url(&self.url).await?,
+            snix_tracing::propagate::tonic::send_trace,
+        );
+        Ok(Arc::new(GrpcBlobStore::from_client(
+            instance_name.to_string(),
+            client,
+        )))
     }
 }
 
